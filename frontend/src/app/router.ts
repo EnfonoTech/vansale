@@ -1,15 +1,26 @@
 /**
- * Router — hash-based on native (deep routes 404 in the Capacitor
- * WebView's file server otherwise — §3.7 rule 10), path-based on web.
+ * Router — hash history everywhere, base = full asset path.
+ *
+ * The web PWA is served via Frappe's `website_redirects` which 301s
+ * `/vansale` → `/assets/vansale/spa/index.html`. Using `createWebHistory`
+ * with base `"/vansale/"` fails because the post-redirect URL doesn't
+ * start with that base (it starts with `/assets/vansale/spa/`), leaving
+ * RouterView unable to resolve any route — empty screen. Also, any deep
+ * refresh (`/vansale/login`) hits the server which has no rule for that
+ * subpath → Frappe 404.
+ *
+ * Hash history with the asset-path base fixes both: the hash fragment
+ * drives routing entirely client-side, and the browser only ever requests
+ * the real static `index.html` on refresh. This mirrors fatehhr's proven
+ * setup.
  *
  * Guards:
  *   - Unauthenticated → /login
  *   - Authenticated but stale PIN → /pin (unlock mode)
  */
-import { createRouter, createWebHashHistory, createWebHistory } from "vue-router";
+import { createRouter, createWebHashHistory } from "vue-router";
 import type { RouteRecordRaw } from "vue-router";
 import { useSessionStore } from "@/stores/session";
-import { isNative } from "./platform";
 
 const routes: RouteRecordRaw[] = [
   { path: "/login", name: "login", component: () => import("@/views/LoginView.vue") },
@@ -70,7 +81,7 @@ const routes: RouteRecordRaw[] = [
 ];
 
 export const router = createRouter({
-  history: isNative() ? createWebHashHistory() : createWebHistory("/vansale/"),
+  history: createWebHashHistory("/assets/vansale/spa/"),
   routes,
 });
 
