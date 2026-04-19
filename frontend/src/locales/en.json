@@ -1,0 +1,43 @@
+{
+  "app": {
+    "title": "Van Sale"
+  },
+  "nav": {
+    "dashboard": "Dashboard",
+    "logout": "Log out"
+  },
+  "login": {
+    "heading": "Sign in",
+    "email": "Email",
+    "password": "Password",
+    "submit": "Continue",
+    "error_generic": "Incorrect email or password"
+  },
+  "pin": {
+    "setup_heading": "Set your PIN",
+    "unlock_heading": "Enter your PIN",
+    "change_heading": "Change PIN",
+    "hint_setup": "Choose a 4–8 digit PIN you can remember. You'll use it every time you open the app.",
+    "hint_unlock": "Enter the PIN you set up on this device.",
+    "forgot": "Forgot PIN? Sign in with password again.",
+    "submit_setup": "Save PIN",
+    "submit_unlock": "Unlock",
+    "mismatch": "PINs do not match",
+    "invalid": "PIN must be 4 to 8 digits",
+    "wrong": "Incorrect PIN"
+  },
+  "dashboard": {
+    "welcome": "Welcome, {name}",
+    "env_web": "Web PWA",
+    "env_native": "Native APK",
+    "version": "v{v}",
+    "coming_soon": "Phase 3 adds the real dashboard."
+  },
+  "common": {
+    "loading": "Loading…",
+    "offline": "Offline",
+    "online": "Online",
+    "try_again": "Try again",
+    "cancel": "Cancel"
+  }
+}

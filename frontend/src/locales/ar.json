@@ -1,0 +1,43 @@
+{
+  "app": {
+    "title": "فان سيل"
+  },
+  "nav": {
+    "dashboard": "لوحة التحكم",
+    "logout": "تسجيل الخروج"
+  },
+  "login": {
+    "heading": "تسجيل الدخول",
+    "email": "البريد الإلكتروني",
+    "password": "كلمة المرور",
+    "submit": "متابعة",
+    "error_generic": "البريد الإلكتروني أو كلمة المرور غير صحيحة"
+  },
+  "pin": {
+    "setup_heading": "إعداد رمز PIN",
+    "unlock_heading": "أدخل رمز PIN",
+    "change_heading": "تغيير رمز PIN",
+    "hint_setup": "اختر رمزاً من 4 إلى 8 أرقام. ستستخدمه في كل مرة تفتح التطبيق.",
+    "hint_unlock": "أدخل رمز PIN الذي أعددته على هذا الجهاز.",
+    "forgot": "نسيت رمز PIN؟ سجّل الدخول بكلمة المرور مرة أخرى.",
+    "submit_setup": "حفظ الرمز",
+    "submit_unlock": "فتح",
+    "mismatch": "الرمزان غير متطابقين",
+    "invalid": "يجب أن يتكون الرمز من 4 إلى 8 أرقام",
+    "wrong": "رمز PIN غير صحيح"
+  },
+  "dashboard": {
+    "welcome": "مرحباً، {name}",
+    "env_web": "PWA للويب",
+    "env_native": "APK الأصلي",
+    "version": "الإصدار {v}",
+    "coming_soon": "المرحلة 3 ستضيف لوحة التحكم الفعلية."
+  },
+  "common": {
+    "loading": "جارٍ التحميل…",
+    "offline": "غير متصل",
+    "online": "متصل",
+    "try_again": "أعد المحاولة",
+    "cancel": "إلغاء"
+  }
+}
