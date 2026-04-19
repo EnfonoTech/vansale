@@ -1,1 +1,28 @@
-[]
+[
+ {
+  "dt": "Sales Invoice",
+  "fieldname": "custom_client_id",
+  "fieldtype": "Data",
+  "label": "Client ID",
+  "module": "Vansale",
+  "name": "Sales Invoice-custom_client_id",
+  "no_copy": 1,
+  "insert_after": "naming_series",
+  "read_only": 1,
+  "description": "Van Sale idempotency key — matches Vansale Outbox.client_id",
+  "unique": 0
+ },
+ {
+  "dt": "Payment Entry",
+  "fieldname": "custom_client_id",
+  "fieldtype": "Data",
+  "label": "Client ID",
+  "module": "Vansale",
+  "name": "Payment Entry-custom_client_id",
+  "no_copy": 1,
+  "insert_after": "naming_series",
+  "read_only": 1,
+  "description": "Van Sale idempotency key",
+  "unique": 0
+ }
+]
