@@ -29,7 +29,8 @@ that inherits every lesson from the Fateh HR rebuild.
 | Site | `trading` on GS DEV (`94.136.186.151`, bench user `v15`) |
 | Server ID | `8d69b825-6148-4da6-817b-d079a37f422d` |
 | App | `vansale` (module `Vansale`) |
-| DocTypes live | Vansale Pin, Vansale Outbox, Van Route Plan, Van Route Stop, Van Visit Log |
+| DocTypes live | Vansale Pin, Vansale Outbox, Van Route Plan, Van Route Stop, Van Visit Log, **Vansale Configuration** (+ 3 child tables) |
+| Roles | **Van User**, **Van Manager** (auto-created via `setup.after_migrate`) |
 | Custom fields | `Sales Invoice.custom_client_id`, `Payment Entry.custom_client_id` |
 | Frontend `NATIVE_VERSION` | `1.0.0` / code 1 (bumped via `scripts/bump-version.mjs`) |
 | APK | Not yet built — keystore generation is a one-liner when first customer is picked |
@@ -115,7 +116,26 @@ curl -s https://trading-demo.enfonoerp.com/api/method/vansale.api.dashboard.toda
 
 ---
 
-## 6. Forensic debug loop (when users report stuck sync)
+## 6. Creating a Van User
+
+Mirrors RMAX's Branch Configuration pattern. One `Vansale Configuration` row per van; add the user as a child row and the controller auto-creates their User Permissions + assigns the role.
+
+1. Desk → **Vansale Configuration** → **New**.
+2. `Van Code` = stable identifier, e.g. `VAN-RIYADH-01`.
+3. `Company` (required), `Branch` (optional).
+4. Warehouse table — add one row per warehouse the van can draw from. **First row = user's default warehouse.**
+5. Cost Center table — add one row per cost center. **First row = user's default cost center.**
+6. User table — add the Frappe User + role (`Van User` by default).
+7. Save. Behind the scenes:
+   - User Permissions written: Company (`is_default=1`), first Warehouse (`is_default=1`), first Cost Center (`is_default=1`), plus the Company's default cost center so tax templates resolve.
+   - `Van User` role assigned to the user.
+   - On PIN unlock, the PWA calls `vansale.api.me.config_defaults` and caches the defaults in localStorage; the invoice form pre-fills warehouse + hides the picker when there's only one.
+
+Cost centers and warehouses on new Sales Invoice / Payment Entry / Delivery Note / Stock Entry rows are rewritten by `van_defaults.override_*` before validate — so even if somebody edits the payload, the doc lands on the user's default.
+
+List views (Sales Invoice, Payment Entry, Stock Entry, Delivery Note, Van Visit Log, Van Route Plan) are filtered by `vansale.van_filters.*` — van users only see rows touching their warehouse(s).
+
+## 7. Forensic debug loop (when users report stuck sync)
 
 Same as fatehhr §6 — always check in this order, never ship a speculative fix without step 3:
 
