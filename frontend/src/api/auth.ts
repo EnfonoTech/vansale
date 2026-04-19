@@ -1,5 +1,5 @@
 import { apiCall } from "./client";
-import { setCredentials, clearCredentials, type Credentials } from "@/app/frappe";
+import { setCredentials, clearCredentials } from "@/app/frappe";
 
 export interface LoginResult {
   user: string;
@@ -8,9 +8,11 @@ export interface LoginResult {
   has_pin: boolean;
 }
 
-export interface PinUnlockResult extends Credentials {
+export interface PinUnlockResult {
   user: string;
   full_name: string;
+  api_key: string;
+  api_secret: string;
   roles?: string[];
   language?: string;
 }
