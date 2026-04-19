@@ -1,0 +1,71 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+.Python
+*.so
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.tox/
+.coverage
+htmlcov/
+venv/
+.venv/
+
+# Node
+node_modules/
+.npm/
+.pnpm-store/
+
+# Build output (never commit)
+frontend/dist/
+vansale/public/spa/
+android-capacitor/www/
+android-capacitor/android/app/build/
+android-capacitor/android/build/
+android-capacitor/android/.gradle/
+
+# APK + release artifacts
+*.apk
+*.aab
+dist/*.apk
+
+# Keystore (NEVER commit)
+*.keystore
+*.jks
+android-capacitor/keystore/
+~/.vansale-keystore-pw
+
+# Stale build artifacts (fatehhr lesson)
+frontend/**/*.vue.js
+frontend/**/*.vue.d.ts
+frontend/src/**/*.js.map
+frontend/tsconfig.tsbuildinfo
+frontend/src/app/frappe.js
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# Env files (per-customer secrets)
+customers/.env.*
+!customers/.env.example
+frontend/.env
+frontend/.env.local
+frontend/.env.*.local
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+
+# Study workspace (cloned reference repos, not part of this project)
+van-sales-study/

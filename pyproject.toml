@@ -1,0 +1,20 @@
+[project]
+name = "vansale"
+authors = [
+    { name = "Enfono Technologies", email = "ramees@enfono.com"}
+]
+description = "Van Sales PWA on Frappe v15 (offline-first Vue 3 SPA + Capacitor APK)"
+requires-python = ">=3.10"
+readme = "README.md"
+dynamic = ["version"]
+dependencies = [
+    "bcrypt>=4.0.0",
+    "python-dateutil>=2.8",
+]
+
+[build-system]
+requires = ["flit_core >=3.4,<4"]
+build-backend = "flit_core.buildapi"
+
+[tool.flit.module]
+name = "vansale"
