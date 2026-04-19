@@ -1,0 +1,2 @@
+# Patches executed in sequence on `bench migrate`.
+# Append `module.path.function_name` per line.
