@@ -81,7 +81,7 @@
    "fieldtype": "Table",
    "label": "User",
    "options": "Vansale Configuration User",
-   "description": "Users assigned here are auto-granted the Van User role + scoped User Permissions."
+   "description": "Users assigned here are auto-granted the Van User role + scoped User Permissions. ⚠️ After adding a user, open their User doc and set a password — without one, they cannot log in to the PWA."
   }
  ],
  "index_web_pages_for_search": 1,

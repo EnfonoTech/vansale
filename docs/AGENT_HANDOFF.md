@@ -130,6 +130,22 @@ Mirrors RMAX's Branch Configuration pattern. One `Vansale Configuration` row per
    - User Permissions written: Company (`is_default=1`), first Warehouse (`is_default=1`), first Cost Center (`is_default=1`), plus the Company's default cost center so tax templates resolve.
    - `Van User` role assigned to the user.
    - On PIN unlock, the PWA calls `vansale.api.me.config_defaults` and caches the defaults in localStorage; the invoice form pre-fills warehouse + hides the picker when there's only one.
+8. **⚠️ Set a password** for each added user. Frappe's default "new user email" often fails on demo tenants (email queue unconfigured), which leaves the account with no password at all. Without a password the PWA login rejects them and they see what looks like an "empty screen".
+
+   **Option A — User doc**: open the User record → Password field → set one.
+
+   **Option B — API (bulk)**:
+   ```bash
+   curl -X POST https://<site>/api/method/vansale.api.admin.set_user_password \
+     -H "Authorization: token <admin-key>:<admin-secret>" \
+     -H "Content-Type: application/json" \
+     -d '{"user":"driver1@example.com","new_password":"VanUser@123"}'
+   # List users missing passwords:
+   curl https://<site>/api/method/vansale.api.admin.users_without_password \
+     -H "Authorization: token <admin-key>:<admin-secret>"
+   ```
+
+   The admin endpoint is gated to users listed in at least one Vansale Configuration, so it can't be used as a general password reset.
 
 Cost centers and warehouses on new Sales Invoice / Payment Entry / Delivery Note / Stock Entry rows are rewritten by `van_defaults.override_*` before validate — so even if somebody edits the payload, the doc lands on the user's default.
 
