@@ -1,5 +1,6 @@
 [
  {
+  "doctype": "Custom Field",
   "dt": "Sales Invoice",
   "fieldname": "custom_client_id",
   "fieldtype": "Data",
@@ -13,6 +14,7 @@
   "unique": 0
  },
  {
+  "doctype": "Custom Field",
   "dt": "Payment Entry",
   "fieldname": "custom_client_id",
   "fieldtype": "Data",
