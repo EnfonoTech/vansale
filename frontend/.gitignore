@@ -1,0 +1,13 @@
+node_modules/
+dist/
+.env
+.env.local
+.env.*.local
+tsconfig.tsbuildinfo
+*.log
+
+# Stale compiled artefacts (see fatehhr lesson)
+src/**/*.vue.js
+src/**/*.vue.d.ts
+src/**/*.js.map
+src/app/frappe.js
