@@ -1,8 +1,8 @@
 # Van Sale — Agent Handoff
 
 > **Start here if you're a fresh agent picking up this repo.**
-> This file grows with the project. As of 2026-04-19 it covers Phase 1
-> (Foundation). Phase plans are in [`superpowers/plans/`](superpowers/plans/).
+> As of 2026-04-19 all 5 phases are live on `trading-demo.enfonoerp.com`.
+> Phase plans in [`superpowers/plans/`](superpowers/plans/).
 
 ---
 
@@ -10,80 +10,80 @@
 
 Offline-first van-sales PWA on Frappe v15 + ERPNext. One Vue 3 source
 tree ships as both a web PWA (at `/vansale`) and a signed Capacitor
-Android APK (added in Phase 5). Replaces the existing `fateh_pwa` React
-PWA — same domain, new spine that inherits every lesson from the Fateh
-HR rebuild.
+Android APK (scripts in place; keystore to be generated per customer).
+Replaces the existing `fateh_pwa` React PWA — same domain, new spine
+that inherits every lesson from the Fateh HR rebuild.
 
 **Architecture source of truth:** `~/.claude/skills/frappe-vue-pwa/SKILL.md`.
 **Infra + deploy source of truth:** `~/.claude/skills/enfono-servers/SKILL.md`.
-**Deploy pipeline reference:** `~/.claude/skills/fatehhr/SKILL.md`
-(mirror the commands, swap paths / app id / keystore).
+**Mirror pipeline:** `~/.claude/skills/fatehhr/SKILL.md`.
 
 ---
 
-## 2. Current state (Phase 1 complete locally)
+## 2. Current state
 
 | Thing | Value |
 |---|---|
-| Repo root | `/Users/sayanthns/ERP - PWAs/vansale/` |
-| Frappe app | `vansale` (module `Vansale`) |
-| SPA path | `/vansale` → `/assets/vansale/spa/index.html` |
-| Web route | `/vansale` (via `website_redirects`) |
-| Native APK id | `com.enfono.vansale.<customer>` (template; Phase 5 picks first customer) |
-| Python app version | `0.0.1` |
-| Frontend `NATIVE_VERSION` | `1.0.0` / code 1 |
-| Server + demo tenant | **TBD** — user has not yet nominated a target |
+| Repo | https://github.com/EnfonoTech/vansale (public, branch `develop`) |
+| PWA URL | https://trading-demo.enfonoerp.com/vansale |
+| Site | `trading` on GS DEV (`94.136.186.151`, bench user `v15`) |
+| Server ID | `8d69b825-6148-4da6-817b-d079a37f422d` |
+| App | `vansale` (module `Vansale`) |
+| DocTypes live | Vansale Pin, Vansale Outbox, Van Route Plan, Van Route Stop, Van Visit Log |
+| Custom fields | `Sales Invoice.custom_client_id`, `Payment Entry.custom_client_id` |
+| Frontend `NATIVE_VERSION` | `1.0.0` / code 1 (bumped via `scripts/bump-version.mjs`) |
+| APK | Not yet built — keystore generation is a one-liner when first customer is picked |
 
-### What Phase 1 delivered
+### Phases shipped
 
-- Frappe app scaffold: `hooks.py` (CORS `after_migrate`, website redirects, fixtures), `install.py::ensure_capacitor_cors`, `Vansale Pin` DocType, `utils/secrets.py` with stable `api_secret` issuance.
-- Auth endpoints: `login`, `setup_pin`, `login_with_pin`, `change_pin`, `ping`, `logout` — all with the rule-8 `doc.get_password()` read and rule-7 stable token reuse.
-- Vue 3 SPA skeleton: platform detection (`isNative`, `apiBase`, `absoluteUrl`), `frappe.ts` API facade with `ApiError` vs `NetworkError` separation, Pinia session store with localStorage persistence + 2h PIN window, router with hash-on-native / history-on-web, Login + PIN (setup/unlock) + stub Dashboard, English + Arabic locales with RTL, white-label theme plugin.
-- Deploy-pipeline stubs: `scripts/bump-version.mjs`, `scripts/build-customer.sh`, `customers/.env.example`.
+- **P1 Foundation** — Frappe app scaffold, PIN auth (bcrypt + stable api_secret), CORS, Vue 3 + Pinia + vue-router + vue-i18n SPA skeleton, theme plugin.
+- **P2 Offline engine** — IDB schema (9 stores), queue, ordered drain (photos → invoices → payments → returns → visits), ONE-uploader `capturePhoto` / `resolveToRealUrl`, `SignaturePad`, `PhotoSlot`, `SyncBadge`, `SyncErrorsView`, `UTC-ISO` datetime helpers, `file_upload` endpoint, `Vansale Outbox` audit DocType.
+- **P3 Core sales flow** — API for customer / item / invoice / payment / sales return / dashboard (today sales + collection + recent activity + month summary + warehouses); Vue views: Dashboard, CustomerList, InvoiceList, InvoiceForm, PaymentForm. Every write is idempotent by `client_id` so drain retries are safe.
+- **P4 Van-specific** — Van Route Plan + Stop + Visit Log DocTypes; `route.today/start_visit/end_visit/daily_report` API; `van_stock.list_stock/transfer_in` using ERPNext Bin (no parallel ledger); scanner / printer / GPS feature helpers (lazy-import Capacitor plugins); `RouteTodayView`, `VanStockView`.
+- **P5 Capacitor shell** — `android-capacitor/` with package.json, vite.config.ts, capacitor.config.ts, index.html, src symlink to ../frontend/src; route-hierarchy native back button; `@capacitor/filesystem`-based `saveBlobToDevice`; `bump-version.mjs` (atomic), `_patch-build-gradle.py`, `generate-customer-assets.mjs`, `generate-keystore.sh`, `build-customer.sh` (one-shot).
 
-### Deferred to Phase 5
+### Smoke test results (post-deploy)
 
-- Server install + demo tenant (needs user decision: which server, which site name).
-- APK build pipeline + keystore.
-- Full `saveBlobToDevice` (currently web-only).
+```
+curl https://trading-demo.enfonoerp.com/vansale                               → 301 → /assets/vansale/spa/index.html
+curl https://trading-demo.enfonoerp.com/assets/vansale/spa/index.html          → 200
+curl POST /api/method/vansale.api.auth.login                                   → ValidationError (whitelisting works)
+curl /api/method/vansale.api.util.version_compat                               → {"min":"1.0.0","current":"1.0.0"}
+curl /api/method/vansale.api.util.get_csrf_token                               → 56-char hex (CSRF works)
+```
 
 ---
 
-## 3. Install on a target server (when nominated)
+## 3. How to deploy an update
 
-Use the Enfono Server Manager API. Defaults assume AQRAR + `vansale_demo`,
-but pick whatever the user requests.
+### Web PWA (one curl)
 
 ```bash
-# Run via server-manager /api/servers/<ID>/command — see enfono-servers skill.
+cd /Users/sayanthns/ERP\ -\ PWAs/vansale/frontend
+CUSTOMER_BUILD_TARGET=web pnpm exec vite build
+cd ../vansale/public/spa && tar czf /tmp/vansale-dist.tar.gz --exclude='.DS_Store' .
+gh release upload frontend-dev --repo EnfonoTech/vansale /tmp/vansale-dist.tar.gz --clobber
 
-set -e
-cd /home/v15/frappe-bench
-sudo -u v15 bench get-app <this_repo> --branch develop
-
-# Per enfono-servers rule #5 — pip install -e after every app install,
-# otherwise Gunicorn throws ModuleNotFoundError on every request.
-/home/v15/frappe-bench/env/bin/pip install -e /home/v15/frappe-bench/apps/vansale
-
-# Create site (maintenance window only).
-sudo -u v15 bench new-site vansale_demo \
-  --mariadb-root-password "<ROOT>" \
-  --admin-password "<ADMIN>" \
-  --mariadb-user-host-login-scope="%"
-sudo -u v15 bench --site vansale_demo install-app erpnext
-sudo -u v15 bench --site vansale_demo install-app vansale
-
-# wkhtmltopdf needs host_name for PDF rendering (fatehhr lesson #6):
-sudo -u v15 bench --site vansale_demo set-config host_name https://<domain>
-
-# Reload workers without full restart (business-hours hot reload).
-sudo supervisorctl signal QUIT frappe-bench-web:frappe-bench-frappe-web
-sudo supervisorctl signal QUIT frappe-bench-workers:frappe-bench-frappe-long-worker-0
-sudo supervisorctl signal QUIT frappe-bench-workers:frappe-bench-frappe-short-worker-0
+# Server: pull code + download tarball + signal workers
+curl -s -X POST "http://207.180.209.80:3847/api/servers/8d69b825-6148-4da6-817b-d079a37f422d/command" \
+  -H "Authorization: Bearer 9c9d7e54d54c30e9f264f202376c04ed4dd4bab9c57eb2b3" \
+  -H "Content-Type: application/json" \
+  -d '{"command":"set -e; cd /home/v15/frappe-bench/apps/vansale && sudo -u v15 git pull --ff-only && cd /tmp && curl -fsSL -o vansale-dist.tar.gz https://github.com/EnfonoTech/vansale/releases/download/frontend-dev/vansale-dist.tar.gz && sudo -u v15 rm -rf /home/v15/frappe-bench/apps/vansale/vansale/public/spa && sudo -u v15 mkdir -p /home/v15/frappe-bench/apps/vansale/vansale/public/spa && sudo -u v15 tar xzf /tmp/vansale-dist.tar.gz -C /home/v15/frappe-bench/apps/vansale/vansale/public/spa && cd /home/v15/frappe-bench && sudo -u v15 bench build --app vansale && sudo supervisorctl signal QUIT frappe-bench-web:frappe-bench-frappe-web && sudo supervisorctl signal QUIT frappe-bench-workers:frappe-bench-frappe-long-worker-0 && sudo supervisorctl signal QUIT frappe-bench-workers:frappe-bench-frappe-short-worker-0 && echo DEPLOYED"}'
 ```
 
-Caddy SSL vs certbot — check `sslMode` per `enfono-servers` inventory
-before provisioning a domain.
+Backend (Python) changes: as above plus `bench --site trading migrate` if DocTypes / fixtures changed.
+
+### Android APK (when a customer is picked)
+
+```bash
+cp customers/.env.example customers/.env.demo   # fill in APP_ID, THEME_PRIMARY, etc.
+bash scripts/generate-keystore.sh demo           # ONCE — backs password file into ~/.vansale-demo-keystore-pw
+bash scripts/build-customer.sh demo              # bumps version → web tarball → cap copy → patch gradle → assembleRelease
+
+# Artefacts:
+dist/vansale-demo-1.0.1.apk
+dist/vansale-demo-pwa.tar.gz
+```
 
 ---
 
@@ -92,37 +92,65 @@ before provisioning a domain.
 ```bash
 cd frontend
 pnpm install
-pnpm dev          # Vite on :8082 with /api proxy to a local bench
-pnpm type-check   # vue-tsc --noEmit
-pnpm build        # → ../vansale/public/spa/
+pnpm dev            # Vite on :8082 proxying /api → localhost:8000
+pnpm type-check     # vue-tsc --noEmit
+pnpm build          # → ../vansale/public/spa/
 ```
 
-Set `VITE_API_BASE` in `frontend/.env.local` for native builds; web
-build uses same-origin and needs nothing.
+Set `VITE_API_BASE` in `frontend/.env.local` for native builds; web uses same-origin.
 
 ---
 
-## 5. Testing hooks
+## 5. Smoke test kit
 
-- **Auth smoke:** `curl -X POST .../api/method/vansale.api.auth.login -d '{"usr":"...","pwd":"..."}'`
-- **PIN smoke:** after `login`, `curl -X POST .../api/method/vansale.api.auth.setup_pin -d '{"pin":"1234"}'`
-- **Token smoke:** hit `/api/method/vansale.api.auth.ping` with `Authorization: token <key>:<secret>`.
-- **CORS smoke on a Capacitor origin:** `-H "Origin: https://localhost"` → should not 403.
+```bash
+curl -s -o /dev/null -w "HTTP %{http_code}\n" https://trading-demo.enfonoerp.com/assets/vansale/spa/index.html
+curl -s https://trading-demo.enfonoerp.com/api/method/vansale.api.util.version_compat
+curl -s https://trading-demo.enfonoerp.com/api/method/vansale.api.util.get_csrf_token
 
----
-
-## 6. Open items (end of Phase 1)
-
-- [ ] User nominates target server + demo site name (`vansale_demo` suggested).
-- [ ] User confirms GitHub remote (new `EnfonoTech/vansale` repo? reuse existing?). No push has been done.
-- [ ] Phase 2 execution — offline engine (see [`superpowers/plans/2026-04-19-vansale-phase2-offline-engine.md`](superpowers/plans/2026-04-19-vansale-phase2-offline-engine.md)).
+# With auth cookie/token:
+curl -s https://trading-demo.enfonoerp.com/api/method/vansale.api.customer.list_mine -H "Cookie: ..."
+curl -s https://trading-demo.enfonoerp.com/api/method/vansale.api.dashboard.today_sales -H "Cookie: ..."
+```
 
 ---
 
-## 7. Pair skills
+## 6. Forensic debug loop (when users report stuck sync)
+
+Same as fatehhr §6 — always check in this order, never ship a speculative fix without step 3:
+
+1. Ask user for Settings → Version.
+2. Check server doc state via bench console (`frappe.get_doc("Sales Invoice", ...)`).
+3. Check Frappe Error Log — last 30 min, method LIKE `%vansale%`.
+4. Check client Sync Errors view — `attempts >= 1` surfaces server rejection verbatim.
+5. chrome://inspect → IndexedDB + Console if 1–4 don't explain it.
+
+---
+
+## 7. Known gotchas carried over
+
+Read `frappe-vue-pwa` §5 for the full 20 commandments. The ones most likely to bite Van Sale specifically:
+
+- `allow_cors` on `trading` was already `"*"` so `ensure_capacitor_cors` is a no-op — fine, but don't strip CORS in a future hardening pass without also adding the Capacitor origins back (§3.6).
+- Sales Team filter in `customer.list_mine` returns *all* customers if the user has no Sales Person record. Good for demo; tighten in P3.5 if stricter scoping is needed.
+- Van stock uses ERPNext Bin; the user needs a default `Warehouse` or `Sales Person.custom_van_warehouse`. Without it, VanStockView shows "No van warehouse set."
+- Default Mode of Payment: `payment.save` assumes Cash/Bank with a Mode of Payment Account on the Company. If the `trading` site is missing those, payments fail with "Could not resolve accounts." — set defaults on Company first.
+
+---
+
+## 8. Open items
+
+- [ ] Generate demo keystore + first APK (run `bash scripts/generate-keystore.sh demo` + `bash scripts/build-customer.sh demo`).
+- [ ] Seed demo data on `trading`: salesperson user, a couple of van warehouses, items with prices, a few customers, a route plan for today.
+- [ ] Add `~/.claude/skills/vansale/SKILL.md` (mirror of `fatehhr` skill, swap infra IDs + paths).
+- [ ] Optional hardening: tighten customer scoping per Sales Team, add real-time via socket.io, add PDF print for invoices.
+
+---
+
+## 9. Pair skills
 
 - **`frappe-vue-pwa`** — architecture source of truth.
 - **`enfono-servers`** — server inventory, SSH/API, safety rules, maintenance window.
 - **`fatehhr`** — mirror deploy pipeline (swap paths + app id).
 
-Read all three before any substantive change to this repo.
+Read all three before any substantive change.
