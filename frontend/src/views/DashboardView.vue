@@ -53,6 +53,11 @@ async function onLogout() {
       <h1 style="margin: 0">
         {{ t("dashboard.welcome", { name: session.fullName ?? session.user ?? "" }) }}
       </h1>
+      <p class="muted small" v-if="session.defaults?.van_code">
+        Van <strong>{{ session.defaults.van_code }}</strong>
+        <span v-if="session.defaults.default_warehouse"> · {{ session.defaults.default_warehouse }}</span>
+        <span v-if="session.currency"> · {{ session.currency }}</span>
+      </p>
       <p class="muted small">
         {{ isNative() ? t("dashboard.env_native") : t("dashboard.env_web") }} ·
         {{ t("dashboard.version", { v: NATIVE_VERSION }) }}

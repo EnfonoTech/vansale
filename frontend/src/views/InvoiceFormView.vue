@@ -6,6 +6,9 @@ import { listMine as listItems, type ItemRow } from "@/api/item";
 import { save, type InvoiceItem } from "@/api/invoice";
 import { warehouses } from "@/api/dashboard";
 import { ApiError } from "@/app/frappe";
+import { useSessionStore } from "@/stores/session";
+
+const session = useSessionStore();
 
 const router = useRouter();
 
@@ -26,6 +29,11 @@ const success = ref("");
 const total = computed(() => lines.value.reduce((sum, l) => sum + l.qty * l.rate, 0));
 
 async function loadAll() {
+  // Pre-fill warehouse from the user's Vansale Configuration default before
+  // fetching — this way the item list is already filtered to the right van.
+  if (!warehouse.value && session.defaultWarehouse) {
+    warehouse.value = session.defaultWarehouse;
+  }
   customers.value = await listCustomers(undefined, 200);
   items.value = await listItems(undefined, warehouse.value || undefined, 300);
   whs.value = await warehouses();
@@ -106,7 +114,7 @@ onMounted(loadAll);
           </option>
         </select>
       </label>
-      <label class="stack" style="gap: 0.3rem">
+      <label class="stack" style="gap: 0.3rem" v-if="whs.length > 1">
         <span class="muted">Warehouse</span>
         <select v-model="warehouse" @change="searchItems">
           <option value="">Default</option>
@@ -115,6 +123,9 @@ onMounted(loadAll);
           </option>
         </select>
       </label>
+      <p v-else-if="whs.length === 1" class="muted small">
+        Warehouse: <strong>{{ whs[0].warehouse_name }}</strong>
+      </p>
     </section>
 
     <section class="card stack">

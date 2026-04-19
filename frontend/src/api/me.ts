@@ -1,0 +1,35 @@
+import { apiCall } from "./client";
+
+export interface ConfigDefaults {
+  user: string;
+  full_name: string;
+  language: string;
+  is_van_user: boolean;
+  is_van_manager: boolean;
+  is_system_manager: boolean;
+  roles: string[];
+  company: string | null;
+  branch: string | null;
+  default_warehouse: string | null;
+  warehouses: string[];
+  default_cost_center: string | null;
+  cost_centers: string[];
+  van_code: string | null;
+  currency: string | null;
+}
+
+export function configDefaults() {
+  return apiCall<ConfigDefaults>("GET", "vansale.api.me.config_defaults");
+}
+
+export interface VanListRow {
+  name: string;
+  van_code: string;
+  van_name: string | null;
+  company: string | null;
+  branch: string | null;
+}
+
+export function vans() {
+  return apiCall<VanListRow[]>("GET", "vansale.api.me.vans");
+}

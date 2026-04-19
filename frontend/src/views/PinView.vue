@@ -3,8 +3,10 @@ import { computed, ref } from "vue";
 import { useRouter } from "vue-router";
 import { useI18n } from "vue-i18n";
 import { loginWithPin, setupPin } from "@/api/auth";
+import { configDefaults } from "@/api/me";
 import { useSessionStore } from "@/stores/session";
 import { ApiError, NetworkError } from "@/app/frappe";
+import { isOnline } from "@/app/online";
 
 const router = useRouter();
 const session = useSessionStore();
@@ -57,6 +59,15 @@ async function onSubmit() {
       await loginWithPin(session.email ?? "", pin.value);
     }
     session.markPinVerified();
+    // Pull fresh Vansale Configuration defaults so forms can pre-fill.
+    if (isOnline()) {
+      try {
+        const defaults = await configDefaults();
+        session.setDefaults(defaults);
+      } catch {
+        // Non-fatal — stored defaults from the last online session remain.
+      }
+    }
     await router.replace({ name: "dashboard" });
   } catch (err) {
     if (err instanceof ApiError) {
