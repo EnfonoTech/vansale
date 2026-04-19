@@ -1,0 +1,66 @@
+{
+ "actions": [],
+ "autoname": "format:VRP-{user}-{plan_date}",
+ "creation": "2026-04-19 00:00:00",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "user",
+  "plan_date",
+  "warehouse",
+  "notes",
+  "stops"
+ ],
+ "fields": [
+  {
+   "fieldname": "user",
+   "fieldtype": "Link",
+   "label": "Salesperson (User)",
+   "options": "User",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "plan_date",
+   "fieldtype": "Date",
+   "label": "Plan Date",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "warehouse",
+   "fieldtype": "Link",
+   "label": "Van Warehouse",
+   "options": "Warehouse"
+  },
+  {
+   "fieldname": "notes",
+   "fieldtype": "Small Text",
+   "label": "Notes"
+  },
+  {
+   "fieldname": "stops",
+   "fieldtype": "Table",
+   "label": "Stops",
+   "options": "Van Route Stop"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-04-19 00:00:00",
+ "modified_by": "Administrator",
+ "module": "Vansale",
+ "name": "Van Route Plan",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "read": 1, "write": 1, "create": 1, "delete": 1, "role": "System Manager"
+  },
+  {
+   "read": 1, "write": 1, "role": "Sales User"
+  }
+ ],
+ "sort_field": "plan_date",
+ "sort_order": "DESC",
+ "track_changes": 1
+}

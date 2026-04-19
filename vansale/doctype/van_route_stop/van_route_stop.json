@@ -1,0 +1,40 @@
+{
+ "istable": 1,
+ "creation": "2026-04-19 00:00:00",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "customer",
+  "planned_time",
+  "address",
+  "status",
+  "started_at",
+  "ended_at",
+  "invoice",
+  "payment",
+  "signature_file",
+  "notes"
+ ],
+ "fields": [
+  {"fieldname": "customer", "fieldtype": "Link", "options": "Customer", "label": "Customer", "reqd": 1, "in_list_view": 1},
+  {"fieldname": "planned_time", "fieldtype": "Time", "label": "Planned Time", "in_list_view": 1},
+  {"fieldname": "address", "fieldtype": "Small Text", "label": "Address"},
+  {"fieldname": "status", "fieldtype": "Select", "options": "pending\nin_progress\ndone\nskipped", "default": "pending", "in_list_view": 1},
+  {"fieldname": "started_at", "fieldtype": "Datetime", "label": "Started"},
+  {"fieldname": "ended_at", "fieldtype": "Datetime", "label": "Ended"},
+  {"fieldname": "invoice", "fieldtype": "Link", "options": "Sales Invoice", "label": "Invoice"},
+  {"fieldname": "payment", "fieldtype": "Link", "options": "Payment Entry", "label": "Payment"},
+  {"fieldname": "signature_file", "fieldtype": "Attach", "label": "Signature"},
+  {"fieldname": "notes", "fieldtype": "Small Text", "label": "Notes"}
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-04-19 00:00:00",
+ "modified_by": "Administrator",
+ "module": "Vansale",
+ "name": "Van Route Stop",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC"
+}
