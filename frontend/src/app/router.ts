@@ -25,6 +25,48 @@ const routes: RouteRecordRaw[] = [
     component: () => import("@/views/DashboardView.vue"),
     meta: { requiresAuth: true, requiresPin: true },
   },
+  {
+    path: "/customers",
+    name: "customers",
+    component: () => import("@/views/CustomerListView.vue"),
+    meta: { requiresAuth: true, requiresPin: true },
+  },
+  {
+    path: "/invoices",
+    name: "invoices",
+    component: () => import("@/views/InvoiceListView.vue"),
+    meta: { requiresAuth: true, requiresPin: true },
+  },
+  {
+    path: "/invoice/new",
+    name: "invoice-new",
+    component: () => import("@/views/InvoiceFormView.vue"),
+    meta: { requiresAuth: true, requiresPin: true },
+  },
+  {
+    path: "/payment/new",
+    name: "payment-new",
+    component: () => import("@/views/PaymentFormView.vue"),
+    meta: { requiresAuth: true, requiresPin: true },
+  },
+  {
+    path: "/route",
+    name: "route-today",
+    component: () => import("@/views/RouteTodayView.vue"),
+    meta: { requiresAuth: true, requiresPin: true },
+  },
+  {
+    path: "/van-stock",
+    name: "van-stock",
+    component: () => import("@/views/VanStockView.vue"),
+    meta: { requiresAuth: true, requiresPin: true },
+  },
+  {
+    path: "/sync",
+    name: "sync-errors",
+    component: () => import("@/views/SyncErrorsView.vue"),
+    meta: { requiresAuth: true, requiresPin: true },
+  },
 ];
 
 export const router = createRouter({
