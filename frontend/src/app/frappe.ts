@@ -195,18 +195,39 @@ export async function apiCall<T>(
  * Save a Blob to the user's device.
  *
  * - Web: constructs an object-URL and clicks a hidden anchor.
- * - Native: Phase 1 uses a stub that falls back to anchor (the Android
- *   WebView silently drops `<a download>` — see fatehhr lesson #10.1,
- *   so Phase 5 replaces this with `@capacitor/filesystem` writeFile).
+ * - Native (Android/iOS): `<a download>` is silently dropped by the
+ *   WebView (fatehhr lesson #10.1). Uses `@capacitor/filesystem` +
+ *   Documents/ directory instead.
  *
  * Filenames are sanitised: Frappe doc names contain `/` and spaces
  * which break Filesystem + share sheets (fatehhr lesson #12).
  */
 export async function saveBlobToDevice(blob: Blob, rawName: string): Promise<void> {
-  const safeName = rawName.replace(/[^A-Za-z0-9._-]+/g, "_");
+  const safeName = rawName.replace(/[^A-Za-z0-9._-]+/g, "_") || "download";
+
   if (isNative()) {
-    /* Phase 5: await Filesystem.writeFile(...)  */
+    try {
+      const [{ Filesystem, Directory }, { arrayBufferToBase64 }] = await Promise.all([
+        import("@capacitor/filesystem"),
+        import("@/offline/_base64"),
+      ]);
+      const buf = await blob.arrayBuffer();
+      const res = await Filesystem.writeFile({
+        path: safeName,
+        data: arrayBufferToBase64(buf),
+        directory: Directory.Documents,
+        recursive: true,
+      });
+      // eslint-disable-next-line no-console
+      console.info("vansale: saved", res.uri);
+      return;
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error("saveBlobToDevice native failed", err);
+      // Fall through to anchor as last resort.
+    }
   }
+
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;

@@ -18,14 +18,14 @@ setLocale(defaultLocale);
 
 app.mount("#app");
 
-// Native-only bootstrap. Splash + status bar + back button wiring lands
-// in Phase 5 — this block is a placeholder so the symbol exists.
+// Native bootstrap — splash + status bar + back-button wiring.
 if (isNative()) {
   void (async () => {
     try {
-      const [{ SplashScreen }, { StatusBar }] = await Promise.all([
+      const [{ SplashScreen }, { StatusBar }, { installNativeBack }] = await Promise.all([
         import("@capacitor/splash-screen"),
         import("@capacitor/status-bar"),
+        import("./app/native-back"),
       ]);
       try {
         await StatusBar.setBackgroundColor({ color: "#2563eb" });
@@ -37,6 +37,7 @@ if (isNative()) {
       } catch {
         /* SplashScreen not available */
       }
+      await installNativeBack(router);
     } catch {
       /* plugins not bundled on web */
     }
