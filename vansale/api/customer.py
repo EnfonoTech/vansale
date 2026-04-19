@@ -25,34 +25,16 @@ _LIST_FIELDS = [
 ]
 
 
-def _resolve_sales_person() -> Optional[str]:
-    """Return the Sales Person name linked to the current User, if any."""
-    user = frappe.session.user
-    return frappe.db.get_value("Sales Person", {"employee": ["is", "set"], "enabled": 1, "user": user}, "name") \
-        or frappe.db.get_value("Sales Person", {"user": user}, "name")
-
-
 def _customer_filters_for_user() -> dict:
-    """If the user maps to a Sales Person, restrict to customers in their
-    sales team. Otherwise return all active customers (System Managers,
-    demo fallback).
+    """Return the base filter set for Customer queries.
+
+    Customer-level scoping happens via Frappe's User Permission system
+    (Territory, Customer Group) when admins configure it. The Vansale
+    Configuration pattern — mirroring RMAX's Branch Configuration —
+    doesn't create Customer-level User Permissions, so every Van User
+    sees all active customers unless the admin restricts explicitly.
     """
-    sp = _resolve_sales_person()
-    filters: dict = {"disabled": 0}
-    if not sp:
-        return filters
-    # Customers whose Sales Team lists this person
-    names = frappe.db.sql_list(
-        """
-        SELECT DISTINCT parent
-        FROM `tabSales Team`
-        WHERE parenttype = 'Customer' AND sales_person = %s
-        """,
-        (sp,),
-    )
-    if names:
-        filters["name"] = ["in", names]
-    return filters
+    return {"disabled": 0}
 
 
 @frappe.whitelist(methods=["GET"])
