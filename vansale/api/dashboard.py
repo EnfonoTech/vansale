@@ -134,10 +134,33 @@ def recent_activity(limit: int = 10) -> list[dict]:
 
 @frappe.whitelist(methods=["GET"])
 def warehouses(company: Optional[str] = None) -> list[dict]:
-    """List stock warehouses — used as the van-stock picker."""
+    """List stock warehouses. If the user has a Vansale Configuration
+    (and therefore User Permissions for a subset of warehouses), return
+    ONLY those — otherwise return all active warehouses for the company.
+    """
     user = frappe.session.user
+    # Van user path — restrict to configured warehouses.
+    user_whs = frappe.get_all(
+        "User Permission",
+        filters={"user": user, "allow": "Warehouse"},
+        pluck="for_value",
+    )
+    if user_whs:
+        rows = frappe.get_all(
+            "Warehouse",
+            filters={"name": ["in", user_whs], "is_group": 0, "disabled": 0},
+            fields=["name", "warehouse_name"],
+            order_by="warehouse_name",
+        )
+        return rows
+
     company = (
         company
+        or frappe.db.get_value(
+            "User Permission",
+            {"user": user, "allow": "Company", "is_default": 1},
+            "for_value",
+        )
         or frappe.defaults.get_user_default("Company", user)
         or frappe.db.get_single_value("Global Defaults", "default_company")
     )

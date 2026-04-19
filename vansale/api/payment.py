@@ -109,7 +109,12 @@ def save(
         }
 
     company = (
-        frappe.defaults.get_user_default("Company", frappe.session.user)
+        frappe.db.get_value(
+            "User Permission",
+            {"user": frappe.session.user, "allow": "Company", "is_default": 1},
+            "for_value",
+        )
+        or frappe.defaults.get_user_default("Company", frappe.session.user)
         or frappe.db.get_single_value("Global Defaults", "default_company")
     )
     paid_from, paid_to = _resolve_accounts(company, mode_of_payment)

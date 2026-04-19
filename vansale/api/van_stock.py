@@ -14,10 +14,30 @@ from vansale.api.datetime_util import naive_site_to_utc_iso
 
 
 def _user_van_warehouse() -> Optional[str]:
+    """Resolve the van user's primary warehouse via User Permission.
+
+    Vansale Configuration sets ``is_default=1`` on the first warehouse row
+    for each assigned user. Fallback to Frappe's per-user defaults for
+    admin accounts that haven't been added to a Vansale Configuration.
+    """
     user = frappe.session.user
     return (
-        frappe.db.get_value("Sales Person", {"user": user}, "custom_van_warehouse")
+        frappe.db.get_value(
+            "User Permission",
+            {"user": user, "allow": "Warehouse", "is_default": 1},
+            "for_value",
+        )
         or frappe.defaults.get_user_default("Warehouse", user)
+    )
+
+
+def _user_warehouses() -> list[str]:
+    """All warehouses the van user has User Permission for."""
+    user = frappe.session.user
+    return frappe.get_all(
+        "User Permission",
+        filters={"user": user, "allow": "Warehouse"},
+        pluck="for_value",
     )
 
 

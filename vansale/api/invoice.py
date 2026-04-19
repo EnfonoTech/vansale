@@ -16,16 +16,29 @@ from frappe import _
 from vansale.api.datetime_util import naive_site_to_utc_iso, parse_client_ts
 
 
+def _user_default(allow: str) -> Optional[str]:
+    return frappe.db.get_value(
+        "User Permission",
+        {"user": frappe.session.user, "allow": allow, "is_default": 1},
+        "for_value",
+    )
+
+
 def _get_default_warehouse(company: str) -> Optional[str]:
+    """Prefer the Van User's configured warehouse; fall back to company / stock default."""
     return (
-        frappe.db.get_value("Company", company, "default_warehouse")
+        _user_default("Warehouse")
+        or frappe.db.get_value("Company", company, "default_warehouse")
         or frappe.db.get_single_value("Stock Settings", "default_warehouse")
     )
 
 
 def _user_company() -> str:
-    user_default = frappe.defaults.get_user_default("Company", frappe.session.user)
-    return user_default or frappe.db.get_single_value("Global Defaults", "default_company")
+    return (
+        _user_default("Company")
+        or frappe.defaults.get_user_default("Company", frappe.session.user)
+        or frappe.db.get_single_value("Global Defaults", "default_company")
+    )
 
 
 def _existing_by_client_id(client_id: str) -> Optional[str]:
