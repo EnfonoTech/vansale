@@ -2,6 +2,7 @@
 import { onMounted, ref, computed } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { detail, type InvoiceDetail } from "@/api/invoice";
+import { openSalesInvoicePrint } from "@/app/print";
 import { useSessionStore } from "@/stores/session";
 import Icon from "@/components/Icon.vue";
 
@@ -53,9 +54,13 @@ function payHere() {
 
 function printInvoice() {
   if (!inv.value) return;
-  // TODO(phase-D): wire to server print format + ZATCA. For now open Frappe's print view.
-  const url = `/printview?doctype=Sales%20Invoice&name=${encodeURIComponent(inv.value.name)}&format=Standard&no_letterhead=0`;
-  window.open(url, "_blank");
+  // ZATCA Phase 2 Print Format (KSA compliance) — embeds signed QR.
+  openSalesInvoicePrint(inv.value.name);
+}
+
+function returnInvoice() {
+  if (!inv.value) return;
+  void router.push({ name: "invoice-return", params: { name: inv.value.name } });
 }
 </script>
 
@@ -98,6 +103,13 @@ function printInvoice() {
           </button>
           <button class="ghost" @click="printInvoice">
             <Icon name="receipt" :size="16" /> Print
+          </button>
+          <button
+            v-if="inv.docstatus === 1 && !inv.is_return"
+            class="ghost"
+            @click="returnInvoice"
+          >
+            <Icon name="x" :size="16" /> Return
           </button>
         </div>
       </section>

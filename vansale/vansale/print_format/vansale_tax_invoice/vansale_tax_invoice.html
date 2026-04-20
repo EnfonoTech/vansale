@@ -1,0 +1,564 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=0.9">
+    <title>Tax Invoice - {{ doc.name }}</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'DejaVu Sans', 'Arial Black', Arial, sans-serif;
+            font-weight: 600;
+            font-size: 16px;
+            color: #000;
+            background: #fff;
+            padding: 0px;
+            width: 110mm;
+            margin: 0 auto;
+        }
+
+        .container {
+            width: 100%;
+        }
+
+        /* Header Section */
+        .header {
+            text-align: center;
+            margin-bottom: 8px;
+        }
+
+        .logo {
+            width: 170px;
+            height: auto;
+        }
+
+        .company-name-ar {
+            font-size: 28px;
+            font-weight: bold;
+            margin: 6px 0;
+            color: #000;
+        }
+
+        .company-name-en {
+            font-size: 18px;
+            font-weight: bold;
+            margin: 4px 0;
+            color: #000;
+        }
+
+        .address {
+            font-size: 16px;
+            color: #333;
+            margin: 3px 0;
+            line-height: 1.4;
+        }
+
+        .address-line {
+            margin: 3px 0;
+        }
+
+        .address-separator {
+            border-top: 1px solid #000;
+            margin: 3px 0;
+        }
+
+        .company-details {
+            font-size: 13px;
+            margin: 0;
+            text-align: center;
+        }
+
+        /* Invoice Title */
+        .invoice-title {
+            text-align: center;
+            margin: 0;
+            font-size: 22px;
+            font-weight: 800;
+        }
+
+        .invoice-title-ar {
+            font-size: 24px;
+        }
+
+        /* Invoice Details */
+        .invoice-details-box {
+            padding: 0;
+            margin: 6px 0;
+            font-size: 15px;
+        }
+
+        .invoice-details {
+            display: flex;
+            justify-content: space-between;
+            margin: 3px 0;
+            font-size: 15px;
+        }
+
+        .invoice-details .detail-item {
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* Items Table */
+        .items-section {
+            margin: 6px 0;
+        }
+
+        .items-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 15px;
+        }
+
+        .items-table thead {
+            font-weight: bold;
+        }
+
+        .items-table th {
+            text-align: center;
+            font-size: 13px;
+            line-height: 1.2;
+        }
+
+        .items-table td {
+            text-align: center;
+            font-size: 13px;
+            font-weight: 800;
+        }
+
+        .items-table .text-left {
+            text-align: right;
+        }
+
+        .items-table .text-right {
+            text-align: left;
+        }
+
+        .item-code {
+            font-size: 13px;
+            font-weight: 800;
+        }
+
+        .item-description {
+            text-align: right;
+            font-size: 13px;
+        }
+
+        .item-unit {
+            font-size: 13px;
+            color: #666;
+        }
+
+        .number-of-items {
+            margin: 4px 0;
+            font-size: 14px;
+            text-align: left;
+        }
+
+        /* Summary Section */
+        .summary-section {
+            margin: 6px 0;
+        }
+
+        .summary-row {
+            display: flex;
+            justify-content: space-between;
+            margin: 6px 0;
+            font-size: 14px;
+        }
+
+        .summary-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-weight: 800;
+            margin: 10px 0;
+            font-size: 14px;
+        }
+
+        .summary-table th,
+        .summary-table td {
+            text-align: center;
+            border: 1px solid #000;
+            font-size: 14px;
+        }
+
+        .summary-table .text-right {
+            text-align: left;
+        }
+
+        .total-row {
+            font-weight: 800;
+        }
+
+        /* Payment Section */
+        .payment-section {
+            margin: 6px 0;
+            font-weight: 800;
+        }
+
+        .payment-row {
+            display: flex;
+            justify-content: space-between;
+            margin: 6px 0;
+            font-size: 14px;
+            font-weight: 800;
+        }
+
+        /* Footer */
+        .footer {
+            text-align: center;
+            margin-top: 3px;
+            padding-top: 3px;
+            font-size: 14px;
+        }
+
+        .thank-you {
+            font-size: 14px;
+        }
+
+        .barcode-section {
+            margin: 10px 0;
+            padding: 6px;
+        }
+
+        .barcode {
+            font-family: 'Courier New', monospace;
+            font-size: 15px;
+            letter-spacing: 1px;
+            margin: 4px 0;
+        }
+
+        .customer-info {
+            margin: 6px 0;
+            font-size: 18px;
+            text-align: left;
+        }
+
+        .customer-info div {
+            margin: 4px 0;
+        }
+
+        /* QR Code */
+        .qr-code-container {
+            width: 100%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            margin-top: 3px;
+        }
+
+        .qr-code-box {
+            width: 6cm;
+            height: 6cm;
+            border: 1px solid #aaa;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background-color: #fff;
+        }
+
+        .qr-code-box img {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+        }
+
+        /* Utility Classes */
+        .text-center {
+            text-align: center;
+        }
+
+        .text-right {
+            text-align: right;
+        }
+
+        .text-left {
+            text-align: left;
+        }
+
+        .bold {
+            font-weight: bold;
+        }
+
+        @media print {
+            @page {
+                size: 100mm auto;
+                margin: 0 1em 0 1em;
+            }
+            body {
+                width: 110mm;
+                margin: 0;
+                padding: 0px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            {% set logo = frappe.db.get_value("Company", doc.company, "company_logo") %}
+            {% if logo %}
+              <img src="{{ logo }}" alt="Logo" class="logo">
+            {% endif %}
+            <div class="company-name-ar">{{ doc.company }}</div>
+
+            {% set pos = (doc.pos_profile or "").lower() %}
+
+            <div class="address">
+                {% if "faisaliya" in pos %}
+                    <div class="address-line" style="font-size:22px;">الفيصلية – الدمام، المملكة العربية السعودية</div>
+                    <div class="address-line" style="font-size:19px;">Al Faisaliyah – Dammam, Saudi Arabia</div>
+                {% elif "doha" in pos %}
+                    <div class="address-line" style="font-size:22px;">الدوحة – الدمام، المملكة العربية السعودية</div>
+                    <div class="address-line" style="font-size:19px;">Doha – Dammam, Saudi Arabia</div>
+                {% elif "saihat" in pos %}
+                    <div class="address-line" style="font-size:22px;">سيهات – الدمام، المملكة العربية السعودية</div>
+                    <div class="address-line" style="font-size:19px;">Saihat – Dammam, Saudi Arabia</div>
+                {% else %}
+                    <div class="address-line" style="font-size:22px;">الفيصلية – الدمام، المملكة العربية السعودية</div>
+                    <div class="address-line" style="font-size:19px;">Al Faisaliyah – Dammam, Saudi Arabia</div>
+                {% endif %}
+            </div>
+
+            <div class="address-separator"></div>
+
+            <div class="company-details">
+                {% set company = frappe.get_doc("Company", doc.company) %}
+                <span>C.F. No: {{ company.tax_id or "" }}</span>
+                <span>VAT ID: {{ company.tax_id or "" }}</span>
+            </div>
+            <div class="address-separator"></div>
+        </div>
+
+        <div class="invoice-title">
+            {% if doc.docstatus == 0 %}
+                <span>DRAFT INVOICE</span>
+                <span class="invoice-title-ar">مسودة فاتورة</span>
+            {% elif doc.is_return %}
+                <span>CREDIT NOTE</span>
+                <span class="invoice-title-ar">إشعار دائن</span>
+            {% else %}
+                <span>TAX INVOICE</span>
+                <span class="invoice-title-ar">فاتورة ضريبية مبسطة</span>
+            {% endif %}
+        </div>
+
+        <div class="invoice-details-box">
+            <div class="invoice-details" style="width:100%;">
+                <div class="detail-item" style="width:65%;">
+                    <div>رقم الفاتورة / Rec. No</div>
+                    <div>{{ doc.name }}</div>
+                </div>
+                <div class="detail-item" style="width:35%;">
+                    <div>تاريخ / Date</div>
+                    <div>{{ doc.get_formatted("posting_date") }}</div>
+                </div>
+            </div>
+
+            <div class="invoice-details" style="width:100%;">
+                <div class="detail-item" style="width:65%;">
+                    <div>مندوب مبيعات / Cashier</div>
+                    <div>{{ doc.owner or "" }}</div>
+                </div>
+                <div class="detail-item" style="width:35%;">
+                    <div>وقت / Time</div>
+                    <div>{{ frappe.format(doc.posting_time, {"fieldtype":"Time", "options":"hh:mm:ss A"}) }}</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="items-section">
+            <table class="items-table">
+                <thead>
+                    <tr style="border-top:1px solid #000; border-bottom:1px solid #000;">
+                        <th style="padding:3px !important; background:#fff; color:#000; width:8%;"><strong>كمية<br>Qty</strong></th>
+                        <th style="padding:3px !important; background:#fff; color:#000; width:12%;"><strong>سعر<br>Price</strong></th>
+                        <th style="padding:3px !important; background:#fff; color:#000; width:10%;"><strong>خصم<br>Disc.</strong></th>
+                        <th style="padding:3px !important; background:#fff; color:#000; width:15%;"><strong>قيمة قبل ضريبة<br>Before VAT</strong></th>
+                        <th style="padding:3px !important; background:#fff; color:#000; width:12%;"><strong>ضريبة 15%<br>15% VAT</strong></th>
+                        <th style="padding:3px !important; background:#fff; color:#000; width:15%;"><strong>قيمة بعد ضريبة<br>After VAT</strong></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in doc.items %}
+                    <tr>
+                        <td colspan="6" class="item-description" style="padding:3px !important;">
+                            <div style="display:flex; align-items:center; width:100%;">
+                                <div style="flex:1; text-align:left; font-weight:bold;">
+                                    {{ item.item_code }} {{ item.stock_uom or item.uom or "PCS" }}
+                                </div>
+                                <div style="flex:2; text-align:center;">
+                                    {{ item.item_name }}
+                                    {% if item.description and item.description != item.item_name %}
+                                        - {{ item.description }}
+                                    {% endif %}
+                                </div>
+                                <div style="flex:1; text-align:right; font-weight:bold;">
+                                    {% set arabic_name = frappe.db.get_value("Item", item.item_code, "custom_arabic_name") %}
+                                    {{ arabic_name or "" }}
+                                </div>
+                            </div>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td style="padding:3px !important;">{{ "%.3f"|format(item.qty) }}</td>
+                        <td style="padding:3px !important;">{{ "%.2f"|format(item.rate) }}</td>
+                        <td style="padding:3px !important;">{{ "%.2f"|format(item.discount_amount) }}</td>
+                        <td style="padding:3px !important;">{{ "%.2f"|format(item.net_amount) }}</td>
+                        <td style="padding:3px !important;">{{ "%.2f"|format(item.tax_amount if item.tax_amount is defined else 0) }}</td>
+                        <td style="padding:3px !important;" class="bold">{{ "%.2f"|format(item.total_amount if item.total_amount is defined else item.amount) }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+
+            <div class="number-of-items">
+                <strong>Number of Items: {{ doc.items|length }}</strong>
+            </div>
+        </div>
+
+        <div class="summary-section">
+            <div class="summary-row">
+                <span>صافي المبلغ شاملاً ضريبة / Net VAT Inclusive Amount</span>
+                <span>{{ "%.2f"|format(doc.grand_total) }}</span>
+            </div>
+
+            <table class="summary-table">
+                <thead>
+                    <tr>
+                        <th style="padding:3px !important; background:#fff; color:#000; width:20%;"><strong>MRP</strong></th>
+                        <th style="padding:3px !important; background:#fff; color:#000; width:25%;"><strong>خصم / Tot. Disc.</strong></th>
+                        <th style="padding:3px !important; background:#fff; color:#000; width:35%;"><strong>المجموع قبل ضريبة / Total before VAT</strong></th>
+                        <th style="padding:3px !important; background:#fff; color:#000; width:20%;"><strong>ضريبة 15% / 15% VAT</strong></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td style="padding:3px !important;">{{ "%.2f"|format(doc.total) }}</td>
+                        <td style="padding:3px !important;">{{ "%.2f"|format(doc.discount_amount or 0) }}</td>
+                        <td style="padding:3px !important;">{{ "%.2f"|format(doc.net_total) }}</td>
+                        <td style="padding:3px !important;">{{ "%.2f"|format(doc.total_taxes_and_charges) }}</td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <div class="summary-row">
+                <span>دفعة مقدمة / Order Advance</span>
+                <span>{{ "%.2f"|format(doc.total_advance or 0) }}</span>
+            </div>
+
+            <div class="summary-row total-row" style="font-size:20px;">
+                <span>صافي الفاتورة / Net Amount</span>
+                <span>{{ "%.2f"|format(doc.grand_total) }}</span>
+            </div>
+        </div>
+
+        <table style="width:100%; border-collapse:collapse; margin-top:12px; font-size:15px; text-align:center; font-weight:800;">
+            <thead>
+                <tr style="border-top:1px solid #000; border-bottom:1px solid #000; font-weight:800;">
+                    <th style="padding:3px !important; background:#fff; color:#000; width:33%; font-weight:800;">تلقي النقدية<br>Cash Received</th>
+                    <th style="padding:3px !important; background:#fff; color:#000; width:33%; font-weight:800;">بطاقة ائتمان<br>Debit/Credit Card</th>
+                    <th style="padding:3px !important; background:#fff; color:#000; width:33%; font-weight:800;">رصيد حساب<br>Balance</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% set ns = namespace(cash=0, card=0) %}
+
+                {% if doc.is_pos and doc.payments %}
+                    {% for p in doc.payments %}
+                        {% set mode = (p.mode_of_payment or "")|lower %}
+                        {% if "cash" in mode %}
+                            {% set ns.cash = ns.cash + (p.amount or 0) %}
+                        {% elif "card" in mode or "bank" in mode or "credit" in mode or "debit" in mode %}
+                            {% set ns.card = ns.card + (p.amount or 0) %}
+                        {% endif %}
+                    {% endfor %}
+                {% endif %}
+
+                {% set pe_refs = frappe.get_all(
+                    "Payment Entry Reference",
+                    filters={
+                        "reference_doctype": doc.doctype,
+                        "reference_name": doc.name
+                    },
+                    fields=["parent", "allocated_amount"]
+                ) %}
+
+                {% for ref in pe_refs %}
+                    {% set pe = frappe.get_doc("Payment Entry", ref.parent) %}
+                    {% if pe.docstatus == 1 %}
+                        {% set mode = (pe.mode_of_payment or "")|lower %}
+                        {% if "cash" in mode %}
+                            {% set ns.cash = ns.cash + (ref.allocated_amount or 0) %}
+                        {% elif "card" in mode or "bank" in mode or "credit" in mode or "debit" in mode %}
+                            {% set ns.card = ns.card + (ref.allocated_amount or 0) %}
+                        {% endif %}
+                    {% endif %}
+                {% endfor %}
+
+                {% set balance = doc.grand_total - ns.cash - ns.card %}
+
+                <tr style="border-bottom:1px solid #000;">
+                    <td style="padding:3px !important; font-weight:600;">{{ "%.2f"|format(ns.cash) }}</td>
+                    <td style="padding:3px !important; font-weight:600;">{{ "%.2f"|format(ns.card) }}</td>
+                    <td style="padding:3px !important; font-weight:600;">
+                        {% if balance < 0 %}
+                            ({{ "%.2f"|format(balance|abs) }})
+                        {% else %}
+                            {{ "%.2f"|format(balance) }}
+                        {% endif %}
+                    </td>
+                </tr>
+            </tbody>
+        </table>
+
+        <div class="footer">
+            <div class="thank-you">
+                <div>شكرا لك الزيارة مرة أخرى</div>
+                <div>Thank you, visit again</div>
+            </div>
+
+            <div style="margin: 6px 0; font-size: 13px;">
+                <strong>Mobile:</strong> {{ doc.contact_mobile or "" }}
+            </div>
+
+            <div class="barcode-section">
+                <div class="barcode">{{ doc.name }}</div>
+            </div>
+
+            <div class="customer-info">
+                <div><span>Customer Name:</span> {{ doc.customer_name or "" }}</div>
+                <div>
+                    <span>VAT ID:</span>
+                    {{ doc.tax_id or frappe.db.get_value("Customer", doc.customer, "custom_vat_registration_number") or "" }}
+                </div>
+                {% set driver = "" %}
+                {% if doc.sales_team and doc.sales_team|length > 0 %}
+                    {% set driver = doc.sales_team[0].sales_person %}
+                {% endif %}
+                <div><span>Driver Name:</span> {{ driver }}</div>
+                <div><span>Client Mobile:</span> {{ doc.contact_mobile or "" }}</div>
+                <div><span>Online Order #:</span> {{ doc.po_no or "" }}</div>
+            </div>
+
+            <div class="qr-code-container" style="width: 100%; display: flex; justify-content: center; align-items: flex-start; text-align:center;">
+                <div style="width: 6cm; height: 6cm; border: 1px solid #aaa; display: flex; align-items: center; justify-content: center; background-color: #f9f9f9;">
+                    {% if doc.docstatus == 0 %}
+                        <strong>NO QR</strong>
+                    {% elif doc.ksa_einv_qr %}
+                        {# ksa_compliance Phase 2 attach-image URL #}
+                        <img src="{{ doc.ksa_einv_qr }}" style="width: 6cm; height: 6cm;" alt="QR Code">
+                    {% else %}
+                        <p style="color:#c00;font-size:12px;">QR pending<br>sync with ZATCA</p>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

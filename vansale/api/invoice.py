@@ -245,6 +245,119 @@ def _default_mop_account(mop: str, company: str) -> Optional[str]:
     return None
 
 
+@frappe.whitelist(methods=["POST"])
+def return_against(
+    client_id: str,
+    original_name: str,
+    items: list[dict[str, Any]],
+    posting_ts: Optional[str] = None,
+    remarks: Optional[str] = None,
+    submit: int = 1,
+) -> dict:
+    """Create a Sales Return (Credit Note) against an existing submitted invoice.
+
+    Each `items[i]` must contain `item_code` and `qty` (positive number — we
+    negate). Optionally `rate`, `uom`, `warehouse` — otherwise copied from
+    the original line. Idempotent by `client_id` like normal invoice save.
+    """
+    if not client_id:
+        frappe.throw(_("client_id is required"))
+    if not original_name:
+        frappe.throw(_("original_name is required"))
+    if not items:
+        frappe.throw(_("At least one return line is required"))
+
+    existing = _existing_by_client_id(client_id)
+    if existing:
+        doc = frappe.get_doc("Sales Invoice", existing)
+        return {
+            "name": doc.name,
+            "grand_total": float(doc.grand_total or 0),
+            "status": doc.status,
+            "modified": naive_site_to_utc_iso(doc.modified),
+            "idempotent_replay": True,
+        }
+
+    original = frappe.get_doc("Sales Invoice", original_name)
+    if original.docstatus != 1:
+        frappe.throw(_("Original invoice must be submitted"))
+    if int(original.is_return or 0):
+        frappe.throw(_("Cannot return against a credit note"))
+
+    orig_line_by_code: dict[str, Any] = {}
+    for line in original.items:
+        orig_line_by_code.setdefault(line.item_code, line)
+
+    posting = parse_client_ts(posting_ts) if posting_ts else frappe.utils.now_datetime()
+
+    doc = frappe.new_doc("Sales Invoice")
+    doc.customer = original.customer
+    doc.company = original.company
+    doc.currency = original.currency
+    doc.selling_price_list = original.selling_price_list
+    doc.price_list_currency = original.price_list_currency
+    doc.plc_conversion_rate = original.plc_conversion_rate
+    doc.conversion_rate = original.conversion_rate
+    doc.is_return = 1
+    doc.return_against = original.name
+    doc.update_stock = int(original.update_stock or 0)
+    doc.set_warehouse = original.set_warehouse
+    doc.set_posting_time = 1
+    doc.posting_date = posting.date()
+    doc.posting_time = posting.strftime("%H:%M:%S")
+    doc.taxes_and_charges = original.taxes_and_charges
+    doc.remarks = remarks or _("Return against {0}").format(original.name)
+    doc.custom_client_id = client_id
+
+    for item in items:
+        code = item.get("item_code")
+        if not code:
+            frappe.throw(_("item_code is required on every return line"))
+        qty = float(item.get("qty") or 0)
+        if qty <= 0:
+            frappe.throw(_("Return qty must be positive for {0}").format(code))
+        orig = orig_line_by_code.get(code)
+        row = doc.append("items", {})
+        row.item_code = code
+        row.qty = -qty
+        row.uom = item.get("uom") or (orig.uom if orig else None)
+        row.conversion_factor = float(item.get("conversion_factor") or (orig.conversion_factor if orig else 1) or 1)
+        row.rate = float(item.get("rate") if item.get("rate") is not None else (orig.rate if orig else 0))
+        if orig is not None and item.get("rate") is None:
+            row.price_list_rate = float(orig.price_list_rate or 0)
+            if orig.discount_percentage:
+                row.discount_percentage = float(orig.discount_percentage or 0)
+        row.warehouse = item.get("warehouse") or (orig.warehouse if orig else doc.set_warehouse)
+        if orig is not None:
+            row.sales_invoice_item = orig.name  # links back to source row
+
+    # Keep sales person tagging on returns for reporting consistency.
+    sp = current_user_sales_person()
+    if sp:
+        doc.append("sales_team", {"sales_person": sp, "allocated_percentage": 100})
+
+    doc.insert(ignore_permissions=False)
+    if submit:
+        doc.submit()
+
+    _record_outbox(client_id, doc.name, posting_ts, {
+        "return_against": original.name,
+        "items": items,
+    })
+    frappe.db.commit()
+
+    return {
+        "name": doc.name,
+        "grand_total": float(doc.grand_total or 0),
+        "outstanding_amount": float(doc.outstanding_amount or 0),
+        "status": doc.status,
+        "docstatus": int(doc.docstatus or 0),
+        "modified": naive_site_to_utc_iso(doc.modified),
+        "idempotent_replay": False,
+        "is_return": 1,
+    }
+
+
 @frappe.whitelist(methods=["GET"])
 def list_mine(limit: int = 50, customer: Optional[str] = None) -> list[dict]:
     filters: dict = {"owner": frappe.session.user, "docstatus": ["in", [0, 1]]}

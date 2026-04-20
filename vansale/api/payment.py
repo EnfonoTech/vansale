@@ -260,9 +260,22 @@ def outstanding(customer: str) -> list[dict]:
     rows = frappe.get_all(
         "Sales Invoice",
         filters={"customer": customer, "docstatus": 1, "outstanding_amount": [">", 0]},
-        fields=["name", "grand_total", "outstanding_amount", "posting_date"],
+        fields=["name", "grand_total", "outstanding_amount", "posting_date", "status", "due_date"],
         order_by="posting_date asc",
     )
     for r in rows:
         r["posting_date"] = naive_site_to_utc_iso(r.get("posting_date"))
+        r["due_date"] = naive_site_to_utc_iso(r.get("due_date"))
+    return rows
+
+
+@frappe.whitelist(methods=["GET"])
+def modes_of_payment() -> list[dict]:
+    """Active Modes of Payment for the dropdown. Filters out disabled rows."""
+    rows = frappe.get_all(
+        "Mode of Payment",
+        filters={"enabled": 1},
+        fields=["name", "type"],
+        order_by="name asc",
+    )
     return rows

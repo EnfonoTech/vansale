@@ -24,11 +24,29 @@ _ITEM_FIELDS = [
 
 @frappe.whitelist(methods=["GET"])
 def list_mine(limit: int = 100, search: Optional[str] = None, warehouse: Optional[str] = None) -> list[dict]:
+    """Search items by code / name / barcode.
+
+    v15 Item has no top-level `barcode` column — barcodes live in the
+    `Item Barcode` child table. Prior build used `or_filters={'barcode': ...}`
+    which silently returned 0 rows and broke the catalog search.
+    """
     filters: dict = {"disabled": 0, "has_variants": 0}
     or_filters = None
     if search:
         s = f"%{search}%"
-        or_filters = {"item_name": ["like", s], "item_code": ["like", s], "barcode": ["like", s]}
+        or_filters = {"item_name": ["like", s], "item_code": ["like", s]}
+        # Barcode match → parent item_code.
+        barcode_parents = [
+            b.parent
+            for b in frappe.get_all(
+                "Item Barcode",
+                filters={"barcode": ["like", s]},
+                fields=["parent"],
+                limit=int(limit),
+            )
+        ]
+        if barcode_parents:
+            or_filters["name"] = ["in", barcode_parents]
     rows = frappe.get_all(
         "Item",
         filters=filters,

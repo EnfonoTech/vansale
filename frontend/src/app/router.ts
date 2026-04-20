@@ -75,6 +75,13 @@ const routes: RouteRecordRaw[] = [
     props: true,
   },
   {
+    path: "/invoice/:name/return",
+    name: "invoice-return",
+    component: () => import("@/views/SalesReturnView.vue"),
+    meta: { requiresAuth: true, requiresPin: true },
+    props: true,
+  },
+  {
     path: "/payment/new",
     name: "payment-new",
     component: () => import("@/views/PaymentFormView.vue"),

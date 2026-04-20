@@ -36,6 +36,12 @@ export async function outstanding(customer: string): Promise<Array<Record<string
   return apiCall("GET", `vansale.api.payment.outstanding?customer=${encodeURIComponent(customer)}`);
 }
 
+export interface ModeOfPayment { name: string; type: string | null }
+
+export async function modesOfPayment(): Promise<ModeOfPayment[]> {
+  return apiCall<ModeOfPayment[]>("GET", "vansale.api.payment.modes_of_payment");
+}
+
 export async function save(payload: PaymentPayload): Promise<SavedPayment> {
   const clientId = genUuid();
   const clientTs = new Date().toISOString();

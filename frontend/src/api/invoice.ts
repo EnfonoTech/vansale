@@ -106,6 +106,41 @@ export async function detail(name: string): Promise<InvoiceDetail> {
   );
 }
 
+export interface ReturnLine {
+  item_code: string;
+  qty: number;                 // positive — server negates
+  rate?: number;
+  uom?: string;
+  conversion_factor?: number;
+  warehouse?: string;
+}
+
+export interface ReturnPayload {
+  original_name: string;
+  items: ReturnLine[];
+  remarks?: string;
+  submit?: 0 | 1;
+}
+
+export interface SavedReturn extends SavedInvoice {
+  is_return: number;
+}
+
+/** Create a Sales Return (Credit Note) against a submitted invoice.
+ *  Offline path not supported — returns require server-side stock validation. */
+export async function returnAgainst(payload: ReturnPayload): Promise<SavedReturn> {
+  const clientId = genUuid();
+  const clientTs = new Date().toISOString();
+  const res = await apiCall<SavedReturn>("POST", "vansale.api.invoice.return_against", {
+    client_id: clientId,
+    posting_ts: clientTs,
+    ...payload,
+  });
+  const sync = useSyncStore();
+  void sync.refresh();
+  return { ...res, clientId };
+}
+
 /** Offline-first save. Online synchronous path first, queue on network failure,
  *  re-throw ApiError so validation surfaces to the user (frappe-vue-pwa §4.1). */
 export async function save(payload: InvoicePayload): Promise<SavedInvoice> {

@@ -2,7 +2,7 @@
 import { computed, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { listMine as listCustomers } from "@/api/customer";
-import { outstanding, save } from "@/api/payment";
+import { outstanding, save, modesOfPayment, type ModeOfPayment } from "@/api/payment";
 import { ApiError } from "@/app/frappe";
 import { useSessionStore } from "@/stores/session";
 import { useToastStore } from "@/stores/toasts";
@@ -15,17 +15,24 @@ const toasts = useToastStore();
 
 const customers = ref<Array<{ name: string; customer_name: string }>>([]);
 const invoices = ref<Array<Record<string, unknown>>>([]);
+const mops = ref<ModeOfPayment[]>([]);
 const customer = ref(String(route.query.customer ?? ""));
 const preselectInvoice = String(route.query.invoice ?? "");
 const selected = ref<Set<string>>(new Set());
 const amount = ref<number | "">("");
-const mode = ref<"Cash" | "Bank">("Cash");
+const mode = ref<string>("Cash");
 const reference = ref("");
 const remarks = ref("");
 const busy = ref(false);
 
 onMounted(async () => {
   customers.value = await listCustomers(undefined, 200);
+  try {
+    mops.value = await modesOfPayment();
+    if (mops.value.length > 0 && !mops.value.some((m) => m.name === mode.value)) {
+      mode.value = mops.value[0].name;
+    }
+  } catch { /* fall back to hardcoded options */ }
   if (customer.value) await loadOutstanding();
 });
 
@@ -60,6 +67,26 @@ function togglePick(r: Record<string, unknown>) {
     .reduce((t, row) => t + (Number(row.outstanding_amount) || 0), 0);
 }
 
+function selectAll() {
+  const s = new Set<string>();
+  for (const r of invoices.value) s.add(String(r.name));
+  selected.value = s;
+  amount.value = invoices.value.reduce((t, r) => t + (Number(r.outstanding_amount) || 0), 0);
+}
+
+function clearPicks() {
+  selected.value = new Set();
+  amount.value = "";
+}
+
+function statusTone(status: unknown): string {
+  const s = String(status || "").toLowerCase();
+  if (s === "overdue") return "danger";
+  if (s === "unpaid") return "warning";
+  if (s === "partly paid") return "warning";
+  return "info";
+}
+
 const selectedList = computed(() => Array.from(selected.value));
 const hasPicks = computed(() => selected.value.size > 0);
 const totalOutstanding = computed(() =>
@@ -75,7 +102,7 @@ async function submit() {
     const res = await save({
       customer: customer.value,
       paid_amount: n,
-      mode_of_payment: mode.value,
+      mode_of_payment: mode.value as "Cash" | "Bank" | string,
       reference_no: reference.value || undefined,
       invoice_names: hasPicks.value ? selectedList.value : undefined,
       remarks: remarks.value || undefined,
@@ -118,6 +145,14 @@ async function submit() {
           Total {{ session.currency }} {{ fmt(totalOutstanding) }}
         </span>
       </div>
+      <div class="bulk">
+        <button type="button" class="link-btn" @click="selectAll">
+          <Icon name="check" :size="13" /> Select all
+        </button>
+        <button type="button" class="link-btn" @click="clearPicks">
+          <Icon name="x" :size="13" /> Clear
+        </button>
+      </div>
       <p v-if="!hasPicks" class="hint">
         <Icon name="clock" :size="14" />
         None picked — payment will auto-allocate FIFO (oldest first).
@@ -135,7 +170,10 @@ async function submit() {
                 <Icon v-if="selected.has(String(r.name))" name="check" :size="14" />
               </span>
               <div>
-                <strong>{{ r.name }}</strong>
+                <div class="name-row">
+                  <strong>{{ r.name }}</strong>
+                  <span v-if="r.status" class="pill" :data-tone="statusTone(r.status)">{{ r.status }}</span>
+                </div>
                 <div class="muted xsmall">{{ r.posting_date }}</div>
               </div>
             </div>
@@ -146,6 +184,13 @@ async function submit() {
           </button>
         </li>
       </ul>
+    </section>
+
+    <section v-else-if="customer" class="card stack">
+      <p class="hint">
+        <Icon name="check" :size="14" />
+        No outstanding invoices for this customer.
+      </p>
     </section>
 
     <section class="card stack">
@@ -163,29 +208,17 @@ async function submit() {
           />
         </div>
       </label>
-      <div>
-        <span class="label" style="display:block;margin-bottom:0.35rem">Mode of payment</span>
-        <div class="mode-row">
-          <button
-            class="mode-btn"
-            :class="{ active: mode === 'Cash' }"
-            type="button"
-            @click="mode = 'Cash'"
-          >
-            <Icon name="payment" :size="18" />
-            Cash
-          </button>
-          <button
-            class="mode-btn"
-            :class="{ active: mode === 'Bank' }"
-            type="button"
-            @click="mode = 'Bank'"
-          >
-            <Icon name="receipt" :size="18" />
-            Bank
-          </button>
-        </div>
-      </div>
+      <label class="field">
+        <span class="label">Mode of payment</span>
+        <select v-if="mops.length > 0" v-model="mode">
+          <option v-for="m in mops" :key="m.name" :value="m.name">{{ m.name }}</option>
+        </select>
+        <select v-else v-model="mode">
+          <option value="Cash">Cash</option>
+          <option value="Bank">Bank</option>
+          <option value="Credit Card">Credit Card</option>
+        </select>
+      </label>
       <label class="field">
         <span class="label">Reference (optional)</span>
         <input v-model="reference" placeholder="Cheque / transaction no." />
@@ -246,23 +279,13 @@ async function submit() {
 }
 .amount-input input { padding-inline-start: 3rem; font-size: var(--text-xl); font-weight: 600; padding-block: 0.9rem; }
 
-.mode-row { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; }
-.mode-btn {
-  all: unset; cursor: pointer;
-  display: flex; flex-direction: column; align-items: center; gap: 0.25rem;
-  padding: 0.75rem;
-  border-radius: var(--radius);
-  background: var(--surface-muted);
-  color: var(--text-muted);
-  font-weight: 600;
-  border: 2px solid transparent;
-  transition: all var(--dur-fast) var(--ease);
+.bulk { display: flex; gap: 0.5rem; }
+.link-btn {
+  all: unset; cursor: pointer; color: var(--primary);
+  font-size: var(--text-xs); font-weight: 600;
+  display: inline-flex; align-items: center; gap: 0.2rem;
 }
-.mode-btn.active {
-  background: var(--primary-soft);
-  color: var(--primary);
-  border-color: var(--primary);
-}
+.name-row { display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap; }
 
 .submit { min-height: 3.25rem; font-size: var(--text-base); }
 </style>

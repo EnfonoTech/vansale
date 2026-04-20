@@ -26,6 +26,7 @@ import {
 } from "@/api/item";
 import { save, type InvoiceItem } from "@/api/invoice";
 import { ApiError } from "@/app/frappe";
+import { openSalesInvoicePrint } from "@/app/print";
 import { useSessionStore } from "@/stores/session";
 import { useToastStore } from "@/stores/toasts";
 import Icon from "@/components/Icon.vue";
@@ -205,9 +206,9 @@ async function doSave(submit: 0 | 1) {
     lines.value = [];
     if (!res.queued && res.name && !res.name.startsWith("QUEUED")) {
       // Auto-print popup on submit (PDF §1g). Skip for drafts.
+      // Uses ZATCA Phase 2 Print Format (KSA compliance).
       if (flag) {
-        const url = `/printview?doctype=Sales%20Invoice&name=${encodeURIComponent(res.name)}&trigger_print=1&format=Standard&no_letterhead=0`;
-        window.open(url, "_blank", "noopener,noreferrer");
+        openSalesInvoicePrint(res.name, { triggerPrint: true });
       }
       setTimeout(() => router.push({ name: "invoice-detail", params: { name: res.name } }), 600);
     } else {
