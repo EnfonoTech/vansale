@@ -52,17 +52,69 @@ def list_mine(limit: int = 100, search: Optional[str] = None, warehouse: Optiona
     return rows
 
 
+def _customer_price_list(customer: Optional[str]) -> Optional[str]:
+    """Resolve the effective selling Price List for a customer.
+
+    Priority: Customer.default_price_list → Customer Group.default_price_list →
+    Selling Settings.selling_price_list.
+    """
+    if customer:
+        cust_pl = frappe.db.get_value("Customer", customer, "default_price_list")
+        if cust_pl:
+            return cust_pl
+        cg = frappe.db.get_value("Customer", customer, "customer_group")
+        if cg:
+            cg_pl = frappe.db.get_value("Customer Group", cg, "default_price_list")
+            if cg_pl:
+                return cg_pl
+    return frappe.db.get_single_value("Selling Settings", "selling_price_list")
+
+
+def _fetch_price(item_code: str, price_list: Optional[str], uom: Optional[str]) -> float:
+    """Fetch Item Price for the (item_code, price_list, uom) triple with UOM fallback."""
+    filters: dict = {"item_code": item_code, "selling": 1}
+    if price_list:
+        filters["price_list"] = price_list
+    if uom:
+        price = frappe.db.get_value(
+            "Item Price",
+            {**filters, "uom": uom},
+            "price_list_rate",
+            order_by="valid_from desc",
+        )
+        if price:
+            return float(price)
+    # Fallback — any UOM for this price list
+    price = frappe.db.get_value(
+        "Item Price", filters, "price_list_rate", order_by="valid_from desc",
+    )
+    return float(price or 0)
+
+
 @frappe.whitelist(methods=["GET"])
 def detail(item_code: str, customer: Optional[str] = None) -> dict:
     if not item_code:
         frappe.throw(_("Item code required"))
     doc = frappe.get_doc("Item", item_code)
-    price = frappe.db.get_value(
-        "Item Price",
-        {"item_code": item_code, "selling": 1},
-        "price_list_rate",
-        order_by="valid_from desc",
-    )
+    price_list = _customer_price_list(customer)
+    stock_uom_rate = _fetch_price(item_code, price_list, doc.stock_uom)
+
+    uoms = []
+    for u in (doc.uoms or []):
+        conv = float(u.conversion_factor or 1)
+        rate = _fetch_price(item_code, price_list, u.uom) or (stock_uom_rate * conv)
+        uoms.append({
+            "uom": u.uom,
+            "conversion_factor": conv,
+            "price_list_rate": float(rate or 0),
+        })
+    if not uoms:
+        uoms.append({
+            "uom": doc.stock_uom,
+            "conversion_factor": 1.0,
+            "price_list_rate": float(stock_uom_rate or doc.standard_rate or 0),
+        })
+
     return {
         "name": doc.name,
         "item_code": doc.item_code,
@@ -70,10 +122,30 @@ def detail(item_code: str, customer: Optional[str] = None) -> dict:
         "item_group": doc.item_group,
         "stock_uom": doc.stock_uom,
         "standard_rate": float(doc.standard_rate or 0),
-        "price_list_rate": float(price or doc.standard_rate or 0),
+        "price_list": price_list,
+        "price_list_rate": float(stock_uom_rate or doc.standard_rate or 0),
+        "uoms": uoms,
         "image": doc.image,
         "tax_template": doc.item_tax_template if hasattr(doc, "item_tax_template") else None,
         "customer": customer,
+    }
+
+
+@frappe.whitelist(methods=["GET"])
+def price_for(item_code: str, customer: Optional[str] = None, uom: Optional[str] = None) -> dict:
+    """Light-weight price lookup used when the user changes UOM on a line."""
+    if not item_code:
+        frappe.throw(_("Item code required"))
+    price_list = _customer_price_list(customer)
+    rate = _fetch_price(item_code, price_list, uom)
+    if not rate:
+        std = float(frappe.db.get_value("Item", item_code, "standard_rate") or 0)
+        rate = std
+    return {
+        "item_code": item_code,
+        "uom": uom,
+        "price_list": price_list,
+        "price_list_rate": float(rate or 0),
     }
 
 

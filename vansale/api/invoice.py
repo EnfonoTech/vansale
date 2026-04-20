@@ -14,6 +14,7 @@ import frappe
 from frappe import _
 
 from vansale.api.datetime_util import naive_site_to_utc_iso, parse_client_ts
+from vansale.api.me import current_user_sales_person
 
 
 def _user_default(allow: str) -> Optional[str]:
@@ -100,6 +101,10 @@ def save(
     remarks: Optional[str] = None,
     update_stock: int = 1,
     submit: int = 1,
+    payment_type: Optional[str] = None,       # "cash" | "credit" — drives is_pos + payments
+    mode_of_payment: Optional[str] = None,    # used when payment_type == "cash"
+    discount_amount: Optional[float] = None,  # invoice-level additional discount
+    apply_discount_on: Optional[str] = None,  # "Grand Total" | "Net Total"
 ) -> dict:
     if not client_id:
         frappe.throw(_("client_id is required"))
@@ -135,6 +140,12 @@ def save(
     doc.remarks = remarks
     doc.custom_client_id = client_id  # custom field added via fixture
 
+    # Cash / credit: cash → is_pos + fully paid via mode_of_payment.
+    pay_type = (payment_type or "").lower()
+    if pay_type == "cash":
+        doc.is_pos = 1
+        # payments row filled after insert so grand_total is known.
+
     # Tax template — auto-apply if the site enforces mandatory taxes
     # and the caller didn't supply one.
     tax_template = _default_tax_template(company)
@@ -147,13 +158,49 @@ def save(
         row = doc.append("items", {})
         row.item_code = item["item_code"]
         row.qty = float(item.get("qty") or 1)
+        if item.get("uom"):
+            row.uom = item["uom"]
+        if item.get("conversion_factor"):
+            row.conversion_factor = float(item["conversion_factor"])
+        # Price — prefer price_list_rate so ERPNext computes discount_percentage.
+        if item.get("price_list_rate") is not None:
+            row.price_list_rate = float(item["price_list_rate"])
         if item.get("rate") is not None:
             row.rate = float(item["rate"])
-        row.uom = item.get("uom") or row.uom
+        if item.get("discount_percentage") is not None:
+            row.discount_percentage = float(item["discount_percentage"])
+        if item.get("discount_amount") is not None:
+            row.discount_amount = float(item["discount_amount"])
         if set_warehouse:
             row.warehouse = item.get("warehouse") or set_warehouse
 
+    # Auto-tag sales person (commission tracking) if configured.
+    sp = current_user_sales_person()
+    if sp:
+        doc.append("sales_team", {"sales_person": sp, "allocated_percentage": 100})
+
+    # Invoice-level additional discount.
+    if discount_amount is not None:
+        doc.discount_amount = float(discount_amount)
+        doc.apply_discount_on = apply_discount_on or "Grand Total"
+
     doc.insert(ignore_permissions=False)
+
+    # Fill payment row only after insert so grand_total is computed.
+    if pay_type == "cash" and submit:
+        mop = mode_of_payment or "Cash"
+        account = _default_mop_account(mop, company)
+        if not account:
+            frappe.throw(_("No default account configured for Mode of Payment {0}").format(mop))
+        # clear any auto-added payments rows from Sales Invoice defaults
+        doc.set("payments", [])
+        doc.append("payments", {
+            "mode_of_payment": mop,
+            "account": account,
+            "amount": float(doc.grand_total or 0),
+        })
+        doc.save()
+
     if submit:
         doc.submit()
 
@@ -161,16 +208,41 @@ def save(
         "customer": customer,
         "items": items,
         "warehouse": set_warehouse,
+        "payment_type": pay_type or None,
+        "mode_of_payment": mode_of_payment,
     })
     frappe.db.commit()
 
     return {
         "name": doc.name,
         "grand_total": float(doc.grand_total or 0),
+        "outstanding_amount": float(doc.outstanding_amount or 0),
         "status": doc.status,
+        "docstatus": int(doc.docstatus or 0),
         "modified": naive_site_to_utc_iso(doc.modified),
         "idempotent_replay": False,
     }
+
+
+def _default_mop_account(mop: str, company: str) -> Optional[str]:
+    """Resolve the Mode of Payment's account for the given company."""
+    acc = frappe.db.get_value(
+        "Mode of Payment Account",
+        {"parent": mop, "company": company},
+        "default_account",
+    )
+    if acc:
+        return acc
+    # Fallback — any account on the MoP row
+    rows = frappe.get_all(
+        "Mode of Payment Account",
+        filters={"parent": mop},
+        fields=["default_account", "company"],
+    )
+    for r in rows:
+        if r.get("default_account"):
+            return r["default_account"]
+    return None
 
 
 @frappe.whitelist(methods=["GET"])

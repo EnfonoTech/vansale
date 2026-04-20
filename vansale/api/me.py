@@ -71,10 +71,18 @@ def config_defaults() -> dict:
             if is_default:
                 default_cost_center = value
 
-    # Van code — the first Vansale Configuration that lists this user.
-    van_code = frappe.db.get_value(
-        "Vansale Configuration User", {"user": user}, "parent"
+    # Van code + sales person — first Vansale Configuration that lists this user.
+    cfg_user = frappe.db.get_value(
+        "Vansale Configuration User",
+        {"user": user},
+        ["parent", "sales_person"],
+        as_dict=True,
     )
+    van_code = cfg_user.parent if cfg_user else None
+    sales_person = cfg_user.sales_person if cfg_user else None
+    sales_person_name = None
+    if sales_person:
+        sales_person_name = frappe.db.get_value("Sales Person", sales_person, "sales_person_name") or sales_person
 
     currency = None
     if company:
@@ -96,7 +104,18 @@ def config_defaults() -> dict:
         "cost_centers": cost_centers,
         "van_code": van_code,
         "currency": currency,
+        "sales_person": sales_person,
+        "sales_person_name": sales_person_name,
     }
+
+
+def current_user_sales_person() -> str | None:
+    """Shared helper — used by invoice.save to auto-tag sales_team."""
+    return frappe.db.get_value(
+        "Vansale Configuration User",
+        {"user": frappe.session.user},
+        "sales_person",
+    )
 
 
 @frappe.whitelist(methods=["GET"])
