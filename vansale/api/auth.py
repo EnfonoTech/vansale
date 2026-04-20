@@ -71,11 +71,20 @@ def login(usr: str, pwd: str):
     login_manager.post_login()
 
     user_doc = frappe.get_doc("User", frappe.session.user)
+    # Also mint (or return existing) api_key/api_secret so the APK can
+    # transition to token auth for the follow-up `setup_pin` call. On
+    # native the WebView does NOT send the Frappe session cookie on
+    # subsequent requests (our `fetchOpts` strips `credentials` — see
+    # frontend/src/app/frappe.ts), so without a token the next call
+    # would run as Guest and trip the whitelist check.
+    api_key, api_secret = get_or_create_stable_secret(user_doc)
     return {
         "user": user_doc.name,
         "full_name": user_doc.full_name,
         "language": user_doc.language or "en",
         "has_pin": bool(frappe.db.exists("Vansale Pin", {"user": user_doc.name})),
+        "api_key": api_key,
+        "api_secret": api_secret,
     }
 
 

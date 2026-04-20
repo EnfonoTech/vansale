@@ -60,64 +60,73 @@ function signInAgain() {
 </script>
 
 <template>
-  <div class="auth">
-    <div class="brand">
-      <div class="brand-mark"><Icon name="truck" :size="36" /></div>
-      <h1>{{ heading }}</h1>
-      <p class="muted">{{ hint }}</p>
+  <div class="auth-wrap">
+    <div class="auth">
+      <div class="brand">
+        <div class="brand-mark"><Icon name="truck" :size="36" /></div>
+        <h1>{{ heading }}</h1>
+        <p class="muted">{{ hint }}</p>
+      </div>
+
+      <form class="card stack" @submit.prevent="onSubmit">
+        <label class="field">
+          <span class="label">PIN</span>
+          <input
+            v-model="pin"
+            type="password"
+            inputmode="numeric"
+            pattern="[0-9]*"
+            autocomplete="one-time-code"
+            minlength="4"
+            maxlength="8"
+            :disabled="busy"
+            required
+            autofocus
+          />
+        </label>
+        <label v-if="mode === 'setup'" class="field">
+          <span class="label">Confirm PIN</span>
+          <input
+            v-model="confirm"
+            type="password"
+            inputmode="numeric"
+            pattern="[0-9]*"
+            minlength="4"
+            maxlength="8"
+            :disabled="busy"
+            required
+          />
+        </label>
+
+        <p class="error" :class="{ 'is-empty': !error }">{{ error || '\u00a0' }}</p>
+
+        <button class="submit" type="submit" :disabled="busy">
+          {{ busy ? "Unlocking…" : (mode === "setup" ? "Save PIN" : "Unlock") }}
+        </button>
+      </form>
+
+      <button class="ghost forgot" type="button" @click="signInAgain">Forgot PIN? Sign in with password</button>
     </div>
-
-    <form class="card stack" @submit.prevent="onSubmit">
-      <label class="field">
-        <span class="label">PIN</span>
-        <input
-          v-model="pin"
-          type="password"
-          inputmode="numeric"
-          pattern="[0-9]*"
-          autocomplete="one-time-code"
-          minlength="4"
-          maxlength="8"
-          :disabled="busy"
-          required
-          autofocus
-        />
-      </label>
-      <label v-if="mode === 'setup'" class="field">
-        <span class="label">Confirm PIN</span>
-        <input
-          v-model="confirm"
-          type="password"
-          inputmode="numeric"
-          pattern="[0-9]*"
-          minlength="4"
-          maxlength="8"
-          :disabled="busy"
-          required
-        />
-      </label>
-
-      <p v-if="error" class="error">{{ error }}</p>
-
-      <button class="submit" type="submit" :disabled="busy">
-        {{ busy ? "Unlocking…" : (mode === "setup" ? "Save PIN" : "Unlock") }}
-      </button>
-    </form>
-
-    <button class="ghost" type="button" @click="signInAgain">Forgot PIN? Sign in with password</button>
   </div>
 </template>
 
 <style scoped>
+/* See LoginView — `svh` + top-anchored layout + reserved error row
+   keep the form stable when the soft keyboard toggles and when the
+   error text appears. */
+.auth-wrap {
+  min-height: 100svh;
+  display: flex;
+  justify-content: center;
+  padding: 2.5rem 1.5rem calc(1.5rem + env(safe-area-inset-bottom));
+  padding-top: calc(2.5rem + env(safe-area-inset-top));
+}
 .auth {
-  min-height: 100dvh;
+  width: 100%;
+  max-width: 26rem;
   display: flex;
   flex-direction: column;
-  justify-content: center;
   gap: 1.5rem;
-  padding: 1.5rem;
-  max-width: 26rem;
-  margin: 0 auto;
 }
 .brand { text-align: center; display: flex; flex-direction: column; align-items: center; gap: 0.4rem; }
 .brand-mark {
@@ -133,5 +142,10 @@ function signInAgain() {
 .field { display: flex; flex-direction: column; gap: 0.3rem; }
 .label { font-size: var(--text-sm); color: var(--text-muted); font-weight: 500; }
 
+.error { margin: 0; min-height: 1.25rem; line-height: 1.25rem; }
+.error.is-empty { visibility: hidden; }
+
 .submit { min-height: 3.25rem; font-size: var(--text-base); }
+
+.forgot { align-self: center; }
 </style>

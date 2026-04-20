@@ -6,6 +6,8 @@ export interface LoginResult {
   full_name: string;
   language: string;
   has_pin: boolean;
+  api_key: string;
+  api_secret: string;
 }
 
 export interface PinUnlockResult {
@@ -18,7 +20,14 @@ export interface PinUnlockResult {
 }
 
 export async function login(usr: string, pwd: string): Promise<LoginResult> {
-  return apiCall<LoginResult>("POST", "vansale.api.auth.login", { usr, pwd });
+  const res = await apiCall<LoginResult>("POST", "vansale.api.auth.login", { usr, pwd });
+  // Stash token immediately so native setup_pin/ping/etc. can use
+  // Authorization: token header. On web this is harmless (cookie +
+  // CSRF path still authenticates).
+  if (res.api_key && res.api_secret) {
+    await setCredentials({ apiKey: res.api_key, apiSecret: res.api_secret });
+  }
+  return res;
 }
 
 export async function setupPin(pin: string): Promise<PinUnlockResult> {
