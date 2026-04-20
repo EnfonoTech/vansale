@@ -63,7 +63,7 @@ function signInAgain() {
   <div class="auth-wrap">
     <div class="auth">
       <div class="brand">
-        <div class="brand-mark"><Icon name="truck" :size="36" /></div>
+        <div class="brand-mark"><Icon name="truck" :size="26" /></div>
         <h1>{{ heading }}</h1>
         <p class="muted">{{ hint }}</p>
       </div>
@@ -111,33 +111,38 @@ function signInAgain() {
 </template>
 
 <style scoped>
-/* See LoginView — `svh` + top-anchored layout + reserved error row
-   keep the form stable when the soft keyboard toggles and when the
-   error text appears. */
+/*
+ * See LoginView — viewport-centered compact layout. User feedback:
+ * "2 fields shouldn't scroll". Shrunk brand mark + tightened gaps,
+ * switched to `grid place-items: center` so the card sits mid-screen
+ * with safe-area padding. `svh` prevents jumps when soft keyboard
+ * opens.
+ */
 .auth-wrap {
   min-height: 100svh;
-  display: flex;
-  justify-content: center;
-  padding: 2.5rem 1.5rem calc(1.5rem + env(safe-area-inset-bottom));
-  padding-top: calc(2.5rem + env(safe-area-inset-top));
+  display: grid;
+  place-items: center;
+  padding: calc(1rem + env(safe-area-inset-top)) 1.5rem calc(1rem + env(safe-area-inset-bottom));
+  overflow: hidden;
 }
 .auth {
   width: 100%;
-  max-width: 26rem;
+  max-width: 24rem;
   display: flex;
   flex-direction: column;
-  gap: 1.5rem;
+  gap: 1rem;
 }
-.brand { text-align: center; display: flex; flex-direction: column; align-items: center; gap: 0.4rem; }
+.brand { text-align: center; display: flex; flex-direction: column; align-items: center; gap: 0.25rem; }
 .brand-mark {
-  width: 4rem; height: 4rem;
+  width: 3rem; height: 3rem;
   border-radius: var(--radius-lg);
   background: linear-gradient(135deg, var(--primary) 0%, color-mix(in srgb, var(--primary) 75%, #0f172a) 100%);
   color: var(--primary-ink);
   display: grid; place-items: center;
   box-shadow: var(--shadow-float);
 }
-.brand h1 { margin: 0; }
+.brand h1 { margin: 0; font-size: var(--text-lg); }
+.brand .muted { font-size: var(--text-xs); }
 
 .field { display: flex; flex-direction: column; gap: 0.3rem; }
 .label { font-size: var(--text-sm); color: var(--text-muted); font-weight: 500; }

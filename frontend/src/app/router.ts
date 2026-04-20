@@ -56,6 +56,13 @@ const routes: RouteRecordRaw[] = [
     props: true,
   },
   {
+    path: "/customer/:name/statement",
+    name: "customer-statement",
+    component: () => import("@/views/StatementView.vue"),
+    meta: { requiresAuth: true, requiresPin: true },
+    props: true,
+  },
+  {
     path: "/invoices",
     name: "invoices",
     component: () => import("@/views/InvoiceListView.vue"),
@@ -80,6 +87,12 @@ const routes: RouteRecordRaw[] = [
     component: () => import("@/views/SalesReturnView.vue"),
     meta: { requiresAuth: true, requiresPin: true },
     props: true,
+  },
+  {
+    path: "/returns",
+    name: "returns",
+    component: () => import("@/views/ReturnsListView.vue"),
+    meta: { requiresAuth: true, requiresPin: true },
   },
   {
     path: "/payment/new",
@@ -110,6 +123,13 @@ const routes: RouteRecordRaw[] = [
     name: "more",
     component: () => import("@/views/MoreView.vue"),
     meta: { requiresAuth: true, requiresPin: true },
+  },
+  {
+    path: "/print/:doctype/:name",
+    name: "print-view",
+    component: () => import("@/views/PrintView.vue"),
+    meta: { requiresAuth: true, requiresPin: true },
+    props: true,
   },
 ];
 

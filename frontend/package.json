@@ -22,7 +22,10 @@
     "@capacitor/preferences": "^6.0.0",
     "@capacitor/network": "^6.0.0",
     "@capacitor/splash-screen": "^6.0.0",
-    "@capacitor/status-bar": "^6.0.0"
+    "@capacitor/status-bar": "^6.0.0",
+    "@fontsource-variable/manrope": "^5.0.21",
+    "@fontsource-variable/plus-jakarta-sans": "^5.0.21",
+    "@fontsource/cairo": "^5.0.17"
   },
   "devDependencies": {
     "@types/node": "^20.11.30",

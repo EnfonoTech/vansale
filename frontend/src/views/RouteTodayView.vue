@@ -36,6 +36,11 @@ async function load() {
   }
 }
 
+function openCustomer(name: string) {
+  if (!name) return;
+  void router.push({ name: "customer-detail", params: { name } });
+}
+
 async function onStart(stop: RouteStop) {
   if (!plan.value?.name) return;
   try {
@@ -142,7 +147,12 @@ const pendingCount = computed(() => stops.value.filter((s) => s.status === "pend
 
     <ul v-if="stops.length" class="stops">
       <li v-for="s in stops" :key="s.name" class="stop" :data-status="s.status">
-        <div class="stop-head">
+        <button
+          type="button"
+          class="stop-head link"
+          @click="openCustomer(s.customer)"
+          :aria-label="`Open customer ${s.customer}`"
+        >
           <div class="body">
             <strong class="truncate">{{ s.customer }}</strong>
             <span class="muted xsmall" v-if="s.address">{{ s.address }}</span>
@@ -152,10 +162,15 @@ const pendingCount = computed(() => stops.value.filter((s) => s.status === "pend
             <Icon :name="statusIcon(s.status)" :size="12" />
             {{ s.status }}
           </span>
-        </div>
-        <button v-if="s.status === 'pending'" class="start-btn" @click="onStart(s)">
-          <Icon name="map-pin" :size="16" /> Start visit
         </button>
+        <div class="stop-actions">
+          <button v-if="s.status === 'pending'" class="start-btn" @click="onStart(s)">
+            <Icon name="map-pin" :size="16" /> Start visit
+          </button>
+          <button class="ghost small" @click="openCustomer(s.customer)">
+            <Icon name="customer" :size="14" /> Open
+          </button>
+        </div>
       </li>
     </ul>
 
@@ -222,10 +237,21 @@ const pendingCount = computed(() => stops.value.filter((s) => s.status === "pend
 .stop[data-status="in_progress"] { border-inline-start-color: var(--primary); }
 
 .stop-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 0.75rem; }
+.stop-head.link {
+  all: unset;
+  cursor: pointer;
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 0.75rem;
+}
+.stop-head.link:active { opacity: 0.7; }
 .body { display: flex; flex-direction: column; gap: 0.1rem; min-width: 0; }
 .truncate { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
-.start-btn { align-self: flex-start; min-height: 2.25rem; padding: 0.4rem 0.75rem; font-size: var(--text-sm); }
+.stop-actions { display: flex; gap: 0.4rem; flex-wrap: wrap; }
+.start-btn { min-height: 2.25rem; padding: 0.4rem 0.75rem; font-size: var(--text-sm); }
 
 .active-card {
   background: linear-gradient(135deg, var(--primary-soft) 0%, var(--surface) 100%);

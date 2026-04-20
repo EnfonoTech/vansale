@@ -42,9 +42,9 @@ async function onSubmit() {
   <div class="auth-wrap">
     <div class="auth">
       <div class="brand">
-        <div class="brand-mark"><Icon name="truck" :size="40" /></div>
+        <div class="brand-mark"><Icon name="truck" :size="30" /></div>
         <h1>Van Sale</h1>
-        <p class="muted">Sign in to start your day</p>
+        <p class="muted small">Sign in to start your day</p>
       </div>
 
       <form class="card stack" @submit.prevent="onSubmit">
@@ -94,39 +94,40 @@ async function onSubmit() {
 
 <style scoped>
 /*
- * Use `svh` (smallest viewport height) rather than `dvh` to avoid the
- * "shake" when the Android soft keyboard opens/closes — `dvh` shrinks
- * with the keyboard and re-centers the flex column, so the whole form
- * jumps. `svh` stays at the keyboard-shown height and the page simply
- * scrolls if needed.
- *
- * Also anchor content to the top (no `justify-content: center`) so
- * error-text appearing below the form doesn't drag the card upward.
+ * Viewport-locked layout: fill `100svh` exactly and center the card.
+ * User feedback — "2 fields shouldn't scroll". With the old top-anchored
+ * `min-height` + large brand + 1.75rem gaps, the page spilled below the
+ * fold on mid-sized phones. Now the wrapper is a grid with
+ * `place-items: center` and an `overflow: hidden` so content stays in
+ * one viewport; the brand shrinks, gaps are tight, and safe-area insets
+ * are respected via `padding`. If the soft keyboard opens `svh` stays
+ * put, so the card doesn't jump.
  */
 .auth-wrap {
   min-height: 100svh;
-  display: flex;
-  justify-content: center;
-  padding: 2.5rem 1.5rem calc(1.5rem + env(safe-area-inset-bottom));
-  padding-top: calc(2.5rem + env(safe-area-inset-top));
+  display: grid;
+  place-items: center;
+  padding: calc(1rem + env(safe-area-inset-top)) 1.5rem calc(1rem + env(safe-area-inset-bottom));
+  overflow: hidden;
 }
 .auth {
   width: 100%;
-  max-width: 26rem;
+  max-width: 24rem;
   display: flex;
   flex-direction: column;
-  gap: 1.75rem;
+  gap: 1.1rem;
 }
-.brand { text-align: center; display: flex; flex-direction: column; align-items: center; gap: 0.4rem; }
+.brand { text-align: center; display: flex; flex-direction: column; align-items: center; gap: 0.25rem; }
 .brand-mark {
-  width: 4.5rem; height: 4.5rem;
+  width: 3.25rem; height: 3.25rem;
   border-radius: var(--radius-lg);
   background: linear-gradient(135deg, var(--primary) 0%, color-mix(in srgb, var(--primary) 75%, #0f172a) 100%);
   color: var(--primary-ink);
   display: grid; place-items: center;
   box-shadow: var(--shadow-float);
-  margin-bottom: 0.5rem;
+  margin-bottom: 0.25rem;
 }
+.brand h1 { font-size: var(--text-lg); }
 .brand h1 { margin: 0; }
 
 .field { display: flex; flex-direction: column; gap: 0.3rem; }

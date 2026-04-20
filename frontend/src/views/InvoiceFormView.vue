@@ -26,10 +26,10 @@ import {
 } from "@/api/item";
 import { save, type InvoiceItem } from "@/api/invoice";
 import { ApiError } from "@/app/frappe";
-import { openSalesInvoicePrint } from "@/app/print";
 import { useSessionStore } from "@/stores/session";
 import { useToastStore } from "@/stores/toasts";
 import Icon from "@/components/Icon.vue";
+import SarSymbol from "@/components/SarSymbol.vue";
 
 const router = useRouter();
 const route = useRoute();
@@ -175,16 +175,53 @@ async function doSave(submit: 0 | 1) {
   const flag = submit === 1;
   if (flag) busy.value = true; else savingDraft.value = true;
   try {
+    /*
+     * Split the invoice-level discount across items proportionally by
+     * line amount and stamp each line's `discount_amount`. The backend
+     * then stores discount on every line (per-item traceability) rather
+     * than carrying a floating doc-level discount that disappears into
+     * a tax row. This is what the user means by "split to itemwise" —
+     * each row's discount is visible in the printed invoice and the
+     * ledger.
+     *
+     * Math:
+     *   lineNet_i = qty_i * rate_i * (1 - line_disc_pct_i/100)
+     *   share_i  = docDiscount * lineNet_i / sum(lineNet)
+     *   perUnit  = share_i / qty_i
+     * The last line absorbs any rounding drift so the sum still equals
+     * the docDiscount the operator entered.
+     */
+    const docDisc = Number(discountAmount.value) || 0;
+    const subtotal = lines.value.reduce((s, l) => s + (Number(l.amount) || 0), 0);
+    const perLineExtraDisc: number[] = lines.value.map(() => 0);
+    if (docDisc > 0 && subtotal > 0) {
+      let allocated = 0;
+      lines.value.forEach((l, i) => {
+        const qty = Number(l.qty) || 0;
+        if (qty <= 0) return;
+        const isLast = i === lines.value.length - 1;
+        const share = isLast
+          ? Math.max(0, docDisc - allocated)
+          : docDisc * ((Number(l.amount) || 0) / subtotal);
+        allocated += share;
+        perLineExtraDisc[i] = share / qty;   // discount amount per unit
+      });
+    }
+
     const payload = {
       customer: customer.value,
       warehouse: warehouse.value || undefined,
-      items: lines.value.map<InvoiceItem>((l) => ({
+      items: lines.value.map<InvoiceItem>((l, i) => ({
         item_code: l.item_code,
         item_name: l.item_name,
         qty: l.qty,
         rate: l.rate,
         price_list_rate: l.price_list_rate,
         discount_percentage: l.discount_percentage,
+        // Per-unit discount amount from doc-level split. ERPNext expects
+        // `discount_amount` at item level to be the per-unit amount, not
+        // the line total (hence the /qty above).
+        discount_amount: perLineExtraDisc[i] > 0 ? perLineExtraDisc[i] : undefined,
         uom: l.uom,
         conversion_factor: l.conversion_factor,
         warehouse: l.warehouse,
@@ -194,8 +231,10 @@ async function doSave(submit: 0 | 1) {
       submit,
       payment_type: paymentType.value,
       mode_of_payment: paymentType.value === "cash" ? modeOfPayment.value : undefined,
-      discount_amount: discountAmount.value ?? undefined,
-      apply_discount_on: discountAmount.value ? ("Grand Total" as const) : undefined,
+      // Doc-level discount is now pre-distributed into item-level
+      // discount_amount, so we don't also send the doc discount field.
+      discount_amount: undefined,
+      apply_discount_on: undefined,
     };
     const res = await save(payload);
     toasts.success(
@@ -204,15 +243,16 @@ async function doSave(submit: 0 | 1) {
         : `Invoice ${res.name} ${flag ? "submitted" : "saved as draft"} (${session.currency} ${res.grand_total.toFixed(2)})`,
     );
     lines.value = [];
+    // Always land on the detail view after a successful save/submit so the
+    // user can see the QR, tax breakup and hit Print manually. The old flow
+    // auto-opened a `window.open` print popup (hostile on the Capacitor
+    // WebView — it maps `_blank` to the host browser) and then bounced to
+    // the dashboard on the queued path, which felt like "submit = home".
     if (!res.queued && res.name && !res.name.startsWith("QUEUED")) {
-      // Auto-print popup on submit (PDF §1g). Skip for drafts.
-      // Uses ZATCA Phase 2 Print Format (KSA compliance).
-      if (flag) {
-        openSalesInvoicePrint(res.name, { triggerPrint: true });
-      }
-      setTimeout(() => router.push({ name: "invoice-detail", params: { name: res.name } }), 600);
+      void router.push({ name: "invoice-detail", params: { name: res.name } });
     } else {
-      setTimeout(() => router.push({ name: "dashboard" }), 700);
+      // Queued offline — no real doc name, so the detail page can't resolve.
+      void router.push({ name: "invoices" });
     }
   } catch (e) {
     toasts.error(
@@ -295,7 +335,7 @@ onMounted(loadAll);
       <div class="section-head">
         <h3 style="margin:0">Lines</h3>
         <strong v-if="lines.length > 0" class="tabular">
-          {{ session.currency }} {{ netTotal.toFixed(2) }}
+          <SarSymbol :code="session.currency" />{{ netTotal.toFixed(2) }}
         </strong>
       </div>
       <div v-if="lines.length === 0" class="empty" style="padding:1rem 0">
@@ -337,9 +377,9 @@ onMounted(loadAll);
           </div>
           <div class="line-foot">
             <span v-if="l.price_list_rate && l.price_list_rate !== l.rate" class="muted xsmall">
-              List: {{ session.currency }} {{ (l.price_list_rate || 0).toFixed(2) }}
+              List: <SarSymbol :code="session.currency" />{{ (l.price_list_rate || 0).toFixed(2) }}
             </span>
-            <strong class="tabular">{{ session.currency }} {{ l.amount.toFixed(2) }}</strong>
+            <strong class="tabular"><SarSymbol :code="session.currency" />{{ l.amount.toFixed(2) }}</strong>
           </div>
         </li>
       </ul>
@@ -360,7 +400,7 @@ onMounted(loadAll);
               <div class="muted xsmall">{{ it.item_code }}</div>
             </div>
             <div class="right-col">
-              <strong>{{ session.currency }} {{ (it.standard_rate ?? 0).toFixed(2) }}</strong>
+              <strong><SarSymbol :code="session.currency" />{{ (it.standard_rate ?? 0).toFixed(2) }}</strong>
               <span v-if="typeof it.stock_qty === 'number'" class="pill" data-tone="primary">
                 {{ it.stock_qty }} in stock
               </span>
@@ -374,7 +414,7 @@ onMounted(loadAll);
     <section v-if="lines.length > 0" class="card stack totals">
       <div class="tot-row">
         <span>Net total</span>
-        <span class="tabular">{{ session.currency }} {{ netTotal.toFixed(2) }}</span>
+        <span class="tabular"><SarSymbol :code="session.currency" />{{ netTotal.toFixed(2) }}</span>
       </div>
       <label class="field">
         <span class="tiny">Invoice discount ({{ session.currency }})</span>
@@ -382,11 +422,11 @@ onMounted(loadAll);
       </label>
       <div class="tot-row muted">
         <span>VAT ({{ (TAX_RATE * 100).toFixed(0) }}%)</span>
-        <span class="tabular">{{ session.currency }} {{ taxTotal.toFixed(2) }}</span>
+        <span class="tabular"><SarSymbol :code="session.currency" />{{ taxTotal.toFixed(2) }}</span>
       </div>
       <div class="tot-row grand">
         <span>Grand total</span>
-        <span class="tabular">{{ session.currency }} {{ grandTotal.toFixed(2) }}</span>
+        <span class="tabular"><SarSymbol :code="session.currency" />{{ grandTotal.toFixed(2) }}</span>
       </div>
       <p class="muted xsmall">Final tax breakup computed by server on save.</p>
     </section>

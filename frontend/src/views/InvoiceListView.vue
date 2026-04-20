@@ -4,6 +4,7 @@ import { useRouter } from "vue-router";
 import { listMine } from "@/api/invoice";
 import { useSessionStore } from "@/stores/session";
 import Icon from "@/components/Icon.vue";
+import SarSymbol from "@/components/SarSymbol.vue";
 
 const router = useRouter();
 const session = useSessionStore();
@@ -70,7 +71,7 @@ function tone(status: unknown): string {
           <span class="muted xsmall">{{ r.name }} · {{ r.posting_date }}</span>
         </div>
         <div class="right">
-          <strong>{{ session.currency }} {{ fmt(r.grand_total) }}</strong>
+          <strong><SarSymbol :code="session.currency" />{{ fmt(r.grand_total) }}</strong>
           <span class="pill" :data-tone="tone(r.status)">{{ r.status }}</span>
         </div>
       </li>

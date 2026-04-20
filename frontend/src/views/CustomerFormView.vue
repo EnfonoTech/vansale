@@ -35,13 +35,21 @@ const city = ref("");
 const stateField = ref("");
 const pincode = ref("");
 const country = ref("");
+// KSA ZATCA Phase 2 — building number is mandatory on B2B addresses.
+const buildingNumber = ref("");
+const additionalNumber = ref("");
+const district = ref("");
 
 const busy = ref(false);
 
 const isB2B = computed(() => customerType.value === "b2b");
 const canSubmit = computed(() => {
   if (!customerName.value.trim()) return false;
-  if (isB2B.value && (!addressLine1.value.trim() || !city.value.trim())) return false;
+  if (isB2B.value) {
+    if (!addressLine1.value.trim()) return false;
+    if (!city.value.trim()) return false;
+    if (!buildingNumber.value.trim()) return false;
+  }
   return true;
 });
 
@@ -63,6 +71,9 @@ async function submit() {
       state: stateField.value || undefined,
       pincode: pincode.value || undefined,
       country: country.value || undefined,
+      building_number: buildingNumber.value || undefined,
+      additional_number: additionalNumber.value || undefined,
+      district: district.value || undefined,
     });
     toasts.success(`Customer ${res.customer_name} created`);
     if (redirectTo === "invoice") {
@@ -122,11 +133,32 @@ async function submit() {
     <section class="card stack">
       <div class="row-head">
         <h3 style="margin:0">Address</h3>
-        <span v-if="isB2B" class="pill" data-tone="warning">Required for B2B</span>
+        <span v-if="isB2B" class="pill" data-tone="warning">Required for B2B · ZATCA</span>
         <span v-else class="muted xsmall">Optional</span>
       </div>
+      <!--
+        KSA ZATCA Phase 2 building number is 4 digits and appears before
+        address line 1 on the printed invoice. We keep the 4-char maxlength
+        as a soft nudge; strict validation happens server-side.
+      -->
+      <div class="two-col">
+        <label class="field">
+          <span class="tiny">Building no. {{ isB2B ? "*" : "" }}</span>
+          <input
+            type="text"
+            v-model="buildingNumber"
+            inputmode="numeric"
+            maxlength="4"
+            placeholder="4-digit"
+          />
+        </label>
+        <label class="field">
+          <span class="tiny">Additional no.</span>
+          <input type="text" v-model="additionalNumber" inputmode="numeric" maxlength="4" />
+        </label>
+      </div>
       <label class="field">
-        <span class="tiny">Address line 1 {{ isB2B ? "*" : "" }}</span>
+        <span class="tiny">Address line 1 (street) {{ isB2B ? "*" : "" }}</span>
         <input type="text" v-model="addressLine1" />
       </label>
       <label class="field">
@@ -135,24 +167,28 @@ async function submit() {
       </label>
       <div class="two-col">
         <label class="field">
+          <span class="tiny">District</span>
+          <input type="text" v-model="district" />
+        </label>
+        <label class="field">
           <span class="tiny">City {{ isB2B ? "*" : "" }}</span>
           <input type="text" v-model="city" />
+        </label>
+      </div>
+      <div class="two-col">
+        <label class="field">
+          <span class="tiny">Pincode</span>
+          <input type="text" v-model="pincode" inputmode="numeric" maxlength="5" />
         </label>
         <label class="field">
           <span class="tiny">State / Region</span>
           <input type="text" v-model="stateField" />
         </label>
       </div>
-      <div class="two-col">
-        <label class="field">
-          <span class="tiny">Pincode</span>
-          <input type="text" v-model="pincode" inputmode="numeric" />
-        </label>
-        <label class="field">
-          <span class="tiny">Country</span>
-          <input type="text" v-model="country" placeholder="Saudi Arabia" />
-        </label>
-      </div>
+      <label class="field">
+        <span class="tiny">Country</span>
+        <input type="text" v-model="country" placeholder="Saudi Arabia" />
+      </label>
     </section>
 
     <button class="submit" type="button" :disabled="!canSubmit || busy" @click="submit">

@@ -1,18 +1,22 @@
 <script setup lang="ts">
 import { onMounted, ref, computed } from "vue";
 import { useRoute, useRouter } from "vue-router";
-import { detail, type InvoiceDetail } from "@/api/invoice";
-import { openSalesInvoicePrint } from "@/app/print";
+import { detail, submitDraft, deleteDraft, type InvoiceDetail } from "@/api/invoice";
 import { useSessionStore } from "@/stores/session";
+import { useToastStore } from "@/stores/toasts";
+import { ApiError } from "@/app/frappe";
 import Icon from "@/components/Icon.vue";
+import SarSymbol from "@/components/SarSymbol.vue";
 
 const route = useRoute();
 const router = useRouter();
 const session = useSessionStore();
+const toasts = useToastStore();
 
 const inv = ref<InvoiceDetail | null>(null);
 const loading = ref(false);
 const err = ref("");
+const busy = ref(false);
 
 const name = computed(() => String(route.params.name ?? ""));
 
@@ -54,13 +58,65 @@ function payHere() {
 
 function printInvoice() {
   if (!inv.value) return;
-  // ZATCA Phase 2 Print Format (KSA compliance) — embeds signed QR.
-  openSalesInvoicePrint(inv.value.name);
+  // In-app PrintView fetches HTML via `frappe.client.get_print` and
+  // renders it inside a sandboxed iframe; works on native + web.
+  // ZATCA Phase 2 format "Vansale Tax Invoice" is the default.
+  void router.push({
+    name: "print-view",
+    params: { doctype: "Sales Invoice", name: inv.value.name },
+  });
 }
 
 function returnInvoice() {
   if (!inv.value) return;
   void router.push({ name: "invoice-return", params: { name: inv.value.name } });
+}
+
+/**
+ * Draft-stage actions.
+ * - Submit flips docstatus 0 → 1 (posts stock, opens outstanding).
+ * - Delete removes the draft entirely (only safe while docstatus === 0).
+ *
+ * Both go through Frappe's generic whitelisted helpers (`frappe.client.submit`
+ * / `frappe.client.delete`) — the app's custom `vansale.api.invoice` module
+ * doesn't expose a submit endpoint, and adding one would require a server
+ * deploy. These generic endpoints respect the doctype permissions and
+ * validations set in ERPNext, so there's no perms bypass.
+ */
+async function submitInvoice() {
+  if (!inv.value || busy.value) return;
+  busy.value = true;
+  try {
+    await submitDraft(inv.value.name);
+    toasts.success(`Submitted ${inv.value.name}`);
+    await load();
+  } catch (e) {
+    toasts.error(
+      e instanceof ApiError ? e.serverMessage ?? e.message
+        : e instanceof Error ? e.message : String(e),
+    );
+  } finally {
+    busy.value = false;
+  }
+}
+
+async function deleteInvoice() {
+  if (!inv.value || busy.value) return;
+  // eslint-disable-next-line no-alert
+  if (!confirm(`Delete draft ${inv.value.name}? This cannot be undone.`)) return;
+  busy.value = true;
+  try {
+    await deleteDraft(inv.value.name);
+    toasts.success("Draft deleted");
+    void router.replace({ name: "invoices" });
+  } catch (e) {
+    toasts.error(
+      e instanceof ApiError ? e.serverMessage ?? e.message
+        : e instanceof Error ? e.message : String(e),
+    );
+  } finally {
+    busy.value = false;
+  }
 }
 </script>
 
@@ -86,31 +142,47 @@ function returnInvoice() {
         <div class="hero-total">
           <div>
             <span class="muted xsmall">Grand total</span>
-            <strong class="big">{{ session.currency }} {{ fmt(inv.grand_total) }}</strong>
+            <strong class="big"><SarSymbol :code="session.currency" />{{ fmt(inv.grand_total) }}</strong>
           </div>
           <div class="hero-sub">
             <span class="muted xsmall">Outstanding</span>
-            <strong :class="inv.outstanding_amount > 0 ? 'warn' : ''">{{ session.currency }} {{ fmt(inv.outstanding_amount) }}</strong>
+            <strong :class="inv.outstanding_amount > 0 ? 'warn' : ''"><SarSymbol :code="session.currency" />{{ fmt(inv.outstanding_amount) }}</strong>
           </div>
         </div>
         <div class="row actions">
-          <button
-            v-if="inv.outstanding_amount > 0 && inv.docstatus === 1"
-            class="primary"
-            @click="payHere"
-          >
-            <Icon name="payment" :size="16" /> Collect
-          </button>
-          <button class="ghost" @click="printInvoice">
-            <Icon name="receipt" :size="16" /> Print
-          </button>
-          <button
-            v-if="inv.docstatus === 1 && !inv.is_return"
-            class="ghost"
-            @click="returnInvoice"
-          >
-            <Icon name="x" :size="16" /> Return
-          </button>
+          <!-- Draft stage: submit or delete. Print is also allowed
+               (useful to preview the invoice before committing stock). -->
+          <template v-if="inv.docstatus === 0">
+            <button class="primary" :disabled="busy" @click="submitInvoice">
+              <Icon name="check" :size="16" /> {{ busy ? "Submitting…" : "Submit" }}
+            </button>
+            <button class="ghost" :disabled="busy" @click="printInvoice">
+              <Icon name="receipt" :size="16" /> Print
+            </button>
+            <button class="ghost danger-ghost" :disabled="busy" @click="deleteInvoice">
+              <Icon name="trash" :size="16" /> Delete
+            </button>
+          </template>
+          <!-- Submitted stage: collect payment, print, return. -->
+          <template v-else>
+            <button
+              v-if="inv.outstanding_amount > 0 && inv.docstatus === 1"
+              class="primary"
+              @click="payHere"
+            >
+              <Icon name="payment" :size="16" /> Collect
+            </button>
+            <button class="ghost" @click="printInvoice">
+              <Icon name="receipt" :size="16" /> Print
+            </button>
+            <button
+              v-if="inv.docstatus === 1 && !inv.is_return"
+              class="ghost"
+              @click="returnInvoice"
+            >
+              <Icon name="x" :size="16" /> Return
+            </button>
+          </template>
         </div>
       </section>
 
@@ -120,12 +192,12 @@ function returnInvoice() {
           <li v-for="(it, i) in inv.items" :key="i" class="line">
             <div class="line-head">
               <strong class="truncate">{{ it.item_name }}</strong>
-              <strong class="amt">{{ session.currency }} {{ fmt(it.amount) }}</strong>
+              <strong class="amt"><SarSymbol :code="session.currency" />{{ fmt(it.amount) }}</strong>
             </div>
             <div class="line-meta muted xsmall">
               <span>{{ fmt(it.qty) }} {{ it.uom || "" }}</span>
               <span>×</span>
-              <span>{{ session.currency }} {{ fmt(it.rate) }}</span>
+              <span><SarSymbol :code="session.currency" />{{ fmt(it.rate) }}</span>
               <span v-if="it.discount_percentage > 0" class="disc">- {{ fmt(it.discount_percentage) }}%</span>
             </div>
           </li>
@@ -134,29 +206,29 @@ function returnInvoice() {
 
       <section class="card stack">
         <h3 class="section-h">Totals</h3>
-        <div class="totals-row"><span class="muted">Net total</span><span>{{ session.currency }} {{ fmt(inv.net_total) }}</span></div>
+        <div class="totals-row"><span class="muted">Net total</span><span><SarSymbol :code="session.currency" />{{ fmt(inv.net_total) }}</span></div>
         <div v-if="inv.discount_amount > 0" class="totals-row">
-          <span class="muted">Discount</span><span>- {{ session.currency }} {{ fmt(inv.discount_amount) }}</span>
+          <span class="muted">Discount</span><span>- <SarSymbol :code="session.currency" />{{ fmt(inv.discount_amount) }}</span>
         </div>
         <template v-if="inv.taxes.length">
           <div class="divider" />
           <div v-for="(t, i) in inv.taxes" :key="i" class="totals-row">
             <span class="muted">{{ t.description }} ({{ fmt(t.rate) }}%)</span>
-            <span>{{ session.currency }} {{ fmt(t.tax_amount) }}</span>
+            <span><SarSymbol :code="session.currency" />{{ fmt(t.tax_amount) }}</span>
           </div>
         </template>
         <div class="divider" />
         <div class="totals-row big-row">
           <strong>Grand total</strong>
-          <strong>{{ session.currency }} {{ fmt(inv.grand_total) }}</strong>
+          <strong><SarSymbol :code="session.currency" />{{ fmt(inv.grand_total) }}</strong>
         </div>
         <div class="totals-row">
           <span class="muted">Paid</span>
-          <span>{{ session.currency }} {{ fmt(inv.paid_amount) }}</span>
+          <span><SarSymbol :code="session.currency" />{{ fmt(inv.paid_amount) }}</span>
         </div>
         <div class="totals-row">
           <span class="muted">Outstanding</span>
-          <strong :class="inv.outstanding_amount > 0 ? 'warn' : ''">{{ session.currency }} {{ fmt(inv.outstanding_amount) }}</strong>
+          <strong :class="inv.outstanding_amount > 0 ? 'warn' : ''"><SarSymbol :code="session.currency" />{{ fmt(inv.outstanding_amount) }}</strong>
         </div>
       </section>
 
@@ -192,8 +264,10 @@ function returnInvoice() {
 .hero-total .big { display: block; font-size: var(--text-2xl); font-variant-numeric: tabular-nums; }
 .hero-sub { text-align: right; }
 .warn { color: var(--warning); }
-.actions { display: flex; gap: 0.5rem; }
-.actions button { flex: 1; min-height: 2.75rem; justify-content: center; }
+.actions { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+.actions button { flex: 1 1 7rem; min-height: 2.75rem; justify-content: center; }
+.danger-ghost { color: var(--danger); }
+.danger-ghost:hover { background: var(--danger-soft); }
 
 .section-h { margin: 0 0 0.1rem; font-size: var(--text-sm); color: var(--text-muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; }
 

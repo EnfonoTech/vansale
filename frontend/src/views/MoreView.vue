@@ -5,6 +5,7 @@ import { useSessionStore } from "@/stores/session";
 import { logout } from "@/api/auth";
 import { useSyncStore } from "@/stores/sync";
 import Icon from "@/components/Icon.vue";
+import SarSymbol from "@/components/SarSymbol.vue";
 
 const router = useRouter();
 const session = useSessionStore();
@@ -27,22 +28,27 @@ async function onLogout() {
 }
 
 interface Link {
-  icon: "customer" | "stock" | "sync" | "refresh" | "truck";
+  icon: "customer" | "stock" | "sync" | "refresh" | "truck" | "invoice" | "receipt" | "plus";
   label: string;
   sub?: string;
   to: string;
+  tone?: "primary" | "success" | "warning" | "danger";
   badge?: number | null;
 }
 
 const links = computed<Link[]>(() => [
+  { icon: "plus", label: "New invoice", sub: "Start a sale", to: "invoice-new", tone: "primary" },
+  { icon: "invoice", label: "All invoices", sub: "Browse submitted & drafts", to: "invoices" },
+  { icon: "receipt", label: "Returns", sub: "Credit notes against invoices", to: "returns", tone: "warning" },
   { icon: "customer", label: "Customers", sub: "Browse & create", to: "customers" },
-  { icon: "stock", label: "Van stock", sub: "Current warehouse", to: "van-stock" },
-  { icon: "truck", label: "Today's route", to: "route-today" },
+  { icon: "stock", label: "Van stock", sub: "Current warehouse", to: "van-stock", tone: "success" },
+  { icon: "truck", label: "Today's route", sub: "Stops, visits, signatures", to: "route-today" },
   {
     icon: "sync",
     label: "Sync errors",
     sub: sync.pending > 0 ? `${sync.pending} pending` : sync.lastError ?? "All clear",
     to: "sync-errors",
+    tone: sync.pending > 0 || sync.lastError ? "danger" : undefined,
     badge: sync.pending > 0 ? sync.pending : null,
   },
 ]);
@@ -76,7 +82,7 @@ const links = computed<Link[]>(() => [
           @click="router.push({ name: l.to })"
           @keyup.enter="router.push({ name: l.to })"
         >
-          <Icon :name="l.icon" :size="18" class="link-icon" />
+          <Icon :name="l.icon" :size="18" class="link-icon" :data-tone="l.tone" />
           <div class="link-body">
             <strong>{{ l.label }}</strong>
             <span v-if="l.sub" class="muted xsmall">{{ l.sub }}</span>
@@ -99,7 +105,7 @@ const links = computed<Link[]>(() => [
       </div>
       <div class="meta-row">
         <span class="muted">Currency</span>
-        <span>{{ session.currency }}</span>
+        <span><SarSymbol :code="session.currency" /> {{ session.currency }}</span>
       </div>
     </section>
 
@@ -174,6 +180,9 @@ const links = computed<Link[]>(() => [
   border-radius: var(--radius-sm);
   box-sizing: content-box;
 }
+.link-icon[data-tone="success"] { background: var(--success-soft); color: var(--success); }
+.link-icon[data-tone="warning"] { background: var(--warning-soft); color: var(--warning); }
+.link-icon[data-tone="danger"] { background: var(--danger-soft); color: var(--danger); }
 .link-body { display: flex; flex-direction: column; gap: 0.05rem; min-width: 0; }
 .chev { color: var(--text-muted); }
 

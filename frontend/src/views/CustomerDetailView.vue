@@ -5,6 +5,7 @@ import { detail, type CustomerDetail } from "@/api/customer";
 import { listMine as listInvoices } from "@/api/invoice";
 import { useSessionStore } from "@/stores/session";
 import Icon from "@/components/Icon.vue";
+import SarSymbol from "@/components/SarSymbol.vue";
 
 const route = useRoute();
 const router = useRouter();
@@ -51,8 +52,11 @@ function openInvoice(name: string) {
   void router.push({ name: "invoice-detail", params: { name } });
 }
 function printStatement() {
-  const url = `/api/method/vansale.api.customer.statement_html?name=${encodeURIComponent(customerName)}`;
-  window.open(url, "_blank", "noopener,noreferrer");
+  // Navigate in-app rather than `window.open`. On native the WebView lives at
+  // `https://localhost`, so a relative `/api/method/...` URL doesn't cross
+  // over to the Frappe site. The StatementView fetches through `apiCall`
+  // (same auth path as everything else) and offers its own Print button.
+  void router.push({ name: "customer-statement", params: { name: customerName } });
 }
 </script>
 
@@ -93,7 +97,7 @@ function printStatement() {
 
       <section class="card outstanding" :data-positive="customer.outstanding > 0">
         <span class="muted xsmall">Outstanding</span>
-        <strong>{{ session.currency }} {{ fmt(customer.outstanding) }}</strong>
+        <strong><SarSymbol :code="session.currency" />{{ fmt(customer.outstanding) }}</strong>
       </section>
 
       <section class="actions-row">

@@ -32,6 +32,24 @@ export async function detail(name: string): Promise<CustomerDetail> {
   );
 }
 
+export interface StatementPayload {
+  html: string;
+}
+
+export async function statement(
+  name: string,
+  fromDate?: string,
+  toDate?: string,
+): Promise<StatementPayload> {
+  const qs = new URLSearchParams({ name });
+  if (fromDate) qs.set("from_date", fromDate);
+  if (toDate) qs.set("to_date", toDate);
+  return apiCall<StatementPayload>(
+    "GET",
+    `vansale.api.customer.statement_json?${qs.toString()}`,
+  );
+}
+
 export interface CustomerCreatePayload {
   customer_name: string;
   customer_type?: "b2b" | "b2c";
@@ -46,6 +64,10 @@ export interface CustomerCreatePayload {
   state?: string;
   pincode?: string;
   country?: string;
+  /** KSA ZATCA Phase 2: mandatory for B2B. */
+  building_number?: string;
+  additional_number?: string;
+  district?: string;
 }
 
 export interface CustomerCreateResult {

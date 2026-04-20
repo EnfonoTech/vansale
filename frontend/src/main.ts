@@ -5,8 +5,18 @@ import { router } from "./app/router";
 import { i18n, setLocale } from "./app/i18n";
 import { isNative } from "./app/platform";
 
+// Bundled web fonts — self-hosted so the Capacitor APK stays fully offline.
+// `@fontsource-variable/*` ships a single woff2 with the whole weight axis
+// which is cheaper than loading 4–5 static weights.
+import "@fontsource-variable/plus-jakarta-sans";
+import "@fontsource-variable/manrope";
+import "@fontsource/cairo/400.css";
+import "@fontsource/cairo/600.css";
+import "@fontsource/cairo/700.css";
+
 import "./styles/tokens.css";
 import "./styles/base.css";
+import "./styles/saudi-riyal.css";
 
 const app = createApp(App);
 app.use(createPinia());

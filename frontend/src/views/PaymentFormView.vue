@@ -7,6 +7,7 @@ import { ApiError } from "@/app/frappe";
 import { useSessionStore } from "@/stores/session";
 import { useToastStore } from "@/stores/toasts";
 import Icon from "@/components/Icon.vue";
+import SarSymbol from "@/components/SarSymbol.vue";
 
 const router = useRouter();
 const route = useRoute();
@@ -142,7 +143,7 @@ async function submit() {
       <div class="row-head">
         <h3 style="margin:0">Outstanding invoices</h3>
         <span class="muted xsmall">
-          Total {{ session.currency }} {{ fmt(totalOutstanding) }}
+          Total <SarSymbol :code="session.currency" />{{ fmt(totalOutstanding) }}
         </span>
       </div>
       <div class="bulk">
@@ -178,7 +179,7 @@ async function submit() {
               </div>
             </div>
             <div class="amt">
-              <strong>{{ session.currency }} {{ fmt(r.outstanding_amount) }}</strong>
+              <strong><SarSymbol :code="session.currency" />{{ fmt(r.outstanding_amount) }}</strong>
               <span class="muted xsmall">of {{ fmt(r.grand_total) }}</span>
             </div>
           </button>
@@ -197,7 +198,7 @@ async function submit() {
       <label class="field">
         <span class="label">Amount</span>
         <div class="amount-input">
-          <span class="amount-currency">{{ session.currency }}</span>
+          <span class="amount-currency"><SarSymbol :code="session.currency" /></span>
           <input
             type="number"
             min="0"

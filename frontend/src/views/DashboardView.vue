@@ -11,6 +11,7 @@ import {
   type ActivityRow,
 } from "@/api/dashboard";
 import Icon from "@/components/Icon.vue";
+import SarSymbol from "@/components/SarSymbol.vue";
 
 const router = useRouter();
 const session = useSessionStore();
@@ -88,7 +89,7 @@ function onActivityClick(row: ActivityRow) {
     <section class="hero">
       <div class="hero-row">
         <span class="muted xsmall">Today's sales</span>
-        <span class="hero-currency">{{ currency }}</span>
+        <span class="hero-currency"><SarSymbol :code="currency" /></span>
       </div>
       <div class="hero-amount">
         <span v-if="loading && !sales" class="skeleton" style="height:2.5rem;width:60%"></span>
@@ -101,11 +102,11 @@ function onActivityClick(row: ActivityRow) {
         </span>
         <span class="pill" data-tone="success">
           <Icon name="payment" :size="14" />
-          {{ currency }} {{ fmt(collection?.amount) }} collected
+          <SarSymbol :code="currency" />{{ fmt(collection?.amount) }} collected
         </span>
         <span v-if="(sales?.returned ?? 0) > 0" class="pill" data-tone="warning">
           <Icon name="refresh" :size="14" />
-          {{ currency }} {{ fmt(sales?.returned) }} returned
+          <SarSymbol :code="currency" />{{ fmt(sales?.returned) }} returned
         </span>
       </div>
     </section>

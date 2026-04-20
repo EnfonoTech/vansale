@@ -49,6 +49,28 @@ export async function listMine(limit = 50, customer?: string): Promise<Array<Rec
   return apiCall("GET", `vansale.api.invoice.list_mine?${qs.toString()}`);
 }
 
+export interface ReturnRow {
+  name: string;
+  customer: string;
+  customer_name: string;
+  grand_total: number;
+  status: string;
+  posting_date: string | null;
+  posting_time: string | null;
+  is_return: number;
+  return_against: string | null;
+  modified: string | null;
+}
+
+/** List sales returns (credit notes) — always includes `return_against`. */
+export async function listReturns(limit = 50, customer?: string): Promise<ReturnRow[]> {
+  const qs = new URLSearchParams();
+  qs.set("limit", String(limit));
+  qs.set("is_return", "1");
+  if (customer) qs.set("customer", customer);
+  return apiCall<ReturnRow[]>("GET", `vansale.api.invoice.list_mine?${qs.toString()}`);
+}
+
 export interface InvoiceDetailTax {
   description: string;
   rate: number;
@@ -104,6 +126,37 @@ export async function detail(name: string): Promise<InvoiceDetail> {
     "GET",
     `vansale.api.invoice.detail?name=${encodeURIComponent(name)}`,
   );
+}
+
+/**
+ * Submit an existing draft Sales Invoice.
+ *
+ * Uses the generic `frappe.client.submit` which is whitelisted for
+ * submitable doctypes in Frappe v15 and works regardless of whether
+ * the custom `vansale.api.invoice` module exposes a submit helper.
+ *
+ * Server accepts either the doc dict or just `{doctype, name}`. We send
+ * the minimal shape so we don't have to round-trip the full doc.
+ */
+export async function submitDraft(name: string): Promise<void> {
+  await apiCall("POST", "frappe.client.submit", {
+    doc: { doctype: "Sales Invoice", name },
+  });
+  const sync = useSyncStore();
+  void sync.refresh();
+}
+
+/**
+ * Delete a draft Sales Invoice. Only allowed when `docstatus === 0`
+ * (Frappe enforces this server-side). Uses `frappe.client.delete`.
+ */
+export async function deleteDraft(name: string): Promise<void> {
+  await apiCall("POST", "frappe.client.delete", {
+    doctype: "Sales Invoice",
+    name,
+  });
+  const sync = useSyncStore();
+  void sync.refresh();
 }
 
 export interface ReturnLine {

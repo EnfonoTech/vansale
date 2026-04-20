@@ -15,13 +15,64 @@ const online = useOnline();
 const TITLES: Record<string, string> = {
   dashboard: "Home",
   customers: "Customers",
+  "customer-new": "New customer",
   "customer-detail": "Customer",
+  "customer-statement": "Statement",
   invoices: "Invoices",
   "invoice-new": "New invoice",
+  "invoice-detail": "Invoice",
+  "invoice-return": "Sales return",
+  returns: "Returns",
   "payment-new": "Collect payment",
   "route-today": "Today's route",
   "van-stock": "Van stock",
   "sync-errors": "Sync errors",
+  more: "More",
+  "print-view": "Print",
+};
+
+/**
+ * Hierarchical back: each screen declares its parent so tapping
+ * the top-bar back arrow walks UP the tree, not along raw browser
+ * history. Detail → list → home. For screens that need to pass
+ * params back to the parent (e.g. statement → customer-detail),
+ * the mapper receives the current route params.
+ *
+ * Screens not in this map fall through to `router.back()` or home.
+ */
+type RouteTarget = { name: string; params?: Record<string, string> };
+type RouteLike = { name?: string; params?: Record<string, unknown> };
+const PARENTS: Record<string, (r: RouteLike) => RouteTarget> = {
+  customers: () => ({ name: "dashboard" }),
+  invoices: () => ({ name: "dashboard" }),
+  returns: () => ({ name: "dashboard" }),
+  "route-today": () => ({ name: "dashboard" }),
+  "van-stock": () => ({ name: "dashboard" }),
+  more: () => ({ name: "dashboard" }),
+  "customer-new": () => ({ name: "customers" }),
+  "customer-detail": () => ({ name: "customers" }),
+  "customer-statement": (r) => ({
+    name: "customer-detail",
+    params: { name: String(r.params?.name ?? "") },
+  }),
+  "invoice-new": () => ({ name: "invoices" }),
+  "invoice-detail": () => ({ name: "invoices" }),
+  "invoice-return": (r) => ({
+    name: "invoice-detail",
+    params: { name: String(r.params?.name ?? "") },
+  }),
+  "payment-new": () => ({ name: "dashboard" }),
+  "sync-errors": () => ({ name: "more" }),
+  "print-view": (r) => {
+    // Print is launched from invoice detail or statement.
+    // Default back to invoice-detail when we have the invoice name.
+    const dt = String(r.params?.doctype ?? "");
+    const nm = String(r.params?.name ?? "");
+    if (dt === "Sales Invoice" && nm) {
+      return { name: "invoice-detail", params: { name: nm } };
+    }
+    return { name: "dashboard" };
+  },
 };
 
 const title = computed(() => TITLES[String(route.name ?? "")] ?? "Van Sale");
@@ -37,7 +88,17 @@ const subtitle = computed(() => {
 
 const showBack = computed(() => {
   const r = String(route.name ?? "");
-  return ["customer-detail", "invoice-new", "payment-new", "sync-errors"].includes(r);
+  return [
+    "customer-new",
+    "customer-detail",
+    "customer-statement",
+    "invoice-new",
+    "invoice-detail",
+    "invoice-return",
+    "payment-new",
+    "sync-errors",
+    "print-view",
+  ].includes(r);
 });
 
 const showSync = computed(() => {
@@ -53,6 +114,12 @@ const syncTone = computed(() => {
 });
 
 function onBack() {
+  const rn = String(route.name ?? "");
+  const parent = PARENTS[rn];
+  if (parent) {
+    void router.push(parent({ name: rn, params: route.params as Record<string, unknown> }));
+    return;
+  }
   router.back();
 }
 

@@ -17,10 +17,10 @@ import {
   type InvoiceDetailItem,
 } from "@/api/invoice";
 import { ApiError } from "@/app/frappe";
-import { openSalesInvoicePrint } from "@/app/print";
 import { useSessionStore } from "@/stores/session";
 import { useToastStore } from "@/stores/toasts";
 import Icon from "@/components/Icon.vue";
+import SarSymbol from "@/components/SarSymbol.vue";
 
 interface ReturnRowState {
   include: boolean;
@@ -118,9 +118,12 @@ async function submit() {
       submit: 1,
     });
     toasts.success(`Credit Note ${res.name} · ${session.currency} ${Math.abs(res.grand_total).toFixed(2)}`);
-    // Auto-open print for the credit note — same ZATCA format handles is_return.
-    openSalesInvoicePrint(res.name, { triggerPrint: true });
-    setTimeout(() => router.push({ name: "invoice-detail", params: { name: res.name } }), 700);
+    // Route to in-app print view — same ZATCA format handles is_return.
+    // Native WebView can't open the server /printview route directly.
+    void router.push({
+      name: "print-view",
+      params: { doctype: "Sales Invoice", name: res.name },
+    });
   } catch (e) {
     toasts.error(
       e instanceof ApiError ? e.serverMessage ?? e.message
@@ -148,7 +151,7 @@ async function submit() {
         </div>
         <div class="grand-row">
           <span class="muted">Original grand total</span>
-          <strong>{{ session.currency }} {{ fmt(orig.grand_total) }}</strong>
+          <strong><SarSymbol :code="session.currency" />{{ fmt(orig.grand_total) }}</strong>
         </div>
       </section>
 
@@ -169,9 +172,9 @@ async function submit() {
               />
               <div class="head-body">
                 <strong class="truncate">{{ it.item_name }}</strong>
-                <span class="muted xsmall">{{ it.item_code }} · {{ it.uom || "" }} · {{ session.currency }} {{ fmt(it.rate) }}</span>
+                <span class="muted xsmall">{{ it.item_code }} · {{ it.uom || "" }} · <SarSymbol :code="session.currency" />{{ fmt(it.rate) }}</span>
               </div>
-              <strong class="line-amt">{{ session.currency }} {{ fmt(it.amount) }}</strong>
+              <strong class="line-amt"><SarSymbol :code="session.currency" />{{ fmt(it.amount) }}</strong>
             </label>
             <div v-if="rows[i]?.include" class="line-grid">
               <label>
@@ -206,7 +209,7 @@ async function submit() {
         </div>
         <div class="tot-row grand">
           <span>Estimated credit (net)</span>
-          <strong>{{ session.currency }} {{ fmt(estTotal) }}</strong>
+          <strong><SarSymbol :code="session.currency" />{{ fmt(estTotal) }}</strong>
         </div>
         <p class="muted xsmall">Final VAT breakup computed on save.</p>
       </section>

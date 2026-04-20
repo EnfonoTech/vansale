@@ -1,0 +1,49 @@
+/*
+ * Saudi Riyal Font — upstream:
+ *   https://github.com/emran-alhaddad/Saudi-Riyal-Font (OFL-1.1)
+ *
+ * Two weights (regular + bold) ship as self-hosted woff2/woff under
+ * `src/assets/fonts/saudi-riyal/`. The font maps the Riyal glyph to
+ * both U+20C1 (official Unicode 17 code point) and U+E900 (legacy
+ * private-use fallback). We reference by U+20C1 for future-proofing
+ * and let the font supply the glyph until the OS does.
+ *
+ * Usage: wrap any occurrence with <span class="sar"/> or use the
+ * `<SarSymbol/>` component which encodes the character + class.
+ */
+@font-face {
+  font-family: "Saudi Riyal";
+  src:
+    url("@/assets/fonts/saudi-riyal/saudi_riyal.woff2") format("woff2"),
+    url("@/assets/fonts/saudi-riyal/saudi_riyal.woff") format("woff");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Saudi Riyal";
+  src:
+    url("@/assets/fonts/saudi-riyal/saudi_riyal_bold.woff2") format("woff2"),
+    url("@/assets/fonts/saudi-riyal/saudi_riyal_bold.woff") format("woff");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+/*
+ * Inline currency marker. The font glyph has its own vertical metrics
+ * (slightly shorter than Latin digits) so we nudge it a hair downward
+ * so "﷼ 123.45" aligns the baseline visually. `font-feature-settings`
+ * is reset because the display font's ss01/cv11 would otherwise turn
+ * the symbol into the wrong shape.
+ */
+.sar {
+  font-family: "Saudi Riyal", "Segoe UI Symbol", sans-serif;
+  font-feature-settings: normal;
+  font-variant-numeric: normal;
+  display: inline-block;
+  line-height: 1;
+  transform: translateY(0.05em);
+  margin-inline-end: 0.18em;
+}
