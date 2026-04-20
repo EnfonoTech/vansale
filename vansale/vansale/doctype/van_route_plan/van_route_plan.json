@@ -8,6 +8,11 @@
   "user",
   "plan_date",
   "warehouse",
+  "frequency_section",
+  "frequency",
+  "days_of_week",
+  "interval_days",
+  "valid_until",
   "notes",
   "stops"
  ],
@@ -34,6 +39,40 @@
    "options": "Warehouse"
   },
   {
+   "fieldname": "frequency_section",
+   "fieldtype": "Section Break",
+   "label": "Recurrence"
+  },
+  {
+   "fieldname": "frequency",
+   "fieldtype": "Select",
+   "label": "Frequency",
+   "options": "One-time\nDaily\nWeekly\nBiweekly\nMonthly\nCustom",
+   "default": "One-time",
+   "in_list_view": 1,
+   "description": "How often this route plan repeats. One-time = the single plan_date only."
+  },
+  {
+   "fieldname": "days_of_week",
+   "fieldtype": "Small Text",
+   "label": "Days of Week",
+   "depends_on": "eval:[\"Weekly\",\"Biweekly\",\"Custom\"].includes(doc.frequency)",
+   "description": "Comma-separated short names: mon,tue,wed,thu,fri,sat,sun. Applies to Weekly/Biweekly/Custom."
+  },
+  {
+   "fieldname": "interval_days",
+   "fieldtype": "Int",
+   "label": "Interval (days)",
+   "depends_on": "eval:doc.frequency==\"Custom\"",
+   "description": "For Custom frequency: number of days between repeats."
+  },
+  {
+   "fieldname": "valid_until",
+   "fieldtype": "Date",
+   "label": "Valid Until",
+   "description": "Optional end date for the recurrence window."
+  },
+  {
    "fieldname": "notes",
    "fieldtype": "Small Text",
    "label": "Notes"
@@ -47,7 +86,7 @@
  ],
  "index_web_pages_for_search": 0,
  "links": [],
- "modified": "2026-04-19 00:00:00",
+ "modified": "2026-04-20 00:00:00",
  "modified_by": "Administrator",
  "module": "Vansale",
  "name": "Van Route Plan",

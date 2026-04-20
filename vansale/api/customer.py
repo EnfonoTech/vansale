@@ -115,18 +115,40 @@ def create(
     state: str | None = None,
     pincode: str | None = None,
     country: str | None = None,
+    building_number: str | None = None,
+    additional_number: str | None = None,
+    district: str | None = None,
 ) -> dict:
     """Create a Customer + optional primary Address.
 
-    B2B (customer_type="b2b") requires address_line1 + city (per PDF §2b).
+    B2B (customer_type="b2b") requires address_line1 + city and, for KSA
+    ZATCA Phase 2 compliance, a **building number** (4-digit) on the
+    primary address (per PDF §2b + KSA E-Invoicing requirements).
     B2C (customer_type="b2c") default — Individual, address optional.
+
+    `building_number`, `additional_number`, `district` are persisted to
+    the custom fields added by the `ksa_compliance` app. When the app
+    isn't installed these fields are silently dropped by Frappe (unknown
+    fieldnames on `Address` are ignored), so the API stays portable.
     """
     if not customer_name:
         frappe.throw(_("Customer name required"))
     ctype = (customer_type or "b2c").lower()
     is_b2b = ctype == "b2b"
-    if is_b2b and (not address_line1 or not city):
-        frappe.throw(_("Address (line 1 + city) is mandatory for B2B customers"))
+    if is_b2b:
+        missing = []
+        if not address_line1:
+            missing.append(_("Address line 1"))
+        if not city:
+            missing.append(_("City"))
+        if not building_number or not str(building_number).strip():
+            missing.append(_("Building number"))
+        if missing:
+            frappe.throw(
+                _("The following fields are mandatory for B2B customers: {0}").format(
+                    ", ".join(missing),
+                )
+            )
 
     doc = frappe.get_doc({
         "doctype": "Customer",
@@ -143,7 +165,7 @@ def create(
     # Create Address if fields provided (mandatory for B2B, optional for B2C).
     address_name: str | None = None
     if address_line1:
-        addr = frappe.get_doc({
+        addr_data = {
             "doctype": "Address",
             "address_title": customer_name,
             "address_type": "Billing",
@@ -158,7 +180,18 @@ def create(
             "is_primary_address": 1,
             "is_shipping_address": 1,
             "links": [{"link_doctype": "Customer", "link_name": doc.name}],
-        })
+        }
+        # KSA ZATCA Phase 2 address fields — these are custom fields added
+        # by the `ksa_compliance` app. Only include them if the fieldnames
+        # actually exist on Address; otherwise `Document.update` will warn.
+        meta = frappe.get_meta("Address")
+        if building_number and meta.has_field("building_number"):
+            addr_data["building_number"] = str(building_number).strip()
+        if additional_number and meta.has_field("additional_number"):
+            addr_data["additional_number"] = str(additional_number).strip()
+        if district and meta.has_field("district"):
+            addr_data["district"] = district
+        addr = frappe.get_doc(addr_data)
         addr.insert(ignore_permissions=False)
         address_name = addr.name
         # Link back to customer as primary address.
@@ -173,13 +206,12 @@ def create(
     }
 
 
-@frappe.whitelist(methods=["GET"])
-def statement_html(name: str, from_date: str | None = None, to_date: str | None = None):
-    """Render a printable customer statement as HTML.
+def _build_statement_html(name: str, from_date: str | None, to_date: str | None) -> str:
+    """Shared statement-HTML builder for both the download and JSON endpoints.
 
-    Pulls submitted Sales Invoices + Payment Entries for the customer,
-    shows running balance per row, opening balance, closing outstanding.
-    Opens directly in a browser tab (frappe.response.type="page").
+    The JSON variant is what the Capacitor APK uses — `frappe.response.type="download"`
+    returns raw HTML bytes that our `apiCall` helper can't parse through `res.json()`.
+    Keeping a single source of truth avoids the layouts drifting apart.
     """
     if not name:
         frappe.throw(_("Customer name required"))
@@ -314,11 +346,40 @@ def statement_html(name: str, from_date: str | None = None, to_date: str | None 
   </table>
 </body></html>"""
 
+    return html
+
+
+@frappe.whitelist(methods=["GET"])
+def statement_html(name: str, from_date: str | None = None, to_date: str | None = None):
+    """Render a printable customer statement as HTML (direct-download variant).
+
+    Used by the web PWA's `window.open` fallback. The JSON variant below is
+    preferred on the APK — WebView intercepts relative URLs under the
+    capacitor:// scheme so we can't rely on a naive `<a href>` / `window.open`.
+    """
+    html = _build_statement_html(name, from_date, to_date)
     frappe.local.response.type = "download"
     frappe.local.response.filename = f"statement-{name}.html"
     frappe.local.response.filecontent = html.encode("utf-8")
     frappe.local.response.content_type = "text/html"
     frappe.local.response.display_content_as = "inline"
+
+
+@frappe.whitelist(methods=["GET"])
+def statement_json(
+    name: str,
+    from_date: str | None = None,
+    to_date: str | None = None,
+) -> dict:
+    """JSON-wrapped statement HTML for the Capacitor APK.
+
+    Returning through Frappe's normal `{message: ...}` envelope means
+    `apiCall<StatementPayload>` can deserialize + v-html render it
+    inside the in-app StatementView (no `window.open` round-trip, which
+    fails on native because the WebView runs at `https://localhost`).
+    """
+    html = _build_statement_html(name, from_date, to_date)
+    return {"html": html}
 
 
 @frappe.whitelist(methods=["GET"])

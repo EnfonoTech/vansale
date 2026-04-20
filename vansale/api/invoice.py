@@ -359,10 +359,24 @@ def return_against(
 
 
 @frappe.whitelist(methods=["GET"])
-def list_mine(limit: int = 50, customer: Optional[str] = None) -> list[dict]:
+def list_mine(
+    limit: int = 50,
+    customer: Optional[str] = None,
+    is_return: Optional[int] = None,
+) -> list[dict]:
+    """List the current user's Sales Invoices.
+
+    `is_return` filter is optional: pass ``1`` to retrieve only credit notes
+    (Sales Returns), ``0`` for regular invoices. Omit to include both. The
+    returned rows always carry the `is_return` + `return_against` fields so
+    the UI can render the "linked original invoice" ribbon without a
+    second round-trip.
+    """
     filters: dict = {"owner": frappe.session.user, "docstatus": ["in", [0, 1]]}
     if customer:
         filters["customer"] = customer
+    if is_return is not None:
+        filters["is_return"] = int(is_return)
     rows = frappe.get_all(
         "Sales Invoice",
         filters=filters,
@@ -375,6 +389,8 @@ def list_mine(limit: int = 50, customer: Optional[str] = None) -> list[dict]:
             "status",
             "posting_date",
             "posting_time",
+            "is_return",
+            "return_against",
             "modified",
         ],
         order_by="posting_date desc, posting_time desc",

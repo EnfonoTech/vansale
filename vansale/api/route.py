@@ -11,16 +11,105 @@ from frappe import _
 from vansale.api.datetime_util import naive_site_to_utc_iso, parse_client_ts
 
 
-@frappe.whitelist(methods=["GET"])
-def today() -> dict:
-    """Return today's plan (or the next upcoming plan) for the current user."""
-    user = frappe.session.user
-    plan_name = frappe.db.get_value(
+_WEEKDAY_KEYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
+
+
+def _parse_days(raw: str | None) -> set[str]:
+    if not raw:
+        return set()
+    return {d.strip().lower()[:3] for d in raw.split(",") if d.strip()}
+
+
+def _recurrence_matches(plan: dict, today_: date) -> bool:
+    """Does a recurring plan fire today?
+
+    Each frequency has its own rule. For Custom we fall back to
+    `interval_days` from the anchor `plan_date`. Plans with `valid_until`
+    set are ignored past that date.
+    """
+    freq = (plan.get("frequency") or "One-time").lower()
+    anchor: date | None = plan.get("plan_date")
+    valid_until: date | None = plan.get("valid_until")
+    if valid_until and today_ > valid_until:
+        return False
+    if freq == "one-time":
+        return anchor == today_
+    if not anchor or today_ < anchor:
+        return False
+    today_key = _WEEKDAY_KEYS[today_.weekday()]
+    days = _parse_days(plan.get("days_of_week"))
+    if freq == "daily":
+        return True
+    if freq == "weekly":
+        return today_key in days if days else today_.weekday() == anchor.weekday()
+    if freq == "biweekly":
+        weeks = (today_ - anchor).days // 7
+        if weeks % 2 != 0:
+            return False
+        return today_key in days if days else today_.weekday() == anchor.weekday()
+    if freq == "monthly":
+        return today_.day == anchor.day
+    if freq == "custom":
+        interval = int(plan.get("interval_days") or 0)
+        if interval <= 0:
+            return False
+        delta = (today_ - anchor).days
+        if delta < 0:
+            return False
+        if days and today_key not in days:
+            return False
+        return delta % interval == 0
+    return False
+
+
+def _resolve_todays_plan(user: str) -> str | None:
+    """Resolve the plan that fires for `user` today, honouring frequency.
+
+    Order of precedence:
+        1. One-time plan with `plan_date == today`
+        2. Future one-time plan (earliest upcoming)
+        3. Any recurring plan whose rule fires today
+    """
+    today_ = date.today()
+    # (1) exact one-time hit
+    name = frappe.db.get_value(
         "Van Route Plan",
-        {"user": user, "plan_date": [">=", date.today()]},
+        {"user": user, "plan_date": today_, "frequency": ["in", ["One-time", ""]]},
+        "name",
+    )
+    if name:
+        return name
+    # (3) recurring matches
+    candidates = frappe.get_all(
+        "Van Route Plan",
+        filters={
+            "user": user,
+            "frequency": ["in", ["Daily", "Weekly", "Biweekly", "Monthly", "Custom"]],
+        },
+        fields=["name", "frequency", "days_of_week", "interval_days", "plan_date", "valid_until"],
+    )
+    for c in candidates:
+        if _recurrence_matches(c, today_):
+            return c["name"]
+    # (2) next upcoming one-time
+    return frappe.db.get_value(
+        "Van Route Plan",
+        {"user": user, "plan_date": [">=", today_]},
         "name",
         order_by="plan_date asc",
     )
+
+
+@frappe.whitelist(methods=["GET"])
+def today() -> dict:
+    """Return today's plan (or the next upcoming plan) for the current user.
+
+    Respects the Frequency field on Van Route Plan so ops can set up
+    "every Monday / Wednesday" or "every 3 days" and the driver's app
+    sees the right stops without a fresh plan row per day.
+    """
+    user = frappe.session.user
+    plan_name = _resolve_todays_plan(user)
     if not plan_name:
         return {"plan": None, "stops": []}
     doc = frappe.get_doc("Van Route Plan", plan_name)
@@ -30,6 +119,9 @@ def today() -> dict:
             "plan_date": str(doc.plan_date),
             "warehouse": doc.warehouse,
             "notes": doc.notes,
+            "frequency": getattr(doc, "frequency", None) or "One-time",
+            "days_of_week": getattr(doc, "days_of_week", None),
+            "valid_until": str(doc.valid_until) if getattr(doc, "valid_until", None) else None,
         },
         "stops": [
             {
