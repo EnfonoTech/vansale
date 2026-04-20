@@ -12,10 +12,10 @@ ending in ``Z``; ``dateutil.isoparse`` always preserves it (fatehhr #7).
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Optional, Union
 
 from dateutil.parser import isoparse
-from frappe.utils import get_system_timezone
+from frappe.utils import get_datetime, get_system_timezone
 
 try:
     from zoneinfo import ZoneInfo
@@ -37,15 +37,20 @@ def parse_client_ts(ts_str: Optional[str]) -> Optional[datetime]:
     return dt.astimezone(ZoneInfo(get_system_timezone())).replace(tzinfo=None)
 
 
-def naive_site_to_utc_iso(dt: Optional[datetime]) -> Optional[str]:
-    """Convert a naive site-local datetime to a UTC ISO string with ``Z``.
+def naive_site_to_utc_iso(dt: Optional[Union[datetime, str]]) -> Optional[str]:
+    """Convert a naive site-local datetime (or str) to a UTC ISO string with ``Z``.
 
-    Used on every outbound datetime field so device-local formatting
+    Frappe fields like ``doc.modified`` are stored as strings after insert
+    / reload, so this accepts both strings and datetimes. Used on every
+    outbound datetime field so device-local formatting
     (``new Date(iso).toLocaleTimeString()``) renders the correct wall
     clock regardless of where the phone is.
     """
     if dt is None:
         return None
+    if isinstance(dt, str):
+        # Frappe stores naive site-local strings like "2026-04-20 10:30:00".
+        dt = get_datetime(dt)
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=ZoneInfo(get_system_timezone()))
     return dt.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
