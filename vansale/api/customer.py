@@ -174,6 +174,154 @@ def create(
 
 
 @frappe.whitelist(methods=["GET"])
+def statement_html(name: str, from_date: str | None = None, to_date: str | None = None):
+    """Render a printable customer statement as HTML.
+
+    Pulls submitted Sales Invoices + Payment Entries for the customer,
+    shows running balance per row, opening balance, closing outstanding.
+    Opens directly in a browser tab (frappe.response.type="page").
+    """
+    if not name:
+        frappe.throw(_("Customer name required"))
+    cust = frappe.get_doc("Customer", name)
+
+    to_date = to_date or str(frappe.utils.today())
+    from_date = from_date or frappe.utils.add_days(to_date, -90)
+
+    # Opening balance — sum of GL entries before from_date.
+    opening = frappe.db.sql(
+        """
+        SELECT COALESCE(SUM(debit - credit), 0) AS bal
+        FROM `tabGL Entry`
+        WHERE party_type = 'Customer' AND party = %s
+          AND posting_date < %s AND is_cancelled = 0
+        """,
+        (name, from_date),
+        as_dict=True,
+    )
+    opening_balance = float(opening[0]["bal"]) if opening else 0.0
+
+    # Invoices in period.
+    invoices = frappe.get_all(
+        "Sales Invoice",
+        filters={
+            "customer": name,
+            "docstatus": 1,
+            "posting_date": ["between", [from_date, to_date]],
+        },
+        fields=["name", "posting_date", "grand_total", "outstanding_amount", "status", "remarks"],
+        order_by="posting_date asc, creation asc",
+    )
+
+    # Payments in period.
+    payments = frappe.db.sql(
+        """
+        SELECT pe.name, pe.posting_date, pe.paid_amount,
+               pe.mode_of_payment, pe.reference_no
+        FROM `tabPayment Entry` pe
+        WHERE pe.party_type = 'Customer' AND pe.party = %s
+          AND pe.docstatus = 1
+          AND pe.posting_date BETWEEN %s AND %s
+        ORDER BY pe.posting_date ASC, pe.creation ASC
+        """,
+        (name, from_date, to_date),
+        as_dict=True,
+    )
+
+    # Merge into unified ledger sorted by date.
+    rows: list[dict] = []
+    for inv in invoices:
+        rows.append({
+            "date": inv.posting_date,
+            "ref": inv.name,
+            "desc": "Sales Invoice",
+            "debit": float(inv.grand_total or 0),
+            "credit": 0.0,
+        })
+    for p in payments:
+        rows.append({
+            "date": p["posting_date"],
+            "ref": p["name"],
+            "desc": f"Payment — {p.get('mode_of_payment') or ''}".strip(" —"),
+            "debit": 0.0,
+            "credit": float(p["paid_amount"] or 0),
+        })
+    rows.sort(key=lambda r: (r["date"], r["ref"]))
+
+    # Running balance.
+    running = opening_balance
+    for r in rows:
+        running = running + r["debit"] - r["credit"]
+        r["balance"] = running
+    closing = running
+
+    company = frappe.db.get_single_value("Global Defaults", "default_company") or ""
+    currency = cust.default_currency or frappe.db.get_value("Company", company, "default_currency") or ""
+
+    def fmt(x: float) -> str:
+        return f"{x:,.2f}"
+
+    inv_rows_html = "".join(
+        f"<tr><td>{r['date']}</td><td>{r['ref']}</td><td>{r['desc']}</td>"
+        f"<td style='text-align:right'>{fmt(r['debit']) if r['debit'] else ''}</td>"
+        f"<td style='text-align:right'>{fmt(r['credit']) if r['credit'] else ''}</td>"
+        f"<td style='text-align:right'>{fmt(r['balance'])}</td></tr>"
+        for r in rows
+    )
+    if not rows:
+        inv_rows_html = "<tr><td colspan='6' style='text-align:center;color:#888;padding:1rem'>No transactions in this period.</td></tr>"
+
+    html = f"""<!doctype html>
+<html><head><meta charset="utf-8"><title>Statement — {cust.customer_name}</title>
+<style>
+  body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif; padding: 2rem; color: #111; }}
+  h1 {{ font-size: 1.3rem; margin: 0 0 0.2rem; }}
+  .meta {{ color: #555; font-size: 0.9rem; margin-bottom: 1rem; }}
+  table {{ width: 100%; border-collapse: collapse; font-size: 0.9rem; }}
+  th, td {{ padding: 0.4rem 0.5rem; border-bottom: 1px solid #ddd; }}
+  th {{ background: #f5f5f5; text-align: left; }}
+  tfoot td {{ font-weight: 700; border-top: 2px solid #111; border-bottom: none; }}
+  .opening {{ color: #555; font-style: italic; }}
+  @media print {{ body {{ padding: 1rem; }} .no-print {{ display: none; }} }}
+  .no-print {{ text-align: right; margin-bottom: 1rem; }}
+  .no-print button {{ padding: 0.4rem 0.9rem; border-radius: 6px; border: 1px solid #2563eb; background: #2563eb; color: white; cursor: pointer; }}
+</style></head>
+<body>
+  <div class="no-print"><button onclick="window.print()">Print</button></div>
+  <h1>{cust.customer_name} — Statement</h1>
+  <div class="meta">
+    Period: <strong>{from_date}</strong> to <strong>{to_date}</strong><br/>
+    Company: {company} · Currency: {currency}<br/>
+    {f'Tax ID: {cust.tax_id}<br/>' if cust.tax_id else ''}
+    {f'Mobile: {cust.mobile_no}<br/>' if cust.mobile_no else ''}
+  </div>
+  <table>
+    <thead>
+      <tr><th>Date</th><th>Reference</th><th>Description</th>
+          <th style="text-align:right">Debit</th>
+          <th style="text-align:right">Credit</th>
+          <th style="text-align:right">Balance</th></tr>
+    </thead>
+    <tbody>
+      <tr class="opening"><td colspan="5">Opening balance</td>
+          <td style="text-align:right">{fmt(opening_balance)}</td></tr>
+      {inv_rows_html}
+    </tbody>
+    <tfoot>
+      <tr><td colspan="5" style="text-align:right">Closing balance</td>
+          <td style="text-align:right">{fmt(closing)}</td></tr>
+    </tfoot>
+  </table>
+</body></html>"""
+
+    frappe.local.response.type = "download"
+    frappe.local.response.filename = f"statement-{name}.html"
+    frappe.local.response.filecontent = html.encode("utf-8")
+    frappe.local.response.content_type = "text/html"
+    frappe.local.response.display_content_as = "inline"
+
+
+@frappe.whitelist(methods=["GET"])
 def summary(customer: str) -> dict:
     """Aggregates for the customer detail tile strip."""
     outstanding = frappe.db.sql(
