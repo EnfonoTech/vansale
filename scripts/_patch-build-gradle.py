@@ -67,16 +67,16 @@ else:
     )
 
 # 3. Replace default release buildType (don't append — avoids duplicates).
-release_block = """
-        release {
+#    Anchor on `buildTypes { ... release { ... } }` so we never touch the
+#    `signingConfigs.release` block injected in step 2.
+release_block = """release {
             signingConfig signingConfigs.release
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
-        }
-""".rstrip()
+        }"""
 src = re.sub(
-    r"release\s*\{[^}]*\}",
-    release_block.strip(),
+    r"buildTypes\s*\{\s*release\s*\{[^}]*\}\s*\}",
+    f"buildTypes {{\n        {release_block}\n    }}",
     src,
     count=1,
     flags=re.DOTALL,

@@ -28,6 +28,10 @@ const appTitle = process.env.CUSTOMER_APP_TITLE ?? "Van Sale";
 const valuesDir = join(ANDROID_ROOT, "app", "src", "main", "res", "values");
 mkdirSync(valuesDir, { recursive: true });
 
+// NOTE: `ic_launcher_background` is declared by the Capacitor template in
+// a separate `ic_launcher_background.xml` resource file. Do NOT redeclare
+// it here or AGP fails with "Duplicate resources". Override the adaptive
+// icon background via ic_launcher_background.xml directly if needed.
 writeFileSync(
   join(valuesDir, "colors.xml"),
   `<?xml version="1.0" encoding="utf-8"?>
@@ -35,6 +39,15 @@ writeFileSync(
     <color name="colorPrimary">${primary}</color>
     <color name="colorPrimaryDark">${primary}</color>
     <color name="colorAccent">${primary}</color>
+</resources>
+`,
+);
+
+// Adaptive-icon background — overwrite the template's value to match brand.
+writeFileSync(
+  join(valuesDir, "ic_launcher_background.xml"),
+  `<?xml version="1.0" encoding="utf-8"?>
+<resources>
     <color name="ic_launcher_background">${primary}</color>
 </resources>
 `,
