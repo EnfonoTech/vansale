@@ -1,7 +1,6 @@
 <script setup lang="ts">
-import { onMounted, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
-import { useI18n } from "vue-i18n";
 import { useSessionStore } from "@/stores/session";
 import { logout } from "@/api/auth";
 import {
@@ -12,140 +11,235 @@ import {
   type TodayCollection,
   type ActivityRow,
 } from "@/api/dashboard";
-import { NATIVE_VERSION } from "@/app/native-version";
-import { isNative } from "@/app/platform";
+import Icon from "@/components/Icon.vue";
 
 const router = useRouter();
 const session = useSessionStore();
-const { t } = useI18n();
 
 const sales = ref<TodaySales | null>(null);
 const collection = ref<TodayCollection | null>(null);
 const activity = ref<ActivityRow[]>([]);
+const loading = ref(false);
 const loadErr = ref("");
 
 async function load() {
+  loading.value = true;
   loadErr.value = "";
   try {
-    const [a, b, c] = await Promise.all([todaySales(), todayCollection(), recentActivity(10)]);
+    const [a, b, c] = await Promise.all([todaySales(), todayCollection(), recentActivity(8)]);
     sales.value = a;
     collection.value = b;
     activity.value = c;
   } catch (err) {
     loadErr.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    loading.value = false;
   }
 }
 
 onMounted(load);
 
-function fmt(n: number | undefined): string {
-  return new Intl.NumberFormat(undefined, { maximumFractionDigits: 3 }).format(n ?? 0);
+function fmt(n: number | undefined | null): string {
+  return new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 }).format(Number(n) || 0);
 }
 
+const currency = computed(() => session.currency ?? "");
+const greeting = computed(() => session.fullName ?? session.user ?? "");
+const timeOfDay = computed(() => {
+  const h = new Date().getHours();
+  if (h < 5) return "Still up";
+  if (h < 12) return "Good morning";
+  if (h < 17) return "Good afternoon";
+  return "Good evening";
+});
+
+interface Quick { icon: "invoice" | "payment" | "customer" | "route" | "stock" | "receipt"; label: string; to: string; tone: string }
+const quickActions: Quick[] = [
+  { icon: "invoice", label: "New invoice", to: "invoice-new", tone: "primary" },
+  { icon: "payment", label: "Collect payment", to: "payment-new", tone: "success" },
+  { icon: "customer", label: "Customers", to: "customers", tone: "info" },
+  { icon: "route", label: "Today's route", to: "route-today", tone: "warning" },
+];
+
 async function onLogout() {
-  try { await logout(); } finally { session.logout(); await router.replace({ name: "login" }); }
+  try { await logout(); }
+  finally { session.logout(); await router.replace({ name: "login" }); }
+}
+
+function kindIcon(kind: ActivityRow["kind"]): "invoice" | "payment" {
+  return kind === "invoice" ? "invoice" : "payment";
 }
 </script>
 
 <template>
-  <section class="stack">
-    <header class="card stack" style="gap: 0.25rem">
-      <h1 style="margin: 0">
-        {{ t("dashboard.welcome", { name: session.fullName ?? session.user ?? "" }) }}
-      </h1>
-      <p class="muted small" v-if="session.defaults?.van_code">
-        Van <strong>{{ session.defaults.van_code }}</strong>
-        <span v-if="session.defaults.default_warehouse"> · {{ session.defaults.default_warehouse }}</span>
-        <span v-if="session.currency"> · {{ session.currency }}</span>
-      </p>
-      <p class="muted small">
-        {{ isNative() ? t("dashboard.env_native") : t("dashboard.env_web") }} ·
-        {{ t("dashboard.version", { v: NATIVE_VERSION }) }}
-      </p>
-    </header>
-
-    <p v-if="loadErr" class="error">{{ loadErr }}</p>
-
-    <div class="tiles">
-      <div class="tile">
-        <span class="muted small">Today's sales</span>
-        <strong>{{ fmt(sales?.amount) }}</strong>
-        <span class="muted small">{{ sales?.count ?? 0 }} invoice{{ sales?.count === 1 ? "" : "s" }}</span>
+  <div class="dashboard stack">
+    <section class="greeting">
+      <span class="muted small">{{ timeOfDay }},</span>
+      <h1>{{ greeting }}</h1>
+      <div v-if="session.defaults" class="van-chip">
+        <Icon name="truck" :size="16" />
+        <span>{{ session.defaults.van_code ?? "—" }}</span>
+        <span v-if="session.defaults.default_warehouse" class="dot">·</span>
+        <span v-if="session.defaults.default_warehouse">{{ session.defaults.default_warehouse }}</span>
       </div>
-      <div class="tile">
-        <span class="muted small">Today's collection</span>
-        <strong>{{ fmt(collection?.amount) }}</strong>
-        <span class="muted small">
-          {{ collection?.by_mode?.map((m) => `${m.mode}: ${fmt(m.amount)}`).join(" · ") || "—" }}
+    </section>
+
+    <section class="hero">
+      <div class="hero-row">
+        <span class="muted xsmall">Today's sales</span>
+        <span class="hero-currency">{{ currency }}</span>
+      </div>
+      <div class="hero-amount">
+        <span v-if="loading && !sales" class="skeleton" style="height:2.5rem;width:60%"></span>
+        <template v-else>{{ fmt(sales?.amount) }}</template>
+      </div>
+      <div class="hero-meta">
+        <span class="pill" data-tone="primary">
+          <Icon name="invoice" :size="14" />
+          {{ sales?.count ?? 0 }} invoice{{ sales?.count === 1 ? "" : "s" }}
+        </span>
+        <span class="pill" data-tone="success">
+          <Icon name="payment" :size="14" />
+          {{ currency }} {{ fmt(collection?.amount) }} collected
+        </span>
+        <span v-if="(sales?.returned ?? 0) > 0" class="pill" data-tone="warning">
+          <Icon name="refresh" :size="14" />
+          {{ currency }} {{ fmt(sales?.returned) }} returned
         </span>
       </div>
-      <div class="tile">
-        <span class="muted small">Returned today</span>
-        <strong>{{ fmt(sales?.returned) }}</strong>
-      </div>
-    </div>
+    </section>
 
-    <nav class="actions">
-      <button @click="router.push({ name: 'invoice-new' })">New invoice</button>
-      <button @click="router.push({ name: 'payment-new' })">Collect payment</button>
-      <button class="ghost" @click="router.push({ name: 'customers' })">Customers</button>
-      <button class="ghost" @click="router.push({ name: 'invoices' })">Invoices</button>
-      <button class="ghost" @click="router.push({ name: 'route-today' })">Today's route</button>
-      <button class="ghost" @click="router.push({ name: 'van-stock' })">Van stock</button>
-    </nav>
+    <section class="quick">
+      <button
+        v-for="q in quickActions"
+        :key="q.to"
+        class="quick-btn"
+        :data-tone="q.tone"
+        @click="router.push({ name: q.to })"
+      >
+        <Icon :name="q.icon" :size="22" />
+        <span>{{ q.label }}</span>
+      </button>
+    </section>
 
     <section class="card stack">
-      <h2 style="margin: 0 0 0.25rem">Recent activity</h2>
-      <p v-if="activity.length === 0" class="muted">No activity yet.</p>
-      <ul class="activity" v-else>
-        <li v-for="row in activity" :key="`${row.kind}:${row.name}`">
-          <span class="kind" :data-kind="row.kind">{{ row.kind }}</span>
-          <span class="who">{{ row.party }}</span>
-          <span class="amt">{{ fmt(row.amount) }}</span>
-          <span class="when muted small">{{ row.posting_date }}</span>
+      <div class="section-head">
+        <h3 style="margin:0">Recent activity</h3>
+        <button v-if="activity.length > 0" class="ghost small" @click="router.push({ name: 'invoices' })">
+          View all
+          <Icon name="chevron-right" :size="16" />
+        </button>
+      </div>
+      <p v-if="loadErr" class="error">{{ loadErr }}</p>
+      <div v-if="loading && activity.length === 0" class="stack">
+        <div class="skeleton" style="height:3rem"></div>
+        <div class="skeleton" style="height:3rem"></div>
+      </div>
+      <div v-else-if="activity.length === 0" class="empty">
+        <Icon name="tag" :size="32" class="empty-icon" />
+        <span>No invoices or payments today yet.</span>
+        <button @click="router.push({ name: 'invoice-new' })">Start selling</button>
+      </div>
+      <ul v-else class="activity">
+        <li v-for="row in activity" :key="`${row.kind}:${row.name}`" class="activity-row">
+          <span class="avatar" :data-kind="row.kind">
+            <Icon :name="kindIcon(row.kind)" :size="18" />
+          </span>
+          <div class="activity-main">
+            <strong class="truncate">{{ row.party }}</strong>
+            <span class="muted xsmall">{{ row.name }} · {{ row.posting_date }}</span>
+          </div>
+          <strong class="activity-amt">{{ fmt(row.amount) }}</strong>
         </li>
       </ul>
     </section>
 
-    <button class="ghost" style="align-self: flex-start" @click="onLogout">
-      {{ t("nav.logout") }}
+    <button class="ghost small" style="align-self:center" @click="onLogout">
+      <Icon name="logout" :size="16" /> Log out
     </button>
-  </section>
+  </div>
 </template>
 
 <style scoped>
-.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr)); gap: 0.65rem; }
-.tile {
-  background: var(--surface);
-  padding: 0.85rem;
-  border-radius: var(--radius);
+.dashboard { gap: 0.875rem; }
+
+.greeting h1 { margin: 0.1rem 0 0.5rem; }
+.van-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.35rem 0.7rem;
+  background: var(--primary-soft);
+  color: var(--primary);
+  border-radius: var(--radius-pill);
+  font-weight: 600;
+  font-size: var(--text-xs);
+}
+.van-chip .dot { color: var(--text-faint); }
+
+.hero {
+  background: linear-gradient(135deg, var(--primary) 0%, color-mix(in srgb, var(--primary) 75%, #0f172a) 100%);
+  color: var(--primary-ink);
+  padding: 1.25rem;
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-float);
   display: flex;
   flex-direction: column;
-  gap: 0.2rem;
-  box-shadow: var(--shadow-sm);
+  gap: 0.35rem;
 }
-.tile strong { font-size: 1.25rem; }
-.actions { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; }
-.small { font-size: 0.78rem; }
-.activity { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0.5rem; }
-.activity li {
+.hero-row { display: flex; justify-content: space-between; align-items: baseline; opacity: 0.85; }
+.hero .muted { color: rgba(255,255,255,0.78); }
+.hero-currency { font-size: var(--text-xs); font-weight: 600; letter-spacing: 0.04em; }
+.hero-amount { font-size: var(--text-3xl); font-weight: 700; letter-spacing: -0.01em; }
+.hero-meta { display: flex; flex-wrap: wrap; gap: 0.35rem; margin-top: 0.35rem; }
+.hero-meta .pill { background: rgba(255,255,255,0.15); color: #fff; }
+
+.quick {
   display: grid;
-  grid-template-columns: auto 1fr auto;
-  gap: 0.35rem 0.7rem;
-  align-items: baseline;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 0.6rem;
 }
-.kind {
-  grid-column: 1;
-  font-size: 0.7rem;
-  padding: 0.1rem 0.4rem;
-  border-radius: 999px;
-  background: rgba(37, 99, 235, 0.1);
+.quick-btn {
+  all: unset;
+  cursor: pointer;
+  min-height: 4.5rem;
+  padding: 0.9rem 1rem;
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.35rem;
+  font-weight: 600;
+  color: var(--text);
+  transition: transform var(--dur-fast) var(--ease);
+}
+.quick-btn:active { transform: scale(0.97); }
+.quick-btn svg {
+  padding: 0.4rem;
+  background: var(--primary-soft);
   color: var(--primary);
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
+  border-radius: var(--radius-sm);
+  box-sizing: content-box;
 }
-.kind[data-kind="payment"] { background: rgba(22, 163, 74, 0.12); color: var(--success); }
-.who { grid-column: 2; }
-.amt { grid-column: 3; font-weight: 600; }
-.when { grid-column: 2 / span 2; }
+.quick-btn[data-tone="success"] svg { background: var(--success-soft); color: var(--success); }
+.quick-btn[data-tone="info"] svg { background: var(--info-soft); color: var(--info); }
+.quick-btn[data-tone="warning"] svg { background: var(--warning-soft); color: var(--warning); }
+
+.section-head { display: flex; align-items: center; justify-content: space-between; }
+
+.activity { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0.55rem; }
+.activity-row { display: grid; grid-template-columns: auto 1fr auto; gap: 0.6rem; align-items: center; }
+.avatar {
+  width: 2.25rem; height: 2.25rem;
+  border-radius: var(--radius-pill);
+  display: grid; place-items: center;
+  background: var(--primary-soft); color: var(--primary);
+}
+.avatar[data-kind="payment"] { background: var(--success-soft); color: var(--success); }
+.activity-main { display: flex; flex-direction: column; min-width: 0; gap: 0.1rem; }
+.activity-amt { font-variant-numeric: tabular-nums; }
+.truncate { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 </style>

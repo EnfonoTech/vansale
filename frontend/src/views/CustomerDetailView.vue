@@ -1,0 +1,172 @@
+<script setup lang="ts">
+import { onMounted, ref } from "vue";
+import { useRoute, useRouter } from "vue-router";
+import { detail, type CustomerDetail } from "@/api/customer";
+import { listMine as listInvoices } from "@/api/invoice";
+import { useSessionStore } from "@/stores/session";
+import Icon from "@/components/Icon.vue";
+
+const route = useRoute();
+const router = useRouter();
+const session = useSessionStore();
+
+const customer = ref<CustomerDetail | null>(null);
+const invoices = ref<Array<Record<string, unknown>>>([]);
+const loading = ref(false);
+const err = ref("");
+
+const customerName = String(route.params.name ?? "");
+
+async function load() {
+  if (!customerName) return;
+  loading.value = true;
+  err.value = "";
+  try {
+    customer.value = await detail(customerName);
+    invoices.value = await listInvoices(10, customerName);
+  } catch (e) {
+    err.value = e instanceof Error ? e.message : String(e);
+  } finally {
+    loading.value = false;
+  }
+}
+
+onMounted(load);
+
+function fmt(n: unknown): string {
+  const num = typeof n === "number" ? n : Number(n) || 0;
+  return new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 }).format(num);
+}
+
+function newInvoice() {
+  void router.push({ name: "invoice-new", query: { customer: customerName } });
+}
+function newPayment() {
+  void router.push({ name: "payment-new", query: { customer: customerName } });
+}
+function callMobile() {
+  if (customer.value?.mobile_no) window.location.href = `tel:${customer.value.mobile_no}`;
+}
+</script>
+
+<template>
+  <div class="stack">
+    <div v-if="loading && !customer" class="stack">
+      <div class="skeleton" style="height:4rem" />
+      <div class="skeleton" style="height:8rem" />
+    </div>
+    <p v-if="err" class="error">{{ err }}</p>
+
+    <template v-if="customer">
+      <section class="card stack">
+        <div class="header-row">
+          <span class="avatar">
+            {{ customer.customer_name.split(/\s+/).slice(0,2).map(s=>s.charAt(0).toUpperCase()).join("") || "?" }}
+          </span>
+          <div style="min-width:0">
+            <h2 class="truncate" style="margin:0">{{ customer.customer_name }}</h2>
+            <span class="muted small truncate">{{ customer.name }}</span>
+          </div>
+        </div>
+        <div class="meta-grid">
+          <div v-if="customer.mobile_no" class="meta-item" @click="callMobile">
+            <Icon name="phone" :size="16" />
+            <span>{{ customer.mobile_no }}</span>
+          </div>
+          <div v-if="customer.territory" class="meta-item">
+            <Icon name="map-pin" :size="16" />
+            <span>{{ customer.territory }}</span>
+          </div>
+          <div v-if="customer.tax_id" class="meta-item">
+            <Icon name="tag" :size="16" />
+            <span>{{ customer.tax_id }}</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="card outstanding" :data-positive="customer.outstanding > 0">
+        <span class="muted xsmall">Outstanding</span>
+        <strong>{{ session.currency }} {{ fmt(customer.outstanding) }}</strong>
+      </section>
+
+      <section class="actions-row">
+        <button class="action-btn primary" @click="newInvoice">
+          <Icon name="invoice" :size="18" /> Invoice
+        </button>
+        <button class="action-btn success" @click="newPayment">
+          <Icon name="payment" :size="18" /> Payment
+        </button>
+      </section>
+
+      <section v-if="customer.addresses.length > 0" class="card stack">
+        <h3 style="margin:0 0 0.25rem">Addresses</h3>
+        <div v-for="(a, i) in customer.addresses" :key="i" class="address">
+          <Icon name="map-pin" :size="16" class="addr-ic" />
+          <div>
+            <div>{{ [a.address_line1, a.address_line2].filter(Boolean).join(", ") }}</div>
+            <div class="muted small">{{ [a.city, a.state, a.country].filter(Boolean).join(", ") }}</div>
+            <div v-if="a.phone" class="muted xsmall">{{ a.phone }}</div>
+          </div>
+        </div>
+      </section>
+
+      <section class="card stack">
+        <h3 style="margin:0 0 0.25rem">Recent invoices</h3>
+        <div v-if="invoices.length === 0" class="empty" style="padding:1rem 0">
+          <Icon name="invoice" :size="28" class="empty-icon" />
+          <span class="muted small">No invoices yet.</span>
+        </div>
+        <ul v-else class="inv-list">
+          <li v-for="r in invoices" :key="String(r.name)" class="inv-row">
+            <div>
+              <strong>{{ r.name }}</strong>
+              <div class="muted xsmall">{{ r.posting_date }} · {{ r.status }}</div>
+            </div>
+            <strong>{{ fmt(r.grand_total) }}</strong>
+          </li>
+        </ul>
+      </section>
+    </template>
+  </div>
+</template>
+
+<style scoped>
+.header-row { display: flex; align-items: center; gap: 0.75rem; }
+.avatar {
+  width: 3rem; height: 3rem;
+  border-radius: var(--radius-pill);
+  display: grid; place-items: center;
+  background: var(--primary-soft); color: var(--primary);
+  font-weight: 700; font-size: var(--text-lg);
+}
+.truncate { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.meta-grid { display: flex; flex-direction: column; gap: 0.4rem; }
+.meta-item {
+  display: flex; align-items: center; gap: 0.5rem;
+  font-size: var(--text-sm); color: var(--text-muted);
+}
+.meta-item svg { color: var(--text-faint); flex-shrink: 0; }
+
+.outstanding {
+  display: flex; justify-content: space-between; align-items: baseline;
+  background: var(--surface-sunk);
+}
+.outstanding[data-positive="true"] { background: var(--warning-soft); color: var(--warning); }
+.outstanding strong { font-size: var(--text-xl); font-variant-numeric: tabular-nums; }
+
+.actions-row { display: grid; grid-template-columns: 1fr 1fr; gap: 0.6rem; }
+.action-btn { min-height: 3rem; font-size: var(--text-base); }
+.action-btn.success { background: var(--success); }
+
+.address {
+  display: flex; gap: 0.5rem; padding: 0.5rem 0;
+  border-top: 1px solid var(--border);
+}
+.address:first-of-type { border-top: none; padding-top: 0; }
+.addr-ic { color: var(--text-faint); flex-shrink: 0; margin-top: 0.15rem; }
+
+.inv-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0.4rem; }
+.inv-row { display: flex; justify-content: space-between; align-items: center; padding: 0.5rem 0; border-top: 1px solid var(--border); }
+.inv-row:first-of-type { border-top: none; padding-top: 0; }
+</style>

@@ -1,19 +1,19 @@
 <script setup lang="ts">
 import { ref } from "vue";
 import { useRouter } from "vue-router";
-import { useI18n } from "vue-i18n";
 import { login } from "@/api/auth";
 import { useSessionStore } from "@/stores/session";
 import { ApiError, NetworkError } from "@/app/frappe";
+import Icon from "@/components/Icon.vue";
 
 const router = useRouter();
 const session = useSessionStore();
-const { t } = useI18n();
 
 const email = ref("");
 const password = ref("");
 const error = ref("");
 const busy = ref(false);
+const showPassword = ref(false);
 
 async function onSubmit() {
   if (busy.value) return;
@@ -29,13 +29,9 @@ async function onSubmit() {
     });
     await router.replace({ name: "pin" });
   } catch (err) {
-    if (err instanceof ApiError) {
-      error.value = err.serverMessage ?? t("login.error_generic");
-    } else if (err instanceof NetworkError) {
-      error.value = t("common.offline");
-    } else {
-      error.value = t("login.error_generic");
-    }
+    if (err instanceof ApiError) error.value = err.serverMessage ?? "Incorrect email or password";
+    else if (err instanceof NetworkError) error.value = "Offline — try again when connected";
+    else error.value = "Incorrect email or password";
   } finally {
     busy.value = false;
   }
@@ -43,34 +39,85 @@ async function onSubmit() {
 </script>
 
 <template>
-  <section class="card stack">
-    <h1>{{ t("login.heading") }}</h1>
-    <form class="stack" @submit.prevent="onSubmit">
-      <label class="stack" style="gap: 0.25rem">
-        <span class="muted">{{ t("login.email") }}</span>
+  <div class="auth">
+    <div class="brand">
+      <div class="brand-mark"><Icon name="truck" :size="40" /></div>
+      <h1>Van Sale</h1>
+      <p class="muted">Sign in to start your day</p>
+    </div>
+
+    <form class="card stack" @submit.prevent="onSubmit">
+      <label class="field">
+        <span class="label">Email</span>
         <input
           v-model="email"
           type="email"
           autocomplete="email"
           inputmode="email"
           required
+          autofocus
           :disabled="busy"
+          placeholder="you@company.com"
         />
       </label>
-      <label class="stack" style="gap: 0.25rem">
-        <span class="muted">{{ t("login.password") }}</span>
-        <input
-          v-model="password"
-          type="password"
-          autocomplete="current-password"
-          required
-          :disabled="busy"
-        />
+      <label class="field">
+        <span class="label">Password</span>
+        <div class="pw-wrap">
+          <input
+            v-model="password"
+            :type="showPassword ? 'text' : 'password'"
+            autocomplete="current-password"
+            required
+            :disabled="busy"
+          />
+          <button
+            type="button"
+            class="ghost small pw-toggle"
+            @click="showPassword = !showPassword"
+            tabindex="-1"
+          >
+            {{ showPassword ? "Hide" : "Show" }}
+          </button>
+        </div>
       </label>
+
       <p v-if="error" class="error">{{ error }}</p>
-      <button type="submit" :disabled="busy">
-        {{ busy ? t("common.loading") : t("login.submit") }}
+
+      <button class="submit" type="submit" :disabled="busy">
+        {{ busy ? "Signing in…" : "Continue" }}
       </button>
     </form>
-  </section>
+  </div>
 </template>
+
+<style scoped>
+.auth {
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2rem;
+  padding: 1.5rem;
+  max-width: 26rem;
+  margin: 0 auto;
+}
+.brand { text-align: center; display: flex; flex-direction: column; align-items: center; gap: 0.4rem; }
+.brand-mark {
+  width: 4.5rem; height: 4.5rem;
+  border-radius: var(--radius-lg);
+  background: linear-gradient(135deg, var(--primary) 0%, color-mix(in srgb, var(--primary) 75%, #0f172a) 100%);
+  color: var(--primary-ink);
+  display: grid; place-items: center;
+  box-shadow: var(--shadow-float);
+  margin-bottom: 0.5rem;
+}
+.brand h1 { margin: 0; }
+
+.field { display: flex; flex-direction: column; gap: 0.3rem; }
+.label { font-size: var(--text-sm); color: var(--text-muted); font-weight: 500; }
+
+.pw-wrap { position: relative; }
+.pw-toggle { position: absolute; top: 50%; inset-inline-end: 0.4rem; transform: translateY(-50%); font-size: var(--text-xs); }
+
+.submit { min-height: 3.25rem; font-size: var(--text-base); }
+</style>

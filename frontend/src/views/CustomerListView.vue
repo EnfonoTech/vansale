@@ -1,15 +1,21 @@
 <script setup lang="ts">
-import { onMounted, ref, watch } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
+import { useRouter } from "vue-router";
 import { listMine, fromCache, refreshCache, type CustomerRow } from "@/api/customer";
-import { isOnline } from "@/app/online";
+import { isOnline, useOnline } from "@/app/online";
 import { NetworkError } from "@/app/frappe";
+import Icon from "@/components/Icon.vue";
 
+const router = useRouter();
+const online = useOnline();
 const rows = ref<CustomerRow[]>([]);
 const search = ref("");
 const err = ref("");
 const source = ref<"live" | "cache">("live");
+const loading = ref(false);
 
 async function load() {
+  loading.value = true;
   err.value = "";
   try {
     if (isOnline()) {
@@ -21,11 +27,15 @@ async function load() {
       source.value = "cache";
     }
   } catch (e) {
-    err.value = e instanceof NetworkError ? "Offline — showing cached customers" : (e instanceof Error ? e.message : String(e));
     if (e instanceof NetworkError) {
+      err.value = "Offline — showing cached customers";
       rows.value = (await fromCache()).map((c) => c.raw as unknown as CustomerRow);
       source.value = "cache";
+    } else {
+      err.value = e instanceof Error ? e.message : String(e);
     }
+  } finally {
+    loading.value = false;
   }
 }
 
@@ -36,35 +46,96 @@ watch(search, () => {
   if (to) clearTimeout(to);
   to = setTimeout(load, 250);
 });
+
+watch(online, (v) => { if (v) void load(); });
+
+const filtered = computed(() => rows.value);
+
+function openCustomer(c: CustomerRow) {
+  void router.push({ name: "customer-detail", params: { name: c.name } });
+}
+
+function initials(name: string): string {
+  return name
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((p) => p.charAt(0).toUpperCase())
+    .join("") || "?";
+}
 </script>
 
 <template>
-  <section class="stack">
-    <header class="card stack" style="gap: 0.5rem">
-      <h1 style="margin: 0">Customers</h1>
-      <input v-model="search" placeholder="Search by name / mobile / VAT" />
-      <p v-if="source === 'cache'" class="muted small">Offline — showing cached data.</p>
-      <p v-if="err" class="error">{{ err }}</p>
-    </header>
-    <ul class="list">
-      <li v-for="c in rows" :key="c.name" class="item">
-        <div>
-          <strong>{{ c.customer_name }}</strong>
-          <div class="muted small">{{ c.mobile_no || c.territory || c.name }}</div>
-        </div>
+  <div class="stack">
+    <div class="search-bar">
+      <Icon name="search" :size="18" class="search-ic" />
+      <input v-model="search" placeholder="Search name, mobile, VAT" aria-label="Search customers" />
+    </div>
+
+    <p v-if="source === 'cache'" class="muted small">
+      <Icon name="wifi-off" :size="14" /> Offline — showing cached customers.
+    </p>
+    <p v-if="err" class="error">{{ err }}</p>
+
+    <div v-if="loading && filtered.length === 0" class="stack">
+      <div class="skeleton" style="height:3.5rem" />
+      <div class="skeleton" style="height:3.5rem" />
+      <div class="skeleton" style="height:3.5rem" />
+    </div>
+    <div v-else-if="filtered.length === 0" class="empty">
+      <Icon name="customer" :size="32" class="empty-icon" />
+      <strong>No customers found</strong>
+      <span>{{ search ? "Try a different search." : "Ask your admin to add customers in this company." }}</span>
+    </div>
+    <ul v-else class="list">
+      <li v-for="c in filtered" :key="c.name">
+        <button class="item" type="button" @click="openCustomer(c)">
+          <span class="avatar">{{ initials(c.customer_name) }}</span>
+          <span class="body">
+            <strong class="truncate">{{ c.customer_name }}</strong>
+            <span class="muted small truncate">
+              {{ c.mobile_no || c.territory || c.name }}
+            </span>
+          </span>
+          <Icon name="chevron-right" :size="18" class="chev" />
+        </button>
       </li>
-      <li v-if="rows.length === 0" class="muted">No customers found.</li>
     </ul>
-  </section>
+  </div>
 </template>
 
 <style scoped>
+.search-bar {
+  position: relative;
+}
+.search-ic {
+  position: absolute; inset-inline-start: 0.7rem; top: 50%;
+  transform: translateY(-50%); color: var(--text-faint); pointer-events: none;
+}
+.search-bar input { padding-inline-start: 2.3rem; }
+
 .list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0.5rem; }
 .item {
+  all: unset;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem 0.85rem;
   background: var(--surface);
-  padding: 0.75rem;
   border-radius: var(--radius);
+  cursor: pointer;
   box-shadow: var(--shadow-sm);
+  transition: background var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease);
 }
-.small { font-size: 0.82rem; }
+.item:active { transform: scale(0.99); background: var(--surface-muted); }
+.avatar {
+  width: 2.5rem; height: 2.5rem;
+  border-radius: var(--radius-pill);
+  display: grid; place-items: center;
+  background: var(--primary-soft); color: var(--primary);
+  font-weight: 700; font-size: var(--text-sm);
+}
+.body { display: flex; flex-direction: column; gap: 0.1rem; min-width: 0; }
+.truncate { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chev { color: var(--text-faint); }
 </style>

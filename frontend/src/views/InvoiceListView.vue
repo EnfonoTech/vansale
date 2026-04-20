@@ -1,63 +1,91 @@
 <script setup lang="ts">
 import { onMounted, ref } from "vue";
+import { useRouter } from "vue-router";
 import { listMine } from "@/api/invoice";
+import { useSessionStore } from "@/stores/session";
+import Icon from "@/components/Icon.vue";
 
+const router = useRouter();
+const session = useSessionStore();
 const rows = ref<Array<Record<string, unknown>>>([]);
 const err = ref("");
 const loading = ref(false);
 
 async function load() {
-  err.value = "";
   loading.value = true;
-  try {
-    rows.value = await listMine(50);
-  } catch (e) {
-    err.value = e instanceof Error ? e.message : String(e);
-  } finally {
-    loading.value = false;
-  }
+  err.value = "";
+  try { rows.value = await listMine(50); }
+  catch (e) { err.value = e instanceof Error ? e.message : String(e); }
+  finally { loading.value = false; }
 }
 
 onMounted(load);
 
 function fmt(n: unknown): string {
   const num = typeof n === "number" ? n : Number(n) || 0;
-  return new Intl.NumberFormat(undefined, { maximumFractionDigits: 3 }).format(num);
+  return new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 }).format(num);
+}
+
+function tone(status: unknown): string {
+  const s = String(status || "").toLowerCase();
+  if (s === "paid") return "success";
+  if (s === "overdue") return "danger";
+  if (s === "cancelled") return "danger";
+  if (s === "unpaid") return "warning";
+  return "info";
 }
 </script>
 
 <template>
-  <section class="stack">
-    <h1>Invoices</h1>
-    <p v-if="loading" class="muted">Loading…</p>
+  <div class="stack">
+    <button class="new-btn" @click="router.push({ name: 'invoice-new' })">
+      <Icon name="plus" :size="18" /> New invoice
+    </button>
+
     <p v-if="err" class="error">{{ err }}</p>
-    <ul class="list">
+
+    <div v-if="loading && rows.length === 0" class="stack">
+      <div class="skeleton" style="height:3.25rem" />
+      <div class="skeleton" style="height:3.25rem" />
+      <div class="skeleton" style="height:3.25rem" />
+    </div>
+    <div v-else-if="rows.length === 0" class="empty">
+      <Icon name="invoice" :size="32" class="empty-icon" />
+      <strong>No invoices yet</strong>
+      <span class="muted">Create your first invoice of the day.</span>
+      <button @click="router.push({ name: 'invoice-new' })">Start selling</button>
+    </div>
+    <ul v-else class="list">
       <li v-for="r in rows" :key="String(r.name)" class="item">
-        <div>
-          <strong>{{ r.customer_name || r.customer }}</strong>
-          <div class="muted small">{{ r.name }} · {{ r.posting_date }}</div>
+        <div class="body">
+          <strong class="truncate">{{ r.customer_name || r.customer }}</strong>
+          <span class="muted xsmall">{{ r.name }} · {{ r.posting_date }}</span>
         </div>
-        <div class="amt">
-          <strong>{{ fmt(r.grand_total) }}</strong>
-          <div class="muted small">{{ r.status }}</div>
+        <div class="right">
+          <strong>{{ session.currency }} {{ fmt(r.grand_total) }}</strong>
+          <span class="pill" :data-tone="tone(r.status)">{{ r.status }}</span>
         </div>
       </li>
-      <li v-if="!loading && rows.length === 0" class="muted">No invoices yet.</li>
     </ul>
-  </section>
+  </div>
 </template>
 
 <style scoped>
+.new-btn { align-self: flex-start; min-height: 2.5rem; padding: 0.55rem 0.9rem; }
+
 .list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0.5rem; }
 .item {
   background: var(--surface);
-  padding: 0.75rem;
   border-radius: var(--radius);
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
+  padding: 0.75rem 0.85rem;
   box-shadow: var(--shadow-sm);
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.75rem;
+  align-items: center;
 }
-.amt { text-align: right; }
-.small { font-size: 0.8rem; }
+.body { display: flex; flex-direction: column; gap: 0.15rem; min-width: 0; }
+.right { text-align: right; display: flex; flex-direction: column; align-items: flex-end; gap: 0.25rem; }
+.right strong { font-variant-numeric: tabular-nums; }
+.truncate { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 </style>
