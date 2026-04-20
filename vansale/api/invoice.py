@@ -41,6 +41,26 @@ def _user_company() -> str:
     )
 
 
+def _default_tax_template(company: str) -> Optional[str]:
+    """Resolve the Company's default Sales Taxes and Charges Template.
+
+    Some sites enforce taxes_and_charges as mandatory (either directly
+    or via customisations like fateh_trading on this bench). Rather
+    than surface a cryptic error to the van user we auto-pick the
+    company's default.
+    """
+    return frappe.db.get_value(
+        "Sales Taxes and Charges Template",
+        {"company": company, "is_default": 1, "disabled": 0},
+        "name",
+    ) or frappe.db.get_value(
+        "Sales Taxes and Charges Template",
+        {"company": company, "disabled": 0},
+        "name",
+        order_by="modified desc",
+    )
+
+
 def _existing_by_client_id(client_id: str) -> Optional[str]:
     """Look up a prior submission of the same idempotency key."""
     if not client_id:
@@ -114,6 +134,12 @@ def save(
     doc.set_warehouse = set_warehouse
     doc.remarks = remarks
     doc.custom_client_id = client_id  # custom field added via fixture
+
+    # Tax template — auto-apply if the site enforces mandatory taxes
+    # and the caller didn't supply one.
+    tax_template = _default_tax_template(company)
+    if tax_template:
+        doc.taxes_and_charges = tax_template
 
     for item in items:
         if not item.get("item_code"):

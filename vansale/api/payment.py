@@ -120,6 +120,11 @@ def save(
     paid_from, paid_to = _resolve_accounts(company, mode_of_payment)
     posting = parse_client_ts(posting_ts) if posting_ts else frappe.utils.now_datetime()
 
+    # Account currencies — required by ERPNext's Payment Entry validation;
+    # skipping this made validate() trip on str vs Dict attribute access.
+    paid_from_currency = frappe.db.get_value("Account", paid_from, "account_currency") or "SAR"
+    paid_to_currency = frappe.db.get_value("Account", paid_to, "account_currency") or "SAR"
+
     doc = frappe.new_doc("Payment Entry")
     doc.payment_type = "Receive"
     doc.party_type = "Customer"
@@ -130,6 +135,12 @@ def save(
     doc.received_amount = amount
     doc.paid_from = paid_from
     doc.paid_to = paid_to
+    doc.paid_from_account_currency = paid_from_currency
+    doc.paid_to_account_currency = paid_to_currency
+    doc.party_account = paid_from  # for Receive, party_account == paid_from (Debtors)
+    doc.party_account_currency = paid_from_currency
+    doc.source_exchange_rate = 1
+    doc.target_exchange_rate = 1
     doc.reference_no = reference_no
     doc.reference_date = reference_date
     doc.posting_date = posting.date()
@@ -155,7 +166,10 @@ def save(
                 },
             )
 
-    doc.setup_party_account_field()
+    # NOTE: do NOT call doc.setup_party_account_field() — it's gone in
+    # ERPNext v15 and previously raised AttributeError("'str'"). The
+    # explicit party_account assignment above already matches what the
+    # method used to populate.
     doc.insert(ignore_permissions=False)
     if submit:
         doc.submit()
