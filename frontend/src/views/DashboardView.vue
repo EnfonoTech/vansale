@@ -2,7 +2,6 @@
 import { computed, onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
 import { useSessionStore } from "@/stores/session";
-import { logout } from "@/api/auth";
 import {
   todaySales,
   todayCollection,
@@ -61,13 +60,15 @@ const quickActions: Quick[] = [
   { icon: "route", label: "Today's route", to: "route-today", tone: "warning" },
 ];
 
-async function onLogout() {
-  try { await logout(); }
-  finally { session.logout(); await router.replace({ name: "login" }); }
-}
-
 function kindIcon(kind: ActivityRow["kind"]): "invoice" | "payment" {
   return kind === "invoice" ? "invoice" : "payment";
+}
+
+function onActivityClick(row: ActivityRow) {
+  if (row.kind === "invoice") {
+    void router.push({ name: "invoice-detail", params: { name: row.name } });
+  }
+  // payment detail view — future
 }
 </script>
 
@@ -141,7 +142,16 @@ function kindIcon(kind: ActivityRow["kind"]): "invoice" | "payment" {
         <button @click="router.push({ name: 'invoice-new' })">Start selling</button>
       </div>
       <ul v-else class="activity">
-        <li v-for="row in activity" :key="`${row.kind}:${row.name}`" class="activity-row">
+        <li
+          v-for="row in activity"
+          :key="`${row.kind}:${row.name}`"
+          class="activity-row"
+          :class="{ clickable: row.kind === 'invoice' }"
+          :role="row.kind === 'invoice' ? 'button' : undefined"
+          :tabindex="row.kind === 'invoice' ? 0 : -1"
+          @click="onActivityClick(row)"
+          @keyup.enter="onActivityClick(row)"
+        >
           <span class="avatar" :data-kind="row.kind">
             <Icon :name="kindIcon(row.kind)" :size="18" />
           </span>
@@ -153,10 +163,6 @@ function kindIcon(kind: ActivityRow["kind"]): "invoice" | "payment" {
         </li>
       </ul>
     </section>
-
-    <button class="ghost small" style="align-self:center" @click="onLogout">
-      <Icon name="logout" :size="16" /> Log out
-    </button>
   </div>
 </template>
 
@@ -231,7 +237,19 @@ function kindIcon(kind: ActivityRow["kind"]): "invoice" | "payment" {
 .section-head { display: flex; align-items: center; justify-content: space-between; }
 
 .activity { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0.55rem; }
-.activity-row { display: grid; grid-template-columns: auto 1fr auto; gap: 0.6rem; align-items: center; }
+.activity-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 0.6rem;
+  align-items: center;
+  border-radius: var(--radius-sm);
+  padding: 0.1rem 0.1rem;
+  transition: background var(--dur-fast) var(--ease);
+}
+.activity-row.clickable { cursor: pointer; }
+.activity-row.clickable:hover { background: var(--surface-muted); }
+.activity-row.clickable:active { transform: scale(0.99); }
+.activity-row:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
 .avatar {
   width: 2.25rem; height: 2.25rem;
   border-radius: var(--radius-pill);

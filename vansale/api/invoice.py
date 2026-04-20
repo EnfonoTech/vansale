@@ -203,26 +203,57 @@ def list_mine(limit: int = 50, customer: Optional[str] = None) -> list[dict]:
 @frappe.whitelist(methods=["GET"])
 def detail(name: str) -> dict:
     doc = frappe.get_doc("Sales Invoice", name)
+    taxes = [
+        {
+            "description": t.description,
+            "rate": float(t.rate or 0),
+            "tax_amount": float(t.tax_amount or 0),
+            "total": float(t.total or 0),
+        }
+        for t in (doc.taxes or [])
+    ]
+    sales_persons = [
+        {
+            "sales_person": sp.sales_person,
+            "allocated_percentage": float(sp.allocated_percentage or 0),
+        }
+        for sp in (doc.sales_team or [])
+    ]
     return {
         "name": doc.name,
         "customer": doc.customer,
         "customer_name": doc.customer_name,
+        "company": doc.company,
+        "currency": doc.currency,
+        "posting_date": str(doc.posting_date) if doc.posting_date else None,
+        "posting_time": str(doc.posting_time) if doc.posting_time else None,
+        "due_date": str(doc.due_date) if doc.due_date else None,
+        "is_return": int(doc.is_return or 0),
         "grand_total": float(doc.grand_total or 0),
         "net_total": float(doc.net_total or 0),
         "total_taxes_and_charges": float(doc.total_taxes_and_charges or 0),
+        "discount_amount": float(doc.discount_amount or 0),
         "outstanding_amount": float(doc.outstanding_amount or 0),
+        "paid_amount": float((doc.grand_total or 0) - (doc.outstanding_amount or 0)),
         "status": doc.status,
+        "docstatus": int(doc.docstatus or 0),
+        "remarks": doc.remarks,
         "items": [
             {
                 "item_code": i.item_code,
                 "item_name": i.item_name,
                 "qty": float(i.qty or 0),
                 "rate": float(i.rate or 0),
+                "price_list_rate": float(i.price_list_rate or 0),
+                "discount_percentage": float(i.discount_percentage or 0),
+                "discount_amount": float(i.discount_amount or 0),
                 "amount": float(i.amount or 0),
                 "uom": i.uom,
                 "warehouse": i.warehouse,
             }
             for i in doc.items
         ],
+        "taxes": taxes,
+        "sales_persons": sales_persons,
         "modified": naive_site_to_utc_iso(doc.modified),
     }

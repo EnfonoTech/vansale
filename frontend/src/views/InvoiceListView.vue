@@ -56,7 +56,15 @@ function tone(status: unknown): string {
       <button @click="router.push({ name: 'invoice-new' })">Start selling</button>
     </div>
     <ul v-else class="list">
-      <li v-for="r in rows" :key="String(r.name)" class="item">
+      <li
+        v-for="r in rows"
+        :key="String(r.name)"
+        class="item"
+        role="button"
+        tabindex="0"
+        @click="router.push({ name: 'invoice-detail', params: { name: String(r.name) } })"
+        @keyup.enter="router.push({ name: 'invoice-detail', params: { name: String(r.name) } })"
+      >
         <div class="body">
           <strong class="truncate">{{ r.customer_name || r.customer }}</strong>
           <span class="muted xsmall">{{ r.name }} · {{ r.posting_date }}</span>
@@ -83,7 +91,11 @@ function tone(status: unknown): string {
   grid-template-columns: 1fr auto;
   gap: 0.75rem;
   align-items: center;
+  cursor: pointer;
+  transition: transform var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease);
 }
+.item:active { transform: scale(0.99); }
+.item:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
 .body { display: flex; flex-direction: column; gap: 0.15rem; min-width: 0; }
 .right { text-align: right; display: flex; flex-direction: column; align-items: flex-end; gap: 0.25rem; }
 .right strong { font-variant-numeric: tabular-nums; }

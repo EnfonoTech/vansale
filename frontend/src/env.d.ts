@@ -23,3 +23,4 @@ interface ImportMeta {
 }
 
 declare const __BUILD_TARGET__: "web" | "native";
+declare const __APP_VERSION__: string;

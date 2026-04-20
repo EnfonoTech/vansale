@@ -62,6 +62,13 @@ const routes: RouteRecordRaw[] = [
     meta: { requiresAuth: true, requiresPin: true },
   },
   {
+    path: "/invoice/:name",
+    name: "invoice-detail",
+    component: () => import("@/views/InvoiceDetailView.vue"),
+    meta: { requiresAuth: true, requiresPin: true },
+    props: true,
+  },
+  {
     path: "/payment/new",
     name: "payment-new",
     component: () => import("@/views/PaymentFormView.vue"),
@@ -83,6 +90,12 @@ const routes: RouteRecordRaw[] = [
     path: "/sync",
     name: "sync-errors",
     component: () => import("@/views/SyncErrorsView.vue"),
+    meta: { requiresAuth: true, requiresPin: true },
+  },
+  {
+    path: "/more",
+    name: "more",
+    component: () => import("@/views/MoreView.vue"),
     meta: { requiresAuth: true, requiresPin: true },
   },
 ];

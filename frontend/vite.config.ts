@@ -1,10 +1,12 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { readFileSync } from "node:fs";
 import { defineConfig, loadEnv } from "vite";
 import vue from "@vitejs/plugin-vue";
 import { themePlugin } from "./plugins/vite-theme-plugin";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const pkg = JSON.parse(readFileSync(path.join(__dirname, "package.json"), "utf8")) as { version: string };
 
 /**
  * `CUSTOMER_BUILD_TARGET` switches base path:
@@ -54,6 +56,7 @@ export default defineConfig(({ mode, command }) => {
     },
     define: {
       __BUILD_TARGET__: JSON.stringify(target),
+      __APP_VERSION__: JSON.stringify(pkg.version),
     },
   };
 });

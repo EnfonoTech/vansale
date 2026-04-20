@@ -41,8 +41,61 @@ export async function listMine(limit = 50, customer?: string): Promise<Array<Rec
   return apiCall("GET", `vansale.api.invoice.list_mine?${qs.toString()}`);
 }
 
-export async function detail(name: string): Promise<Record<string, unknown>> {
-  return apiCall("GET", `vansale.api.invoice.detail?name=${encodeURIComponent(name)}`);
+export interface InvoiceDetailTax {
+  description: string;
+  rate: number;
+  tax_amount: number;
+  total: number;
+}
+
+export interface InvoiceDetailItem {
+  item_code: string;
+  item_name: string;
+  qty: number;
+  rate: number;
+  price_list_rate: number;
+  discount_percentage: number;
+  discount_amount: number;
+  amount: number;
+  uom: string | null;
+  warehouse: string | null;
+}
+
+export interface InvoiceDetailSalesPerson {
+  sales_person: string;
+  allocated_percentage: number;
+}
+
+export interface InvoiceDetail {
+  name: string;
+  customer: string;
+  customer_name: string;
+  company: string;
+  currency: string;
+  posting_date: string | null;
+  posting_time: string | null;
+  due_date: string | null;
+  is_return: number;
+  grand_total: number;
+  net_total: number;
+  total_taxes_and_charges: number;
+  discount_amount: number;
+  outstanding_amount: number;
+  paid_amount: number;
+  status: string;
+  docstatus: number;
+  remarks: string | null;
+  items: InvoiceDetailItem[];
+  taxes: InvoiceDetailTax[];
+  sales_persons: InvoiceDetailSalesPerson[];
+  modified: string | null;
+}
+
+export async function detail(name: string): Promise<InvoiceDetail> {
+  return apiCall<InvoiceDetail>(
+    "GET",
+    `vansale.api.invoice.detail?name=${encodeURIComponent(name)}`,
+  );
 }
 
 /** Offline-first save. Online synchronous path first, queue on network failure,

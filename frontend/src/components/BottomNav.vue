@@ -6,14 +6,14 @@ import Icon from "./Icon.vue";
 const router = useRouter();
 const route = useRoute();
 
-interface Tab { name: string; icon: "home" | "route" | "invoice" | "stock" | "more"; label: string; routes: string[] }
+interface Tab { name: string; icon: "home" | "route" | "invoice" | "customer" | "more"; label: string; routes: string[] }
 
 const tabs: Tab[] = [
   { name: "dashboard", icon: "home", label: "Home", routes: ["dashboard"] },
   { name: "route-today", icon: "route", label: "Route", routes: ["route-today"] },
-  { name: "invoices", icon: "invoice", label: "Sales", routes: ["invoices", "invoice-new"] },
-  { name: "van-stock", icon: "stock", label: "Stock", routes: ["van-stock"] },
-  { name: "customers", icon: "more", label: "Customers", routes: ["customers", "customer-detail"] },
+  { name: "invoices", icon: "invoice", label: "Sales", routes: ["invoices", "invoice-new", "invoice-detail"] },
+  { name: "customers", icon: "customer", label: "Customers", routes: ["customers", "customer-detail"] },
+  { name: "more", icon: "more", label: "More", routes: ["more", "van-stock", "sync-errors"] },
 ];
 
 const activeName = computed(() => String(route.name ?? ""));
