@@ -72,6 +72,11 @@ function returnInvoice() {
   void router.push({ name: "invoice-return", params: { name: inv.value.name } });
 }
 
+function editDraft() {
+  if (!inv.value) return;
+  void router.push({ name: "invoice-edit", params: { name: inv.value.name } });
+}
+
 /**
  * Draft-stage actions.
  * - Submit flips docstatus 0 → 1 (posts stock, opens outstanding).
@@ -155,6 +160,9 @@ async function deleteInvoice() {
           <template v-if="inv.docstatus === 0">
             <button class="primary" :disabled="busy" @click="submitInvoice">
               <Icon name="check" :size="16" /> {{ busy ? "Submitting…" : "Submit" }}
+            </button>
+            <button class="ghost" :disabled="busy" @click="editDraft">
+              <Icon name="edit" :size="16" /> Edit
             </button>
             <button class="ghost" :disabled="busy" @click="printInvoice">
               <Icon name="receipt" :size="16" /> Print

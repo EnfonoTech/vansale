@@ -82,6 +82,13 @@ const routes: RouteRecordRaw[] = [
     props: true,
   },
   {
+    path: "/invoice/:name/edit",
+    name: "invoice-edit",
+    component: () => import("@/views/InvoiceFormView.vue"),
+    meta: { requiresAuth: true, requiresPin: true },
+    props: true,
+  },
+  {
     path: "/invoice/:name/return",
     name: "invoice-return",
     component: () => import("@/views/SalesReturnView.vue"),

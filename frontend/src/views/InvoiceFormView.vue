@@ -24,7 +24,7 @@ import {
   type ItemRow,
   type ItemUom,
 } from "@/api/item";
-import { save, type InvoiceItem } from "@/api/invoice";
+import { save, detail, deleteDraft, type InvoiceItem } from "@/api/invoice";
 import { ApiError } from "@/app/frappe";
 import { useSessionStore } from "@/stores/session";
 import { useToastStore } from "@/stores/toasts";
@@ -35,6 +35,14 @@ const router = useRouter();
 const route = useRoute();
 const session = useSessionStore();
 const toasts = useToastStore();
+
+const props = defineProps<{ name?: string }>();
+
+// Edit mode: we're editing an existing draft invoice. Saved doc name is
+// captured so submit can delete-old + save-new (drafts only — safe because
+// no stock is posted and no GL entries exist until submit).
+const editName = computed(() => props.name || String(route.params.name ?? ""));
+const isEditMode = computed(() => Boolean(editName.value));
 
 interface Line extends InvoiceItem {
   uoms?: ItemUom[];        // per-line UOM choices
@@ -66,6 +74,46 @@ const netTotal = computed(() => lines.value.reduce((s, l) => s + l.amount, 0));
 const taxTotal = computed(() => (netTotal.value - (discountAmount.value || 0)) * TAX_RATE);
 const grandTotal = computed(() => netTotal.value - (discountAmount.value || 0) + taxTotal.value);
 
+/**
+ * Itemwise split preview — shows how the invoice-level discount is spread
+ * across each line proportionally to its amount. Mirrors the math in
+ * `doSave()` so the operator sees exactly what the backend will store.
+ */
+interface DiscountSplitRow {
+  item_name: string;
+  qty: number;
+  share: number;      // total discount absorbed by this line
+  perUnit: number;    // per-unit discount_amount stamped on the row
+  netAfter: number;   // line amount after discount
+}
+const discountSplit = computed<DiscountSplitRow[]>(() => {
+  const docDisc = Number(discountAmount.value) || 0;
+  const subtotal = netTotal.value;
+  if (docDisc <= 0 || subtotal <= 0 || lines.value.length === 0) return [];
+  const rows: DiscountSplitRow[] = [];
+  let allocated = 0;
+  lines.value.forEach((l, i) => {
+    const qty = Number(l.qty) || 0;
+    if (qty <= 0) {
+      rows.push({ item_name: l.item_name || l.item_code, qty, share: 0, perUnit: 0, netAfter: l.amount });
+      return;
+    }
+    const isLast = i === lines.value.length - 1;
+    const share = isLast
+      ? Math.max(0, docDisc - allocated)
+      : docDisc * ((Number(l.amount) || 0) / subtotal);
+    allocated += share;
+    rows.push({
+      item_name: l.item_name || l.item_code,
+      qty,
+      share,
+      perUnit: share / qty,
+      netAfter: Math.max(0, (Number(l.amount) || 0) - share),
+    });
+  });
+  return rows;
+});
+
 const selectedCustomer = computed(() =>
   customers.value.find((c) => c.name === customer.value),
 );
@@ -90,6 +138,42 @@ watch(customer, async (newCustomer) => {
 async function loadAll() {
   customers.value = await listCustomers(undefined, 200);
   items.value = await listItems(undefined, warehouse.value || undefined, 300);
+  if (isEditMode.value) {
+    await prefillFromDraft(editName.value);
+  }
+}
+
+async function prefillFromDraft(name: string) {
+  try {
+    const doc = await detail(name);
+    if (doc.docstatus !== 0) {
+      toasts.error("Only draft invoices can be edited");
+      void router.replace({ name: "invoice-detail", params: { name } });
+      return;
+    }
+    customer.value = doc.customer;
+    remarks.value = doc.remarks || "";
+    discountAmount.value = doc.discount_amount || null;
+    // Rebuild line rows. We skip UOM re-fetching since the doc already has
+    // rate/price_list_rate frozen; operator can still change qty/rate inline.
+    lines.value = doc.items.map<Line>((it) => ({
+      item_code: it.item_code,
+      item_name: it.item_name,
+      qty: it.qty,
+      rate: it.rate,
+      price_list_rate: it.price_list_rate,
+      discount_percentage: it.discount_percentage,
+      discount_amount: it.discount_amount,
+      uom: it.uom ?? undefined,
+      conversion_factor: 1,  // server recomputes on save
+      warehouse: it.warehouse ?? undefined,
+      uoms: it.uom ? [{ uom: it.uom, conversion_factor: 1, price_list_rate: it.price_list_rate }] : [],
+      amount: it.amount,
+    }));
+  } catch (e) {
+    toasts.error(e instanceof Error ? e.message : String(e));
+    void router.replace({ name: "invoices" });
+  }
 }
 
 async function searchItems() {
@@ -236,11 +320,22 @@ async function doSave(submit: 0 | 1) {
       discount_amount: undefined,
       apply_discount_on: undefined,
     };
+    // Edit mode: delete the old draft first so we don't leave an orphan. The
+    // server names a new draft, but that's an acceptable trade-off — no
+    // external references point at draft names.
+    if (isEditMode.value) {
+      try { await deleteDraft(editName.value); }
+      catch (err) {
+        // If delete fails (race condition / already submitted elsewhere),
+        // bail — don't create a duplicate.
+        throw err instanceof Error ? err : new Error(String(err));
+      }
+    }
     const res = await save(payload);
     toasts.success(
       res.queued
         ? "Saved offline — will sync when online"
-        : `Invoice ${res.name} ${flag ? "submitted" : "saved as draft"} (${session.currency} ${res.grand_total.toFixed(2)})`,
+        : `Invoice ${res.name} ${flag ? "submitted" : isEditMode.value ? "updated" : "saved as draft"} (${session.currency} ${res.grand_total.toFixed(2)})`,
     );
     lines.value = [];
     // Always land on the detail view after a successful save/submit so the
@@ -420,6 +515,29 @@ onMounted(loadAll);
         <span class="tiny">Invoice discount ({{ session.currency }})</span>
         <input type="number" min="0" step="any" inputmode="decimal" v-model.number="discountAmount" placeholder="0" />
       </label>
+      <!-- Itemwise split preview — only visible when operator enters a
+           doc-level discount. Shows exactly how the amount flows into each
+           line's per-unit discount_amount (what gets stored + printed). -->
+      <div v-if="discountSplit.length > 0" class="disc-split">
+        <div class="disc-split-head">
+          <Icon name="tag" :size="14" />
+          <span>Discount split across items</span>
+        </div>
+        <ul class="disc-split-list">
+          <li v-for="(row, i) in discountSplit" :key="i" class="disc-split-row">
+            <div class="disc-split-name">
+              <strong class="truncate">{{ row.item_name }}</strong>
+              <span class="muted xsmall">
+                {{ row.qty }} × - <SarSymbol :code="session.currency" />{{ row.perUnit.toFixed(2) }}/unit
+              </span>
+            </div>
+            <div class="disc-split-amt">
+              <strong class="tabular warn"><SarSymbol :code="session.currency" />{{ row.share.toFixed(2) }}</strong>
+              <span class="muted xsmall">Net <SarSymbol :code="session.currency" />{{ row.netAfter.toFixed(2) }}</span>
+            </div>
+          </li>
+        </ul>
+      </div>
       <div class="tot-row muted">
         <span>VAT ({{ (TAX_RATE * 100).toFixed(0) }}%)</span>
         <span class="tabular"><SarSymbol :code="session.currency" />{{ taxTotal.toFixed(2) }}</span>
@@ -510,6 +628,27 @@ onMounted(loadAll);
 
 .totals .tot-row { display: flex; justify-content: space-between; align-items: center; font-size: var(--text-sm); }
 .totals .tot-row.grand { font-size: var(--text-base); font-weight: 700; border-top: 1px solid var(--border-soft, rgba(0,0,0,.08)); padding-top: 0.4rem; margin-top: 0.1rem; }
+
+.disc-split {
+  background: var(--warning-soft, color-mix(in srgb, var(--warning) 14%, transparent));
+  border: 1px dashed var(--warning);
+  border-radius: var(--radius-sm);
+  padding: 0.55rem 0.7rem;
+  display: flex; flex-direction: column; gap: 0.45rem;
+}
+.disc-split-head {
+  display: inline-flex; align-items: center; gap: 0.35rem;
+  font-size: var(--text-xs); font-weight: 600; color: var(--warning);
+  text-transform: uppercase; letter-spacing: 0.04em;
+}
+.disc-split-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0.35rem; }
+.disc-split-row {
+  display: grid; grid-template-columns: 1fr auto; gap: 0.5rem; align-items: center;
+  font-size: var(--text-sm);
+}
+.disc-split-name { display: flex; flex-direction: column; min-width: 0; }
+.disc-split-amt { display: flex; flex-direction: column; align-items: flex-end; gap: 0.05rem; }
+.warn { color: var(--warning); }
 
 .truncate { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
