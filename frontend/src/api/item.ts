@@ -12,9 +12,25 @@ export interface ItemRow {
   stock_qty?: number;
 }
 
+export interface ItemUom {
+  uom: string;
+  conversion_factor: number;
+  price_list_rate: number;
+}
+
 export interface ItemDetail extends ItemRow {
   price_list_rate: number;
+  price_list?: string | null;
+  uoms: ItemUom[];
   tax_template?: string | null;
+  customer?: string | null;
+}
+
+export interface PriceForResult {
+  item_code: string;
+  uom: string | null;
+  price_list: string | null;
+  price_list_rate: number;
 }
 
 export async function listMine(search?: string, warehouse?: string, limit = 100): Promise<ItemRow[]> {
@@ -30,6 +46,14 @@ export async function detail(itemCode: string, customer?: string): Promise<ItemD
   qs.set("item_code", itemCode);
   if (customer) qs.set("customer", customer);
   return apiCall<ItemDetail>("GET", `vansale.api.item.detail?${qs.toString()}`);
+}
+
+export async function priceFor(itemCode: string, customer?: string, uom?: string): Promise<PriceForResult> {
+  const qs = new URLSearchParams();
+  qs.set("item_code", itemCode);
+  if (customer) qs.set("customer", customer);
+  if (uom) qs.set("uom", uom);
+  return apiCall<PriceForResult>("GET", `vansale.api.item.price_for?${qs.toString()}`);
 }
 
 export async function refreshCache(warehouse?: string): Promise<ItemRow[]> {

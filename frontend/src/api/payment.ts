@@ -10,7 +10,8 @@ export interface PaymentPayload {
   mode_of_payment?: "Cash" | "Bank" | string;
   reference_no?: string;
   reference_date?: string;
-  invoice_name?: string;
+  invoice_name?: string;            // legacy single-invoice
+  invoice_names?: string[];         // multi-pick (Phase E)
   remarks?: string;
 }
 

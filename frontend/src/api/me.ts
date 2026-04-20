@@ -16,6 +16,8 @@ export interface ConfigDefaults {
   cost_centers: string[];
   van_code: string | null;
   currency: string | null;
+  sales_person: string | null;
+  sales_person_name: string | null;
 }
 
 export function configDefaults() {

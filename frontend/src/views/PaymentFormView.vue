@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref, watch } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { listMine as listCustomers } from "@/api/customer";
 import { outstanding, save } from "@/api/payment";
@@ -16,7 +16,8 @@ const toasts = useToastStore();
 const customers = ref<Array<{ name: string; customer_name: string }>>([]);
 const invoices = ref<Array<Record<string, unknown>>>([]);
 const customer = ref(String(route.query.customer ?? ""));
-const invoiceName = ref("");
+const preselectInvoice = String(route.query.invoice ?? "");
+const selected = ref<Set<string>>(new Set());
 const amount = ref<number | "">("");
 const mode = ref<"Cash" | "Bank">("Cash");
 const reference = ref("");
@@ -31,11 +32,15 @@ onMounted(async () => {
 watch(customer, loadOutstanding);
 
 async function loadOutstanding() {
-  invoiceName.value = "";
+  selected.value = new Set();
   invoices.value = [];
   if (customer.value) {
     try { invoices.value = await outstanding(customer.value); }
     catch { /* keep empty; user can still free-text a payment */ }
+    if (preselectInvoice) {
+      const row = invoices.value.find((r) => String(r.name) === preselectInvoice);
+      if (row) togglePick(row);
+    }
   }
 }
 
@@ -44,10 +49,22 @@ function fmt(n: unknown): string {
   return new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 }).format(v);
 }
 
-function pickInvoice(r: Record<string, unknown>) {
-  invoiceName.value = String(r.name);
-  amount.value = Number(r.outstanding_amount) || 0;
+function togglePick(r: Record<string, unknown>) {
+  const n = String(r.name);
+  const s = new Set(selected.value);
+  if (s.has(n)) s.delete(n); else s.add(n);
+  selected.value = s;
+  // Auto-fill amount with the sum of picked outstanding (user may override).
+  amount.value = invoices.value
+    .filter((row) => s.has(String(row.name)))
+    .reduce((t, row) => t + (Number(row.outstanding_amount) || 0), 0);
 }
+
+const selectedList = computed(() => Array.from(selected.value));
+const hasPicks = computed(() => selected.value.size > 0);
+const totalOutstanding = computed(() =>
+  invoices.value.reduce((t, r) => t + (Number(r.outstanding_amount) || 0), 0),
+);
 
 async function submit() {
   if (!customer.value) { toasts.warn("Select customer"); return; }
@@ -60,7 +77,7 @@ async function submit() {
       paid_amount: n,
       mode_of_payment: mode.value,
       reference_no: reference.value || undefined,
-      invoice_name: invoiceName.value || undefined,
+      invoice_names: hasPicks.value ? selectedList.value : undefined,
       remarks: remarks.value || undefined,
     });
     toasts.success(
@@ -95,18 +112,32 @@ async function submit() {
     </section>
 
     <section v-if="invoices.length > 0" class="card stack">
-      <h3 style="margin:0 0 0.25rem">Outstanding invoices</h3>
+      <div class="row-head">
+        <h3 style="margin:0">Outstanding invoices</h3>
+        <span class="muted xsmall">
+          Total {{ session.currency }} {{ fmt(totalOutstanding) }}
+        </span>
+      </div>
+      <p v-if="!hasPicks" class="hint">
+        <Icon name="clock" :size="14" />
+        None picked — payment will auto-allocate FIFO (oldest first).
+      </p>
       <ul class="inv-list">
         <li v-for="r in invoices" :key="String(r.name)">
           <button
             type="button"
             class="inv-row"
-            :class="{ active: invoiceName === r.name }"
-            @click="pickInvoice(r)"
+            :class="{ active: selected.has(String(r.name)) }"
+            @click="togglePick(r)"
           >
-            <div>
-              <strong>{{ r.name }}</strong>
-              <div class="muted xsmall">{{ r.posting_date }}</div>
+            <div class="check-col">
+              <span class="check" :data-on="selected.has(String(r.name))">
+                <Icon v-if="selected.has(String(r.name))" name="check" :size="14" />
+              </span>
+              <div>
+                <strong>{{ r.name }}</strong>
+                <div class="muted xsmall">{{ r.posting_date }}</div>
+              </div>
             </div>
             <div class="amt">
               <strong>{{ session.currency }} {{ fmt(r.outstanding_amount) }}</strong>
@@ -176,6 +207,13 @@ async function submit() {
 .field { display: flex; flex-direction: column; gap: 0.3rem; }
 .label { font-size: var(--text-sm); color: var(--text-muted); font-weight: 500; }
 
+.row-head { display: flex; justify-content: space-between; align-items: center; }
+.hint {
+  display: inline-flex; align-items: center; gap: 0.3rem;
+  font-size: var(--text-xs); color: var(--text-muted);
+  background: var(--surface-muted); padding: 0.35rem 0.55rem;
+  border-radius: var(--radius-sm); margin: 0;
+}
 .inv-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0.4rem; }
 .inv-row {
   all: unset; cursor: pointer; width: 100%;
@@ -188,6 +226,15 @@ async function submit() {
 }
 .inv-row.active { background: var(--primary-soft); border-color: var(--primary); }
 .inv-row .amt { text-align: right; display: flex; flex-direction: column; align-items: flex-end; gap: 0.15rem; }
+.check-col { display: flex; align-items: center; gap: 0.6rem; }
+.check {
+  width: 1.2rem; height: 1.2rem;
+  border: 2px solid var(--border);
+  border-radius: 4px; display: grid; place-items: center;
+  color: white; background: transparent;
+  transition: all var(--dur-fast) var(--ease);
+}
+.check[data-on="true"] { background: var(--primary); border-color: var(--primary); }
 
 .amount-input {
   position: relative;

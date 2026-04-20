@@ -32,13 +32,31 @@ export async function detail(name: string): Promise<CustomerDetail> {
   );
 }
 
-export async function create(payload: {
+export interface CustomerCreatePayload {
   customer_name: string;
+  customer_type?: "b2b" | "b2c";
   mobile_no?: string;
+  email_id?: string;
   territory?: string;
   tax_id?: string;
-}): Promise<{ name: string; customer_name: string }> {
-  return apiCall("POST", "vansale.api.customer.create", payload);
+  customer_group?: string;
+  address_line1?: string;
+  address_line2?: string;
+  city?: string;
+  state?: string;
+  pincode?: string;
+  country?: string;
+}
+
+export interface CustomerCreateResult {
+  name: string;
+  customer_name: string;
+  customer_type?: string;
+  address?: string | null;
+}
+
+export async function create(payload: CustomerCreatePayload): Promise<CustomerCreateResult> {
+  return apiCall<CustomerCreateResult>("POST", "vansale.api.customer.create", payload);
 }
 
 /** Populate the local cache (online only). Used on dashboard refresh. */

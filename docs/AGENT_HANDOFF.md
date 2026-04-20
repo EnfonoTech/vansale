@@ -1,7 +1,7 @@
 # Van Sale — Agent Handoff
 
 > **Start here if you're a fresh agent picking up this repo.**
-> As of 2026-04-19 all 5 phases are live on `trading-demo.enfonoerp.com`.
+> As of 2026-04-20 P1–P5 + feedback phases A–E all live on `trading-demo.enfonoerp.com`.
 > Phase plans in [`superpowers/plans/`](superpowers/plans/).
 
 ---
@@ -42,6 +42,19 @@ that inherits every lesson from the Fateh HR rebuild.
 - **P3 Core sales flow** — API for customer / item / invoice / payment / sales return / dashboard (today sales + collection + recent activity + month summary + warehouses); Vue views: Dashboard, CustomerList, InvoiceList, InvoiceForm, PaymentForm. Every write is idempotent by `client_id` so drain retries are safe.
 - **P4 Van-specific** — Van Route Plan + Stop + Visit Log DocTypes; `route.today/start_visit/end_visit/daily_report` API; `van_stock.list_stock/transfer_in` using ERPNext Bin (no parallel ledger); scanner / printer / GPS feature helpers (lazy-import Capacitor plugins); `RouteTodayView`, `VanStockView`.
 - **P5 Capacitor shell** — `android-capacitor/` with package.json, vite.config.ts, capacitor.config.ts, index.html, src symlink to ../frontend/src; route-hierarchy native back button; `@capacitor/filesystem`-based `saveBlobToDevice`; `bump-version.mjs` (atomic), `_patch-build-gradle.py`, `generate-customer-assets.mjs`, `generate-keystore.sh`, `build-customer.sh` (one-shot).
+
+### Feedback phases (2026-04-20 — from user PDF test list)
+
+- **A UI redesign + runtime fixes** — design-system tokens, icon set (28), 5-tab bottom nav (Home/Route/Sales/Customers/More), toast store, redesigned every view; auto-apply Company default Sales Taxes Template on invoice; v15 Payment Entry explicit `paid_from_account_currency`/`paid_to_account_currency`/`party_account`; `naive_site_to_utc_iso` accepts `str`; CustomerDetailView rewired.
+- **B Invoice form overhaul** — `item.detail` returns `uoms[]` with per-UOM price_list_rate via Customer→CustomerGroup→Selling Settings chain; `item.price_for` for UOM change; `invoice.save` accepts per-line `uom`/`conversion_factor`/`price_list_rate`/`discount_percentage`, invoice-level `discount_amount`/`apply_discount_on`, `payment_type` + `mode_of_payment` (auto-adds payments row for Cash + Mode of Payment default account), auto-tags `sales_team` via Vansale Configuration User `sales_person` field. Frontend: catalog click = new line (same-item multi-row), UOM select per line, editable rate with price-list display, discount% per line, Cash/Credit toggle, Save Draft / Save & Submit.
+- **C Customer create** — `customer.create` extended with `customer_type` ("b2b"|"b2c"), email, address fields; B2B requires `address_line1` + `city`; creates Address doc + links as primary. `CustomerFormView.vue` + route `customer-new`; inline "New" link from InvoiceFormView + CustomerListView, redirect query back to invoice.
+- **D Print + statement** — auto-print popup after submit via `/printview?trigger_print=1`; clickable recent invoices on CustomerDetailView (fixes PDF §3); `customer.statement_html` endpoint (opening GL balance → FIFO ledger of invoices + payments → closing balance), served inline via `display_content_as="inline"`.
+- **E Payment FIFO** — `payment.save` accepts `invoice_names: list[str]` for multi-pick; when neither `invoice_name` nor list supplied, auto-allocates FIFO across all outstanding invoices oldest-first; leftover beyond total outstanding remains unallocated (customer credit). `PaymentFormView.vue` multi-select with checkboxes, total outstanding header, FIFO hint when none picked.
+
+### Admin follow-ups (not code)
+
+- Set `sales_person` on the Vansale Configuration User row for each van user so commission auto-tag fires on invoice save.
+- Verify `ksa_compliance` hook attaches ZATCA QR on Sales Invoice submit — print via `/printview?doctype=Sales%20Invoice&name=<name>&format=Standard` and confirm QR renders.
 
 ### Smoke test results (post-deploy)
 

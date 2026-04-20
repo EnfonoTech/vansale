@@ -66,9 +66,14 @@ function initials(name: string): string {
 
 <template>
   <div class="stack">
-    <div class="search-bar">
-      <Icon name="search" :size="18" class="search-ic" />
-      <input v-model="search" placeholder="Search name, mobile, VAT" aria-label="Search customers" />
+    <div class="top-bar">
+      <div class="search-bar">
+        <Icon name="search" :size="18" class="search-ic" />
+        <input v-model="search" placeholder="Search name, mobile, VAT" aria-label="Search customers" />
+      </div>
+      <button type="button" class="new-btn" @click="router.push({ name: 'customer-new' })">
+        <Icon name="plus" :size="18" /> New
+      </button>
     </div>
 
     <p v-if="source === 'cache'" class="muted small">
@@ -104,6 +109,15 @@ function initials(name: string): string {
 </template>
 
 <style scoped>
+.top-bar { display: grid; grid-template-columns: 1fr auto; gap: 0.5rem; align-items: center; }
+.new-btn {
+  all: unset; cursor: pointer;
+  padding: 0 0.95rem; height: 2.5rem;
+  background: var(--primary); color: var(--on-primary, white);
+  border-radius: var(--radius);
+  display: inline-flex; align-items: center; gap: 0.3rem;
+  font-weight: 600; font-size: var(--text-sm);
+}
 .search-bar {
   position: relative;
 }

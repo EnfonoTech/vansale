@@ -10,7 +10,11 @@ export interface InvoiceItem {
   item_name?: string;
   qty: number;
   rate: number;
+  price_list_rate?: number;
+  discount_percentage?: number;
+  discount_amount?: number;
   uom?: string;
+  conversion_factor?: number;
   warehouse?: string;
 }
 
@@ -21,6 +25,10 @@ export interface InvoicePayload {
   remarks?: string;
   update_stock?: 0 | 1;
   submit?: 0 | 1;
+  payment_type?: "cash" | "credit";
+  mode_of_payment?: string;
+  discount_amount?: number;
+  apply_discount_on?: "Grand Total" | "Net Total";
 }
 
 export interface SavedInvoice {

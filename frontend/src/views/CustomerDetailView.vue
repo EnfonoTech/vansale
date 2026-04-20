@@ -47,6 +47,13 @@ function newPayment() {
 function callMobile() {
   if (customer.value?.mobile_no) window.location.href = `tel:${customer.value.mobile_no}`;
 }
+function openInvoice(name: string) {
+  void router.push({ name: "invoice-detail", params: { name } });
+}
+function printStatement() {
+  const url = `/api/method/vansale.api.customer.statement_html?name=${encodeURIComponent(customerName)}`;
+  window.open(url, "_blank", "noopener,noreferrer");
+}
 </script>
 
 <template>
@@ -96,6 +103,9 @@ function callMobile() {
         <button class="action-btn success" @click="newPayment">
           <Icon name="payment" :size="18" /> Payment
         </button>
+        <button class="action-btn ghost" @click="printStatement">
+          <Icon name="receipt" :size="18" /> Statement
+        </button>
       </section>
 
       <section v-if="customer.addresses.length > 0" class="card stack">
@@ -117,12 +127,14 @@ function callMobile() {
           <span class="muted small">No invoices yet.</span>
         </div>
         <ul v-else class="inv-list">
-          <li v-for="r in invoices" :key="String(r.name)" class="inv-row">
-            <div>
-              <strong>{{ r.name }}</strong>
-              <div class="muted xsmall">{{ r.posting_date }} · {{ r.status }}</div>
-            </div>
-            <strong>{{ fmt(r.grand_total) }}</strong>
+          <li v-for="r in invoices" :key="String(r.name)">
+            <button type="button" class="inv-row" @click="openInvoice(String(r.name))">
+              <div>
+                <strong>{{ r.name }}</strong>
+                <div class="muted xsmall">{{ r.posting_date }} · {{ r.status }}</div>
+              </div>
+              <strong>{{ fmt(r.grand_total) }}</strong>
+            </button>
           </li>
         </ul>
       </section>
@@ -155,9 +167,10 @@ function callMobile() {
 .outstanding[data-positive="true"] { background: var(--warning-soft); color: var(--warning); }
 .outstanding strong { font-size: var(--text-xl); font-variant-numeric: tabular-nums; }
 
-.actions-row { display: grid; grid-template-columns: 1fr 1fr; gap: 0.6rem; }
-.action-btn { min-height: 3rem; font-size: var(--text-base); }
+.actions-row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0.5rem; }
+.action-btn { min-height: 3rem; font-size: var(--text-sm); padding: 0 0.4rem; }
 .action-btn.success { background: var(--success); }
+.action-btn.ghost { background: var(--surface-muted); color: var(--text); }
 
 .address {
   display: flex; gap: 0.5rem; padding: 0.5rem 0;
@@ -166,7 +179,14 @@ function callMobile() {
 .address:first-of-type { border-top: none; padding-top: 0; }
 .addr-ic { color: var(--text-faint); flex-shrink: 0; margin-top: 0.15rem; }
 
-.inv-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0.4rem; }
-.inv-row { display: flex; justify-content: space-between; align-items: center; padding: 0.5rem 0; border-top: 1px solid var(--border); }
-.inv-row:first-of-type { border-top: none; padding-top: 0; }
+.inv-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0; }
+.inv-row {
+  all: unset; cursor: pointer; width: 100%;
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 0.55rem 0.25rem;
+  border-top: 1px solid var(--border);
+  transition: background var(--dur-fast) var(--ease);
+}
+.inv-row:first-of-type { border-top: none; }
+.inv-row:active { background: var(--surface-muted); }
 </style>
