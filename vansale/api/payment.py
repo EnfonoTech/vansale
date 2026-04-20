@@ -82,10 +82,22 @@ def save(
     reference_no: Optional[str] = None,
     reference_date: Optional[str] = None,
     invoice_name: Optional[str] = None,
+    invoice_names: Optional[list[str]] = None,
     posting_ts: Optional[str] = None,
     remarks: Optional[str] = None,
     submit: int = 1,
 ) -> dict:
+    """
+    Allocation rules (PDF §2d):
+      - `invoice_names` list provided   → allocate FIFO across the picked
+                                          invoices in the given order
+      - `invoice_name` single provided  → allocate against that invoice only
+      - neither provided                → FIFO auto-allocate across ALL
+                                          outstanding invoices for the
+                                          customer, oldest first; any
+                                          leftover remains unallocated
+                                          (customer credit)
+    """
     if not client_id:
         frappe.throw(_("client_id is required"))
     if not customer:
@@ -146,25 +158,60 @@ def save(
     doc.posting_date = posting.date()
     doc.remarks = remarks
 
-    if invoice_name:
+    # Build the list of invoices to allocate against (FIFO order).
+    target_invoices: list[dict] = []
+    if invoice_names:
+        # Explicit multi-pick — respect caller order.
+        for n in invoice_names:
+            inv = frappe.db.get_value(
+                "Sales Invoice",
+                n,
+                ["name", "grand_total", "outstanding_amount"],
+                as_dict=True,
+            )
+            if inv and float(inv.outstanding_amount or 0) > 0:
+                target_invoices.append(inv)
+    elif invoice_name:
         inv = frappe.db.get_value(
             "Sales Invoice",
             invoice_name,
-            ["grand_total", "outstanding_amount", "currency"],
+            ["name", "grand_total", "outstanding_amount"],
             as_dict=True,
         )
         if inv:
-            allocated = min(amount, float(inv.outstanding_amount or 0))
-            doc.append(
-                "references",
-                {
-                    "reference_doctype": "Sales Invoice",
-                    "reference_name": invoice_name,
-                    "total_amount": float(inv.grand_total or 0),
-                    "outstanding_amount": float(inv.outstanding_amount or 0),
-                    "allocated_amount": allocated,
-                },
-            )
+            target_invoices.append(inv)
+    else:
+        # Auto-FIFO: oldest outstanding invoices first, until amount exhausted.
+        target_invoices = frappe.get_all(
+            "Sales Invoice",
+            filters={
+                "customer": customer,
+                "docstatus": 1,
+                "outstanding_amount": [">", 0],
+            },
+            fields=["name", "grand_total", "outstanding_amount"],
+            order_by="posting_date asc, creation asc",
+        )
+
+    remaining = amount
+    for inv in target_invoices:
+        if remaining <= 0:
+            break
+        out = float(inv["outstanding_amount"] or 0)
+        if out <= 0:
+            continue
+        alloc = min(remaining, out)
+        doc.append(
+            "references",
+            {
+                "reference_doctype": "Sales Invoice",
+                "reference_name": inv["name"],
+                "total_amount": float(inv["grand_total"] or 0),
+                "outstanding_amount": out,
+                "allocated_amount": alloc,
+            },
+        )
+        remaining -= alloc
 
     # NOTE: do NOT call doc.setup_party_account_field() — it's gone in
     # ERPNext v15 and previously raised AttributeError("'str'"). The
