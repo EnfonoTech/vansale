@@ -101,22 +101,76 @@ def detail(name: str) -> dict:
 
 
 @frappe.whitelist(methods=["POST"])
-def create(customer_name: str, mobile_no: str | None = None, territory: str | None = None,
-           tax_id: str | None = None, customer_group: str | None = None) -> dict:
+def create(
+    customer_name: str,
+    mobile_no: str | None = None,
+    territory: str | None = None,
+    tax_id: str | None = None,
+    customer_group: str | None = None,
+    customer_type: str | None = None,         # "b2b" | "b2c"
+    email_id: str | None = None,
+    address_line1: str | None = None,
+    address_line2: str | None = None,
+    city: str | None = None,
+    state: str | None = None,
+    pincode: str | None = None,
+    country: str | None = None,
+) -> dict:
+    """Create a Customer + optional primary Address.
+
+    B2B (customer_type="b2b") requires address_line1 + city (per PDF §2b).
+    B2C (customer_type="b2c") default — Individual, address optional.
+    """
     if not customer_name:
         frappe.throw(_("Customer name required"))
+    ctype = (customer_type or "b2c").lower()
+    is_b2b = ctype == "b2b"
+    if is_b2b and (not address_line1 or not city):
+        frappe.throw(_("Address (line 1 + city) is mandatory for B2B customers"))
+
     doc = frappe.get_doc({
         "doctype": "Customer",
         "customer_name": customer_name,
-        "customer_type": "Individual",
+        "customer_type": "Company" if is_b2b else "Individual",
         "mobile_no": mobile_no,
+        "email_id": email_id,
         "territory": territory or frappe.db.get_single_value("Selling Settings", "territory") or "All Territories",
         "customer_group": customer_group or frappe.db.get_single_value("Selling Settings", "customer_group") or "All Customer Groups",
         "tax_id": tax_id,
     })
     doc.insert(ignore_permissions=False)
+
+    # Create Address if fields provided (mandatory for B2B, optional for B2C).
+    address_name: str | None = None
+    if address_line1:
+        addr = frappe.get_doc({
+            "doctype": "Address",
+            "address_title": customer_name,
+            "address_type": "Billing",
+            "address_line1": address_line1,
+            "address_line2": address_line2,
+            "city": city,
+            "state": state,
+            "pincode": pincode,
+            "country": country or frappe.db.get_single_value("Global Defaults", "country") or "Saudi Arabia",
+            "phone": mobile_no,
+            "email_id": email_id,
+            "is_primary_address": 1,
+            "is_shipping_address": 1,
+            "links": [{"link_doctype": "Customer", "link_name": doc.name}],
+        })
+        addr.insert(ignore_permissions=False)
+        address_name = addr.name
+        # Link back to customer as primary address.
+        frappe.db.set_value("Customer", doc.name, "customer_primary_address", address_name)
+
     frappe.db.commit()
-    return {"name": doc.name, "customer_name": doc.customer_name}
+    return {
+        "name": doc.name,
+        "customer_name": doc.customer_name,
+        "customer_type": doc.customer_type,
+        "address": address_name,
+    }
 
 
 @frappe.whitelist(methods=["GET"])
