@@ -257,15 +257,27 @@ def list_mine(limit: int = 50, customer: Optional[str] = None) -> list[dict]:
 
 @frappe.whitelist(methods=["GET"])
 def outstanding(customer: str) -> list[dict]:
+    """Return submitted, unpaid Sales Invoices for a customer.
+
+    ``ignore_permissions=True`` because the Van User role may not have a
+    User Permission for every customer's invoices — but when collecting
+    payment for a customer they are assigned to, they must see all
+    outstanding regardless of which rep originally billed them.
+
+    ``posting_date`` / ``due_date`` are ``datetime.date`` (not datetime),
+    so we stringify them — ``naive_site_to_utc_iso`` expects a datetime
+    and crashes on a plain date with ``AttributeError: tzinfo``.
+    """
     rows = frappe.get_all(
         "Sales Invoice",
         filters={"customer": customer, "docstatus": 1, "outstanding_amount": [">", 0]},
         fields=["name", "grand_total", "outstanding_amount", "posting_date", "status", "due_date"],
         order_by="posting_date asc",
+        ignore_permissions=True,
     )
     for r in rows:
-        r["posting_date"] = naive_site_to_utc_iso(r.get("posting_date"))
-        r["due_date"] = naive_site_to_utc_iso(r.get("due_date"))
+        r["posting_date"] = str(r["posting_date"]) if r.get("posting_date") else None
+        r["due_date"] = str(r["due_date"]) if r.get("due_date") else None
     return rows
 
 
