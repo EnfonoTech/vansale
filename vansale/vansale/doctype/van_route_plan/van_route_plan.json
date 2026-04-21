@@ -5,8 +5,11 @@
  "doctype": "DocType",
  "engine": "InnoDB",
  "field_order": [
+  "route_name",
   "user",
   "plan_date",
+  "status",
+  "completed_at",
   "warehouse",
   "frequency_section",
   "frequency",
@@ -14,9 +17,18 @@
   "interval_days",
   "valid_until",
   "notes",
-  "stops"
+  "stops",
+  "completion_section",
+  "completion_summary"
  ],
  "fields": [
+  {
+   "fieldname": "route_name",
+   "fieldtype": "Data",
+   "label": "Route Name",
+   "in_list_view": 1,
+   "description": "Friendly name shown to the driver (e.g. 'North Jeddah — Monday'). Optional today; will be required in a future release."
+  },
   {
    "fieldname": "user",
    "fieldtype": "Link",
@@ -31,6 +43,22 @@
    "label": "Plan Date",
    "reqd": 1,
    "in_list_view": 1
+  },
+  {
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "label": "Status",
+   "options": "Active\nCompleted",
+   "default": "Active",
+   "in_list_view": 1,
+   "read_only": 1,
+   "description": "Set to Completed by the driver's app. Do not edit by hand — controls whether the driver can still act on stops."
+  },
+  {
+   "fieldname": "completed_at",
+   "fieldtype": "Datetime",
+   "label": "Completed At",
+   "read_only": 1
   },
   {
    "fieldname": "warehouse",
@@ -82,6 +110,20 @@
    "fieldtype": "Table",
    "label": "Stops",
    "options": "Van Route Stop"
+  },
+  {
+   "fieldname": "completion_section",
+   "fieldtype": "Section Break",
+   "label": "Completion",
+   "collapsible": 1,
+   "depends_on": "eval:doc.status==\"Completed\""
+  },
+  {
+   "fieldname": "completion_summary",
+   "fieldtype": "Long Text",
+   "label": "Completion Summary (JSON)",
+   "read_only": 1,
+   "description": "Daily-report snapshot captured at the moment Complete Route was tapped. Never mutate — used by the app to show a stable summary when the driver reopens a completed route."
   }
  ],
  "index_web_pages_for_search": 0,

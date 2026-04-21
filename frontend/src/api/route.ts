@@ -6,9 +6,13 @@ import type { QueuedVisit } from "@/offline/db";
 
 export interface RoutePlan {
   name: string;
+  route_name?: string | null;
   plan_date: string;
   warehouse?: string;
   notes?: string;
+  status?: "Active" | "Completed";
+  completed_at?: string | null;
+  completion_summary?: DailyReport | null;
 }
 
 export interface RouteStop {
@@ -105,4 +109,28 @@ export interface DailyReport {
 export function dailyReport(planDate?: string): Promise<DailyReport> {
   const qs = planDate ? `?plan_date=${encodeURIComponent(planDate)}` : "";
   return apiCall<DailyReport>("GET", `vansale.api.route.daily_report${qs}`);
+}
+
+export interface CompleteRouteResponse {
+  status: "completed" | "already_completed" | "blocked";
+  reason?: string;
+  in_progress_stops?: { idx: number; customer: string }[];
+  completed_at?: string | null;
+  summary?: DailyReport | null;
+}
+
+/**
+ * Mark a route as completed on the server. Persists `status=Completed`
+ * on the Van Route Plan so reopening the plan doesn't re-prompt — the
+ * v1.0.20 bug was client-only completion state.
+ *
+ * Pass `force=true` to close a route with in_progress stops (the "Close
+ * anyway" escape hatch). Default behaviour returns `status=blocked` with
+ * the list of stops the driver should resolve first.
+ */
+export function completeRoute(planName: string, force = false): Promise<CompleteRouteResponse> {
+  return apiCall<CompleteRouteResponse>("POST", "vansale.api.route.complete_route", {
+    plan_name: planName,
+    force: force ? 1 : 0,
+  });
 }

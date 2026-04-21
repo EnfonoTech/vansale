@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
-import { today, startVisit, endVisit, skipVisit, dailyReport, type RouteStop, type DailyReport } from "@/api/route";
+import { today, startVisit, endVisit, skipVisit, completeRoute, type RouteStop, type DailyReport, type RoutePlan } from "@/api/route";
 import { currentPosition } from "@/features/van/gps";
 import { isOnline } from "@/app/online";
 import { useSessionStore } from "@/stores/session";
@@ -16,18 +16,21 @@ const session = useSessionStore();
 const confirm = useConfirmStore();
 const visit = useRouteVisitStore();
 
-const plan = ref<Record<string, string | null | undefined> | null>(null);
+const plan = ref<RoutePlan | null>(null);
 const stops = ref<RouteStop[]>([]);
 const err = ref("");
 const loading = ref(false);
 const busy = ref(false);
+// Per-stop Complete button spinner. Keyed by stop.idx so concurrent taps
+// don't fight over a single flag.
+const stopBusy = ref<Record<number, boolean>>({});
 
 async function load() {
   loading.value = true;
   err.value = "";
   try {
     const res = await today();
-    plan.value = res.plan as Record<string, string | null | undefined> | null;
+    plan.value = res.plan;
     stops.value = res.stops;
     // Reconcile: if server marked the active visit as done/skipped, drop local state.
     if (visit.active && plan.value?.name) {
@@ -35,6 +38,15 @@ async function load() {
       if (!match || match.status === "done" || match.status === "skipped") {
         visit.clear();
       }
+    }
+    // Persisted completion path — server returned `status=Completed` with
+    // the snapshot taken at tap-to-complete time. Hydrate the inline
+    // summary card so reopening the route just shows the result instead
+    // of re-prompting "Complete?" (the 2026-04-21 user-reported bug).
+    if (plan.value?.status === "Completed" && plan.value.completion_summary) {
+      report.value = plan.value.completion_summary;
+    } else {
+      report.value = null;
     }
   } catch (e) {
     err.value = e instanceof Error ? e.message : String(e);
@@ -100,6 +112,44 @@ async function onEnd() {
   }
 }
 
+/**
+ * Per-customer "Complete" action. End the visit with no invoice / payment /
+ * notes — the driver just needs a way to mark a stop done when they visited
+ * but had nothing to transact. Backs onto the same idempotent end_visit
+ * endpoint so the server-side Van Visit Log still captures it. Works when
+ * the stop is pending (creates start + end in one go) or in_progress.
+ */
+async function onCompleteStop(stop: RouteStop) {
+  if (!plan.value?.name) return;
+  const label = stop.customer;
+  const ok = await confirm.ask({
+    title: `Mark ${label} complete?`,
+    message: "Closes this stop with no invoice or payment. Use this for courtesy visits or when nothing was transacted.",
+    confirmText: "Mark complete",
+  });
+  if (!ok) return;
+  stopBusy.value = { ...stopBusy.value, [stop.idx]: true };
+  try {
+    // Auto-start if the driver never tapped Start — some flows let the
+    // user mark-complete straight from pending without an explicit start.
+    if (stop.status === "pending" && isOnline()) {
+      try { await startVisit(plan.value.name, stop.idx); } catch { /* soft-fail */ }
+    }
+    await endVisit({
+      plan_name: plan.value.name,
+      stop_idx: stop.idx,
+      notes: null,
+    });
+    if (visit.active && visit.active.stop.idx === stop.idx) visit.clear();
+    toasts.success(`Completed · ${label}`);
+    await load();
+  } catch (e) {
+    toasts.error(e instanceof Error ? e.message : String(e));
+  } finally {
+    stopBusy.value = { ...stopBusy.value, [stop.idx]: false };
+  }
+}
+
 async function onSkip(stop: RouteStop) {
   if (!plan.value?.name) return;
   // Confirm destructive action — especially important when unsticking a
@@ -144,7 +194,6 @@ function statusIcon(s: string | undefined): "check" | "clock" | "x" | "map-pin" 
 
 const doneCount = computed(() => stops.value.filter((s) => s.status === "done").length);
 const pendingCount = computed(() => stops.value.filter((s) => s.status === "pending").length);
-const skippedCount = computed(() => stops.value.filter((s) => s.status === "skipped").length);
 const inProgressCount = computed(() => stops.value.filter((s) => s.status === "in_progress").length);
 
 // "Complete Route" is now always surfaced once a plan exists — the v1.0.18
@@ -156,9 +205,16 @@ const inProgressCount = computed(() => stops.value.filter((s) => s.status === "i
 const unresolvedCount = computed(() =>
   pendingCount.value + inProgressCount.value,
 );
+// Gate Complete Route on:
+//   - a plan exists with at least one stop
+//   - no locally-active visit (finish it first so the visit log is clean)
+//   - plan isn't already Completed on the server (v1.0.21 persisted state)
 const canCompleteRoute = computed(() =>
-  stops.value.length > 0 && !visit.hasActive,
+  stops.value.length > 0 &&
+  !visit.hasActive &&
+  (plan.value?.status ?? "Active") !== "Completed",
 );
+const isCompleted = computed(() => plan.value?.status === "Completed");
 
 const report = ref<DailyReport | null>(null);
 const reporting = ref(false);
@@ -166,21 +222,40 @@ const reportErr = ref("");
 
 async function onCompleteRoute() {
   if (!plan.value?.name || !canCompleteRoute.value) return;
-  const hasUnresolved = unresolvedCount.value > 0;
-  const ok = await confirm.ask({
-    title: hasUnresolved ? "Close route now?" : "Complete today's route?",
-    message: hasUnresolved
-      ? `${unresolvedCount.value} of ${stops.value.length} stops still open (${doneCount.value} done, ${skippedCount.value} skipped). Close anyway and view summary?`
-      : `You've handled all ${stops.value.length} stops (${doneCount.value} done, ${skippedCount.value} skipped). View your daily summary?`,
-    confirmText: hasUnresolved ? "Close anyway" : "Complete",
-    danger: hasUnresolved,
-  });
-  if (!ok) return;
+  // Server-persisted completion (v1.0.21). Flow:
+  //   1. Try complete_route without force.
+  //   2. If server responds `blocked` → show the in_progress list and ask
+  //      the driver to end those visits first (or confirm Close Anyway →
+  //      retry with force=1).
+  //   3. On `completed` / `already_completed` → store the returned
+  //      summary, toast, reload so plan.status hydrates.
   reporting.value = true;
   reportErr.value = "";
   try {
-    report.value = await dailyReport(String(plan.value.plan_date ?? ""));
-    toasts.success("Route completed — nice work!");
+    let res = await completeRoute(plan.value.name, false);
+    if (res.status === "blocked" && res.in_progress_stops?.length) {
+      const names = res.in_progress_stops.map((s) => s.customer).join(", ");
+      const force = await confirm.ask({
+        title: "Finish open visits first?",
+        message: `These stops are still in progress: ${names}. End them before closing, or force-close anyway (they'll stay in-progress on the log).`,
+        confirmText: "Close anyway",
+        danger: true,
+      });
+      if (!force) {
+        reporting.value = false;
+        return;
+      }
+      res = await completeRoute(plan.value.name, true);
+    }
+    if (res.status === "completed" || res.status === "already_completed") {
+      report.value = res.summary ?? null;
+      toasts.success(
+        res.status === "already_completed"
+          ? "Route was already completed."
+          : "Route completed — nice work!",
+      );
+      await load();
+    }
   } catch (e) {
     reportErr.value = e instanceof Error ? e.message : String(e);
   } finally {
@@ -211,7 +286,8 @@ const notesModel = computed({
       <div class="hero-head">
         <div>
           <span class="muted xsmall">Route plan</span>
-          <h2 class="hero-date">{{ plan.plan_date }}</h2>
+          <h2 class="hero-date">{{ plan.route_name || plan.plan_date }}</h2>
+          <p v-if="plan.route_name" class="muted xsmall">{{ plan.plan_date }}</p>
           <p v-if="plan.notes" class="muted small">{{ plan.notes }}</p>
         </div>
         <button class="ghost icon-only" @click="load" :disabled="loading" title="Refresh">
@@ -224,14 +300,13 @@ const notesModel = computed({
         <div class="stat"><strong>{{ pendingCount }}</strong><span class="muted xsmall">Pending</span></div>
       </div>
       <!--
-        Always-visible Complete Route button. The v1.0.18 build gated this
-        below the list so drivers who don't skip non-visits never saw it.
-        Keep it here in the hero — disabled only while a visit is actively
-        open (finish that first), never hidden. Label is "Close early" when
-        stops remain so the driver knows what they're confirming.
+        Complete Route button lives here in the hero. v1.0.21 also persists
+        the completion state server-side — once `plan.status === "Completed"`
+        we hide the button entirely and show the stored summary below, so
+        reopening the route doesn't re-prompt.
       -->
       <button
-        v-if="stops.length > 0 && !report"
+        v-if="stops.length > 0 && !isCompleted"
         class="complete-btn"
         :disabled="reporting || visit.hasActive"
         @click="onCompleteRoute"
@@ -243,6 +318,10 @@ const notesModel = computed({
         <span v-else-if="unresolvedCount > 0">Close route ({{ unresolvedCount }} open)</span>
         <span v-else>Complete route</span>
       </button>
+      <div v-else-if="isCompleted" class="completed-banner">
+        <Icon name="check" :size="16" />
+        <span>Route completed<span v-if="plan.completed_at"> &middot; {{ new Date(plan.completed_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }}</span></span>
+      </div>
     </section>
 
     <div v-else-if="loading" class="stack">
@@ -277,22 +356,20 @@ const notesModel = computed({
             {{ s.status }}
           </span>
         </button>
-        <div class="stop-actions">
+        <div class="stop-actions" v-if="!isCompleted">
+          <!--
+            v1.0.21: three per-customer actions — Visit (start), Skip, and
+            Complete. Complete ends the stop without needing an invoice or
+            payment so drivers can close a courtesy visit in one tap. Skip
+            remains the "nothing here" path.
+          -->
           <button
             v-if="s.status === 'pending' && !visit.hasActive"
             class="start-btn"
             @click="onStart(s)"
           >
-            <Icon name="map-pin" :size="16" /> Start visit
+            <Icon name="map-pin" :size="16" /> Visit
           </button>
-          <!--
-            Active stop (in_progress AND matches this device's active visit)
-            gets an inline "End visit" button — the 2026-04-21 feedback was
-            "where is the option to complete a customer in route, you've
-            added skip what is this". Previously the End button was buried
-            in the floating active-card below the list; inline matches the
-            mental model of "close out this stop in-place".
-          -->
           <button
             v-if="s.status === 'in_progress' && visit.active && visit.active.stop.idx === s.idx"
             class="start-btn end-btn"
@@ -301,11 +378,22 @@ const notesModel = computed({
           >
             <Icon name="check" :size="16" /> {{ busy ? "Ending…" : "End visit" }}
           </button>
+          <!-- Mark-complete button — available on pending and in_progress
+               stops that aren't the driver's active visit. -->
           <button
-            v-if="s.status === 'in_progress' && (!visit.active || visit.active.stop.idx !== s.idx)"
+            v-if="(s.status === 'pending' || s.status === 'in_progress') && (!visit.active || visit.active.stop.idx !== s.idx)"
+            class="complete-stop-btn"
+            :disabled="!!stopBusy[s.idx]"
+            @click="onCompleteStop(s)"
+          >
+            <Icon name="check" :size="14" />
+            {{ stopBusy[s.idx] ? "…" : "Complete" }}
+          </button>
+          <button
+            v-if="s.status === 'pending' || s.status === 'in_progress'"
             class="ghost small warning"
             @click="onSkip(s)"
-            title="Clear a stuck visit (marks the stop as skipped)"
+            :title="s.status === 'in_progress' ? 'Clear a stuck visit (marks the stop as skipped)' : 'Skip this customer'"
           >
             <Icon name="x" :size="14" /> Skip
           </button>
@@ -440,6 +528,39 @@ const notesModel = computed({
 }
 .complete-btn:disabled { opacity: 0.55; cursor: not-allowed; }
 .complete-btn.is-partial { background: color-mix(in srgb, var(--warning, #d97706) 85%, var(--success, #16a34a)); }
+
+.completed-banner {
+  margin-top: 0.25rem;
+  padding: 0.6rem 0.85rem;
+  background: color-mix(in srgb, var(--success, #16a34a) 15%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--success, #16a34a) 40%, transparent);
+  border-radius: var(--radius-sm);
+  color: var(--success, #16a34a);
+  font-weight: 600;
+  font-size: 0.9rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.complete-stop-btn {
+  min-height: 2.25rem;
+  padding: 0.35rem 0.7rem;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  background: color-mix(in srgb, var(--success, #16a34a) 12%, var(--surface));
+  color: var(--success, #16a34a);
+  border: 1px solid color-mix(in srgb, var(--success, #16a34a) 45%, transparent);
+  border-radius: var(--radius-sm);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+.complete-stop-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.complete-stop-btn:not(:disabled):hover {
+  background: var(--success, #16a34a);
+  color: #fff;
+}
 
 .summary {
   background: linear-gradient(135deg,
