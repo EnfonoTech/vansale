@@ -55,20 +55,18 @@ export async function fetchPrintHtml(
  * break the ZATCA format without these wrappers.
  */
 /**
- * Download a PDF via Frappe's built-in `download_pdf` endpoint and save
- * it to the device. On native (APK) the system print dialog cannot be
- * summoned from inside a sandboxed iframe — the `window.print()` trick
- * we use on web is silently ignored by the Android WebView. Instead we
- * grab the PDF bytes (with the same auth headers as every other API
- * call) and hand them to `saveBlobToDevice`, which writes to
- * `Documents/` on native and triggers a browser download on web.
+ * Fetch the PDF blob for a print format. Callers decide what to do with it:
+ *  - `downloadPrintPdf` saves it to the device (Documents/ on native,
+ *    browser download on web).
+ *  - `printPdfNative` (in `@/app/native-print`) hands it to Android's
+ *    system PrintManager for the native print dialog.
  */
-export async function downloadPrintPdf(
+export async function fetchPrintPdfBlob(
   doctype: string,
   name: string,
   printFormat = DEFAULT_SI_PRINT_FORMAT,
   noLetterhead = false,
-): Promise<void> {
+): Promise<Blob> {
   const qs = new URLSearchParams({
     doctype,
     name,
@@ -103,7 +101,21 @@ export async function downloadPrintPdf(
     throw new Error(`Could not generate PDF (HTTP ${res.status})`);
   }
 
-  const blob = await res.blob();
+  return res.blob();
+}
+
+/**
+ * Download a PDF and save it to the device. On native (APK) this is the
+ * "save a copy" path — the system print dialog has its own Save-as-PDF
+ * option which is what most users actually want.
+ */
+export async function downloadPrintPdf(
+  doctype: string,
+  name: string,
+  printFormat = DEFAULT_SI_PRINT_FORMAT,
+  noLetterhead = false,
+): Promise<void> {
+  const blob = await fetchPrintPdfBlob(doctype, name, printFormat, noLetterhead);
   const safeDoctype = doctype.replace(/\s+/g, "_");
   const safeName = name.replace(/[^A-Za-z0-9._-]+/g, "_");
   await saveBlobToDevice(blob, `${safeDoctype}-${safeName}.pdf`);

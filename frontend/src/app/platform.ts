@@ -9,7 +9,13 @@
 
 declare global {
   interface Window {
-    Capacitor?: { isNativePlatform?: () => boolean };
+    Capacitor?: {
+      isNativePlatform?: () => boolean;
+      // Plugins map is keyed by plugin name (matches `@CapacitorPlugin(name=...)`
+      // on the Java side). Individual plugin TS bridges narrow the type
+      // with their own `declare global` merge (see `native-print.ts`).
+      Plugins?: Record<string, unknown>;
+    };
   }
 }
 
