@@ -31,22 +31,41 @@ const source = ref<"live" | "cache">("live");
 const loading = ref(false);
 
 async function load() {
-  loading.value = true;
   err.value = "";
+
+  // SWR: paint cache instantly (skips 2-3s of skeleton), then hit the
+  // network. Search queries skip the cache — the cache contains the
+  // unfiltered recent set, not search results.
+  if (!search.value && rows.value.length === 0) {
+    try {
+      const cached = (await fromCache()).map((c) => c.raw as unknown as CustomerRow);
+      if (cached.length > 0) {
+        rows.value = cached;
+        source.value = "cache";
+      }
+    } catch { /* cache miss is fine */ }
+  }
+
+  // Only show spinner when we have nothing on screen yet.
+  loading.value = rows.value.length === 0;
+
   try {
     if (isOnline()) {
       rows.value = await listMine(search.value || undefined, 120);
       source.value = "live";
-      if (!search.value) await refreshCache();
-    } else {
+      // Fire-and-forget — don't block render on cache write.
+      if (!search.value) void refreshCache();
+    } else if (rows.value.length === 0) {
       rows.value = (await fromCache()).map((c) => c.raw as unknown as CustomerRow);
       source.value = "cache";
     }
   } catch (e) {
     if (e instanceof NetworkError) {
+      if (rows.value.length === 0) {
+        rows.value = (await fromCache()).map((c) => c.raw as unknown as CustomerRow);
+        source.value = "cache";
+      }
       err.value = "Offline — showing cached customers";
-      rows.value = (await fromCache()).map((c) => c.raw as unknown as CustomerRow);
-      source.value = "cache";
     } else {
       err.value = e instanceof Error ? e.message : String(e);
     }

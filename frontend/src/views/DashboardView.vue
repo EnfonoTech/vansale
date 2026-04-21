@@ -22,16 +22,47 @@ const activity = ref<ActivityRow[]>([]);
 const loading = ref(false);
 const loadErr = ref("");
 
+const CACHE_KEY = "vansale.dashboard.v1";
+
+type Snapshot = { sales: TodaySales; collection: TodayCollection; activity: ActivityRow[]; at: number };
+
+function readCache(): Snapshot | null {
+  try {
+    const raw = sessionStorage.getItem(CACHE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Snapshot;
+    // Discard if older than 5 min — stale numbers on today's sales are
+    // worse than a spinner.
+    if (Date.now() - parsed.at > 5 * 60_000) return null;
+    return parsed;
+  } catch { return null; }
+}
+
+function writeCache(snap: Snapshot) {
+  try { sessionStorage.setItem(CACHE_KEY, JSON.stringify(snap)); } catch { /* quota */ }
+}
+
 async function load() {
-  loading.value = true;
   loadErr.value = "";
+
+  // SWR: paint last-known snapshot instantly, then refresh.
+  const cached = readCache();
+  if (cached) {
+    sales.value = cached.sales;
+    collection.value = cached.collection;
+    activity.value = cached.activity;
+  }
+
+  loading.value = !cached;
+
   try {
     const [a, b, c] = await Promise.all([todaySales(), todayCollection(), recentActivity(8)]);
     sales.value = a;
     collection.value = b;
     activity.value = c;
+    writeCache({ sales: a, collection: b, activity: c, at: Date.now() });
   } catch (err) {
-    loadErr.value = err instanceof Error ? err.message : String(err);
+    if (!cached) loadErr.value = err instanceof Error ? err.message : String(err);
   } finally {
     loading.value = false;
   }

@@ -56,24 +56,29 @@ def list_mine(limit: int = 50, search: Optional[str] = None) -> list[dict]:
     roles = frappe.get_roles(frappe.session.user)
     is_admin = "System Manager" in roles or "Van Manager" in roles
 
-    # Van users are scoped to customers tagged with their Sales Person in
-    # the Customer → Sales Team child table. When the user's Vansale
-    # Configuration has no `sales_person` set we can't use that tag — fall
-    # back to owner-scoping (customers the user personally created) rather
-    # than letting the filter silently open up to every customer on the
-    # site. Before 2026-04-21 a missing sales_person collapsed to "show
-    # everything", which is how the demo user saw all 45 customers even
-    # though they're supposed to be scoped to their van.
+    # Option C: Van users see union of
+    #   (a) customers they created (owner = session.user), and
+    #   (b) customers tagged with their Sales Person in Sales Team.
+    # Either set alone is legit — (a) covers PWA-created customers before
+    # the Vansale Configuration backfill runs, (b) covers customers seeded
+    # by admins or assigned via Customer > Sales Team.
+    #
+    # Because Frappe's get_all `or_filters` are OR-ed against the base
+    # `filters` (AND-ed), we precompute the union of names up-front and
+    # scope by `name IN (...)`. Search remains an AND-layer over that set.
     if not is_admin:
         sp = current_user_sales_person()
-        if sp:
-            names = _assigned_customer_names(sp) or []
-            if not names:
-                return []  # sales_person set but no customers tagged
-            filters["name"] = ["in", names]
-        else:
-            # No sales_person configured → only show customers I created.
-            filters["owner"] = frappe.session.user
+        assigned = set(_assigned_customer_names(sp) or []) if sp else set()
+        owned = set(
+            r[0] for r in frappe.db.sql(
+                "SELECT name FROM `tabCustomer` WHERE owner = %s",
+                (frappe.session.user,),
+            )
+        )
+        allowed = assigned | owned
+        if not allowed:
+            return []
+        filters["name"] = ["in", list(allowed)]
 
     or_filters = {}
     if search:
@@ -195,6 +200,12 @@ def create(
         "customer_group": customer_group or frappe.db.get_single_value("Selling Settings", "customer_group") or "All Customer Groups",
         "tax_id": tax_id,
     })
+    # Auto-stamp the creating van user's sales_person into Sales Team so
+    # the customer shows up in list_mine() without a manual admin tag +
+    # so invoice commission tracking works from the first invoice.
+    sp = current_user_sales_person()
+    if sp:
+        doc.append("sales_team", {"sales_person": sp, "allocated_percentage": 100})
     doc.insert(ignore_permissions=False)
 
     # Create Address if fields provided (mandatory for B2B, optional for B2C).

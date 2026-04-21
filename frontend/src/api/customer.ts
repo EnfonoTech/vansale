@@ -57,11 +57,16 @@ export async function statement(
  * web (anchor download) and native (Filesystem Documents/). The server
  * endpoint uses `frappe.utils.pdf.get_pdf` which requires wkhtmltopdf.
  */
-export async function downloadStatementPdf(
+/**
+ * Fetch the statement PDF as a Blob without saving it — used by the Print
+ * button to hand bytes directly to the `AndroidPrint` plugin. Web callers
+ * who want a downloaded file should keep using `downloadStatementPdf`.
+ */
+export async function fetchStatementPdf(
   name: string,
   fromDate?: string,
   toDate?: string,
-): Promise<void> {
+): Promise<Blob> {
   const qs = new URLSearchParams({ name });
   if (fromDate) qs.set("from_date", fromDate);
   if (toDate) qs.set("to_date", toDate);
@@ -92,7 +97,15 @@ export async function downloadStatementPdf(
   if (!res.ok) {
     throw new Error(`Could not generate statement PDF (HTTP ${res.status})`);
   }
-  const blob = await res.blob();
+  return await res.blob();
+}
+
+export async function downloadStatementPdf(
+  name: string,
+  fromDate?: string,
+  toDate?: string,
+): Promise<void> {
+  const blob = await fetchStatementPdf(name, fromDate, toDate);
   const safeName = name.replace(/[^A-Za-z0-9._-]+/g, "_");
   await saveBlobToDevice(blob, `statement-${safeName}.pdf`);
 }

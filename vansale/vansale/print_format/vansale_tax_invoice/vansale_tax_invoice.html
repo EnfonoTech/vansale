@@ -410,8 +410,23 @@
                     </tr>
                     <tr>
                         <td style="padding:3px !important;">{{ "%.3f"|format(item.qty) }}</td>
-                        <td style="padding:3px !important;">{{ "%.2f"|format(item.rate) }}</td>
-                        <td style="padding:3px !important;">{{ "%.2f"|format(item.discount_amount) }}</td>
+                        <td style="padding:3px !important;">
+                            {% set has_line_disc = (item.discount_amount and item.discount_amount > 0) or (item.discount_percentage and item.discount_percentage > 0) %}
+                            {% if has_line_disc and item.price_list_rate and item.price_list_rate > item.rate %}
+                                <span style="text-decoration: line-through; color:#666; font-size:11px;">{{ "%.2f"|format(item.price_list_rate) }}</span><br>
+                                <strong>{{ "%.2f"|format(item.rate) }}</strong>
+                            {% else %}
+                                {{ "%.2f"|format(item.rate) }}
+                            {% endif %}
+                        </td>
+                        <td style="padding:3px !important;">
+                            {% if item.discount_percentage and item.discount_percentage > 0 %}
+                                {{ "%.2f"|format(item.discount_amount or 0) }}<br>
+                                <span style="font-size:11px; color:#666;">({{ "%.1f"|format(item.discount_percentage) }}%)</span>
+                            {% else %}
+                                {{ "%.2f"|format(item.discount_amount or 0) }}
+                            {% endif %}
+                        </td>
                         <td style="padding:3px !important;">{{ "%.2f"|format(item.net_amount) }}</td>
                         <td style="padding:3px !important;">{{ "%.2f"|format(item.tax_amount if item.tax_amount is defined else 0) }}</td>
                         <td style="padding:3px !important;" class="bold">{{ "%.2f"|format(item.total_amount if item.total_amount is defined else item.amount) }}</td>

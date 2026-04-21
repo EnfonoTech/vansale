@@ -11,8 +11,9 @@
  */
 import { computed, onMounted, ref } from "vue";
 import { useRoute } from "vue-router";
-import { statement, downloadStatementPdf } from "@/api/customer";
+import { statement, fetchStatementPdf, downloadStatementPdf } from "@/api/customer";
 import { ApiError, NetworkError } from "@/app/frappe";
+import { hasNativePrint, printPdfNative } from "@/app/native-print";
 import { useToastStore } from "@/stores/toasts";
 import Icon from "@/components/Icon.vue";
 
@@ -28,6 +29,7 @@ const iframe = ref<HTMLIFrameElement | null>(null);
 const fromDate = ref("");
 const toDate = ref("");
 const downloading = ref(false);
+const printing = ref(false);
 
 async function load() {
   if (!customerName.value) return;
@@ -62,15 +64,43 @@ async function load() {
 }
 
 /**
- * Print via iframe contentWindow so we only print the statement body, not
- * the surrounding app shell (bottom nav, top bar, etc.). `focus()` first
- * is required on Chrome — otherwise `print()` targets the outer frame.
+ * Print the statement.
+ *
+ * Native Android: fetch the PDF binary from `statement_pdf` and hand it to
+ * the `AndroidPrint` Capacitor plugin (same path as invoice print). Android
+ * WebView silently swallows `iframe.contentWindow.print()` from a sandboxed
+ * frame, which is why the previous wiring showed nothing on tap — the JS
+ * call succeeded, but the WebView never surfaced the system dialog.
+ *
+ * Web: fall back to the iframe's `contentWindow.print()` — browsers honour
+ * it there because the page is not sandboxed away from the user gesture.
  */
-function printStatement() {
-  const frame = iframe.value;
-  if (!frame || !frame.contentWindow) return;
-  frame.contentWindow.focus();
-  frame.contentWindow.print();
+async function printStatement() {
+  if (printing.value) return;
+  printing.value = true;
+  try {
+    if (hasNativePrint()) {
+      const blob = await fetchStatementPdf(
+        customerName.value,
+        fromDate.value || undefined,
+        toDate.value || undefined,
+      );
+      await printPdfNative(blob, `statement-${customerName.value}`);
+      return;
+    }
+    const frame = iframe.value;
+    if (!frame || !frame.contentWindow) {
+      toasts.error("Statement not loaded yet");
+      return;
+    }
+    frame.contentWindow.focus();
+    frame.contentWindow.print();
+  } catch (e) {
+    if (e instanceof NetworkError) toasts.error("Offline — try again when connected");
+    else toasts.error(e instanceof Error ? e.message : String(e));
+  } finally {
+    printing.value = false;
+  }
 }
 
 async function saveAsPdf() {
@@ -121,8 +151,8 @@ onMounted(load);
           <Icon name="receipt" :size="16" />
           <span>{{ downloading ? "Saving…" : "PDF" }}</span>
         </button>
-        <button type="button" class="primary" @click="printStatement">
-          <Icon name="receipt" :size="16" /> Print
+        <button type="button" class="primary" :disabled="printing" @click="printStatement">
+          <Icon name="receipt" :size="16" /> {{ printing ? "Printing…" : "Print" }}
         </button>
       </div>
       <!--

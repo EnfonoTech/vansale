@@ -1,7 +1,13 @@
 <script setup lang="ts">
+/**
+ * Payment Entries list — scoped by the backend to the logged-in user
+ * (via `list_mine`). Drafts are included so the user can open them,
+ * edit or delete. Submitted entries are read-only from here — tap
+ * opens the receipt view where Print is available.
+ */
 import { onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
-import { listMine } from "@/api/invoice";
+import { listMine } from "@/api/payment";
 import { useSessionStore } from "@/stores/session";
 import Icon from "@/components/Icon.vue";
 import SarSymbol from "@/components/SarSymbol.vue";
@@ -12,20 +18,18 @@ const rows = ref<Array<Record<string, unknown>>>([]);
 const err = ref("");
 const loading = ref(false);
 
-const CACHE_KEY = "vansale.invoices.v1";
+const CACHE_KEY = "vansale.payments.v1";
 
 async function load() {
   err.value = "";
 
-  // SWR paint: pull last snapshot from sessionStorage so the list shows
-  // instantly, then refresh in background. Cuts perceived load from 2-3s
-  // to ~0 for repeat visits during the same session.
+  // SWR paint: previous snapshot instantly, then refresh.
   try {
     const raw = sessionStorage.getItem(CACHE_KEY);
     if (raw && rows.value.length === 0) {
       rows.value = JSON.parse(raw);
     }
-  } catch { /* stale/invalid cache is fine */ }
+  } catch { /* ignore */ }
 
   loading.value = rows.value.length === 0;
   try {
@@ -43,23 +47,30 @@ onMounted(load);
 
 function fmt(n: unknown): string {
   const num = typeof n === "number" ? n : Number(n) || 0;
-  return new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 }).format(num);
+  return new Intl.NumberFormat(undefined, {
+    maximumFractionDigits: 2,
+    minimumFractionDigits: 2,
+  }).format(num);
 }
 
-function tone(status: unknown): string {
+function tone(docstatus: unknown, status: unknown): string {
+  if (Number(docstatus) === 0) return "info";
   const s = String(status || "").toLowerCase();
-  if (s === "paid") return "success";
-  if (s === "overdue") return "danger";
+  if (s === "submitted") return "success";
   if (s === "cancelled") return "danger";
-  if (s === "unpaid") return "warning";
-  return "info";
+  return "success";
+}
+
+function statusLabel(docstatus: unknown, status: unknown): string {
+  if (Number(docstatus) === 0) return "Draft";
+  return String(status || "Submitted");
 }
 </script>
 
 <template>
   <div class="stack">
-    <button class="new-btn" @click="router.push({ name: 'invoice-new' })">
-      <Icon name="plus" :size="18" /> New invoice
+    <button class="new-btn" @click="router.push({ name: 'payment-new' })">
+      <Icon name="plus" :size="18" /> New payment
     </button>
 
     <p v-if="err" class="error">{{ err }}</p>
@@ -70,10 +81,10 @@ function tone(status: unknown): string {
       <div class="skeleton" style="height:3.25rem" />
     </div>
     <div v-else-if="rows.length === 0" class="empty">
-      <Icon name="invoice" :size="32" class="empty-icon" />
-      <strong>No invoices yet</strong>
-      <span class="muted">Create your first invoice of the day.</span>
-      <button @click="router.push({ name: 'invoice-new' })">Start selling</button>
+      <Icon name="payment" :size="32" class="empty-icon" />
+      <strong>No payments yet</strong>
+      <span class="muted">Collect your first payment of the day.</span>
+      <button @click="router.push({ name: 'payment-new' })">Collect payment</button>
     </div>
     <ul v-else class="list">
       <li
@@ -82,16 +93,21 @@ function tone(status: unknown): string {
         class="item"
         role="button"
         tabindex="0"
-        @click="router.push({ name: 'invoice-detail', params: { name: String(r.name) } })"
-        @keyup.enter="router.push({ name: 'invoice-detail', params: { name: String(r.name) } })"
+        @click="router.push({ name: 'payment-detail', params: { name: String(r.name) } })"
+        @keyup.enter="router.push({ name: 'payment-detail', params: { name: String(r.name) } })"
       >
         <div class="body">
-          <strong class="truncate">{{ r.customer_name || r.customer }}</strong>
-          <span class="muted xsmall">{{ r.name }} · {{ r.posting_date }}</span>
+          <strong class="truncate">{{ r.party_name || r.party }}</strong>
+          <span class="muted xsmall">
+            {{ r.name }} · {{ r.posting_date }}
+            <template v-if="r.mode_of_payment"> · {{ r.mode_of_payment }}</template>
+          </span>
         </div>
         <div class="right">
-          <strong><SarSymbol :code="session.currency" />{{ fmt(r.grand_total) }}</strong>
-          <span class="pill" :data-tone="tone(r.status)">{{ r.status }}</span>
+          <strong><SarSymbol :code="session.currency" />{{ fmt(r.paid_amount) }}</strong>
+          <span class="pill" :data-tone="tone(r.docstatus, r.status)">
+            {{ statusLabel(r.docstatus, r.status) }}
+          </span>
         </div>
       </li>
     </ul>

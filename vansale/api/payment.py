@@ -240,19 +240,59 @@ def save(
 
 @frappe.whitelist(methods=["GET"])
 def list_mine(limit: int = 50, customer: Optional[str] = None) -> list[dict]:
-    filters: dict = {"docstatus": 1}
+    """Payment Entries visible to this user.
+
+    Van users see Payment Entries they created (owner = session.user) —
+    both drafts and submitted. Admins (System Manager / Van Manager /
+    Accounts Manager) see everything. Drafts are included so the UI can
+    offer Edit/Delete actions on unsubmitted entries; the Payment
+    Detail view already gates submit/delete buttons on docstatus.
+    """
+    roles = frappe.get_roles(frappe.session.user)
+    is_admin = any(r in roles for r in ("System Manager", "Van Manager", "Accounts Manager"))
+
+    filters: dict = {"docstatus": ["<", 2]}  # drafts + submitted (not cancelled)
     if customer:
         filters["party"] = customer
+    if not is_admin:
+        filters["owner"] = frappe.session.user
     rows = frappe.get_all(
         "Payment Entry",
         filters=filters,
-        fields=["name", "party", "party_name", "paid_amount", "mode_of_payment", "posting_date", "modified"],
+        fields=[
+            "name", "party", "party_name", "paid_amount", "mode_of_payment",
+            "posting_date", "modified", "docstatus", "status", "payment_type",
+        ],
         order_by="posting_date desc, modified desc",
         limit=int(limit),
     )
     for r in rows:
         r["modified"] = naive_site_to_utc_iso(r.get("modified"))
+        r["posting_date"] = str(r["posting_date"]) if r.get("posting_date") else None
     return rows
+
+
+@frappe.whitelist(methods=["POST"])
+def delete_payment(name: str) -> dict:
+    """Delete a Payment Entry — drafts only.
+
+    Submitted Payment Entries require a cancel + separate accounting
+    entry to reverse GL impact; we intentionally refuse to cancel from
+    the PWA to prevent accidental GL reversal. The user must open the
+    Desk and go through the Cancel workflow there if they really need to.
+    """
+    if not name:
+        frappe.throw(_("Payment name required"))
+    doc = frappe.get_doc("Payment Entry", name)
+    if doc.docstatus != 0:
+        frappe.throw(_("Only draft payments can be deleted here. Submitted payments must be cancelled from the Desk."))
+    # Ownership check — non-admins can only delete their own drafts.
+    roles = frappe.get_roles(frappe.session.user)
+    is_admin = any(r in roles for r in ("System Manager", "Van Manager", "Accounts Manager"))
+    if not is_admin and doc.owner != frappe.session.user:
+        frappe.throw(_("You can only delete your own draft payments."))
+    frappe.delete_doc("Payment Entry", name, ignore_permissions=False)
+    return {"deleted": True, "name": name}
 
 
 @frappe.whitelist(methods=["GET"])

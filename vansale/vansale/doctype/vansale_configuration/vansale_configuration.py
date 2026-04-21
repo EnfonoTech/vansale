@@ -97,6 +97,51 @@ class VansaleConfiguration(Document):
 
     def on_update(self):
         self._create_permissions()
+        self._backfill_sales_team()
+
+    def _backfill_sales_team(self) -> None:
+        """Tag customers owned by each configured user with their sales_person.
+
+        Rationale: van users see customers scoped to their Sales Team row.
+        Admins set a user's `sales_person` here; before this backfill, every
+        customer the user already created sat outside the filter because no
+        one had added the sales_person to the Customer's Sales Team. Walking
+        owned customers on every save is O(n_users × n_customers_per_user)
+        which is tolerable at this scale (typical van user < 500 customers).
+        Idempotent — skips customers that already have the row.
+        """
+        for u in self.user or []:
+            if not u.user or not u.sales_person:
+                continue
+            owned = frappe.db.sql_list(
+                "SELECT name FROM `tabCustomer` WHERE owner = %s",
+                (u.user,),
+            )
+            for customer_name in owned:
+                exists = frappe.db.exists(
+                    "Sales Team",
+                    {
+                        "parenttype": "Customer",
+                        "parent": customer_name,
+                        "sales_person": u.sales_person,
+                    },
+                )
+                if exists:
+                    continue
+                cust = frappe.get_doc("Customer", customer_name)
+                cust.append(
+                    "sales_team",
+                    {"sales_person": u.sales_person, "allocated_percentage": 100},
+                )
+                # Normalize allocation so ERPNext's 100% total validation
+                # doesn't trip when the customer already had partial rows.
+                total = sum(float(r.allocated_percentage or 0) for r in cust.sales_team)
+                if total and total != 100:
+                    scale = 100.0 / total
+                    for r in cust.sales_team:
+                        r.allocated_percentage = float(r.allocated_percentage or 0) * scale
+                cust.flags.ignore_version = True
+                cust.save(ignore_permissions=True)
 
     def _create_permissions(self) -> None:
         for u in self.user or []:

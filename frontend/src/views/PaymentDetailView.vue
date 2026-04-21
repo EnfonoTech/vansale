@@ -12,8 +12,10 @@
  */
 import { computed, onMounted, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
-import { detail, type PaymentDetail } from "@/api/payment";
+import { detail, deletePayment, type PaymentDetail } from "@/api/payment";
 import { useSessionStore } from "@/stores/session";
+import { useToastStore } from "@/stores/toasts";
+import { useConfirmStore } from "@/stores/confirm";
 import { ApiError } from "@/app/frappe";
 import Icon from "@/components/Icon.vue";
 import SarSymbol from "@/components/SarSymbol.vue";
@@ -21,10 +23,13 @@ import SarSymbol from "@/components/SarSymbol.vue";
 const route = useRoute();
 const router = useRouter();
 const session = useSessionStore();
+const toasts = useToastStore();
+const confirm = useConfirmStore();
 
 const doc = ref<PaymentDetail | null>(null);
 const loading = ref(false);
 const err = ref("");
+const busy = ref(false);
 
 const name = computed(() => String(route.params.name ?? ""));
 
@@ -67,6 +72,35 @@ function openInvoice(ref: string) {
   void router.push({ name: "invoice-detail", params: { name: ref } });
 }
 
+/**
+ * Delete a draft Payment Entry. Submitted entries are intentionally
+ * blocked at the backend — cancelling a posted payment reverses GL
+ * entries, which needs the Desk workflow with proper controls.
+ */
+async function onDelete() {
+  if (!doc.value || busy.value) return;
+  const ok = await confirm.ask({
+    title: `Delete draft ${doc.value.name}?`,
+    message: "This cannot be undone.",
+    confirmText: "Delete",
+    danger: true,
+  });
+  if (!ok) return;
+  busy.value = true;
+  try {
+    await deletePayment(doc.value.name);
+    toasts.success("Draft deleted");
+    void router.replace({ name: "payments" });
+  } catch (e) {
+    toasts.error(
+      e instanceof ApiError ? e.serverMessage ?? e.message
+        : e instanceof Error ? e.message : String(e),
+    );
+  } finally {
+    busy.value = false;
+  }
+}
+
 onMounted(load);
 </script>
 
@@ -99,6 +133,14 @@ onMounted(load);
           </button>
           <button class="ghost" @click="router.push({ name: 'payment-new' })">
             <Icon name="plus" :size="16" /> New payment
+          </button>
+          <button
+            v-if="doc.docstatus === 0"
+            class="ghost danger-ghost"
+            :disabled="busy"
+            @click="onDelete"
+          >
+            <Icon name="trash" :size="16" /> Delete
           </button>
         </div>
       </section>

@@ -75,6 +75,19 @@ export async function detail(name: string): Promise<PaymentDetail> {
   );
 }
 
+/**
+ * Delete a draft Payment Entry. Backend enforces owner check and
+ * refuses submitted entries — cancellation of a posted payment needs
+ * the Desk workflow because it reverses GL entries.
+ */
+export async function deletePayment(name: string): Promise<{ deleted: boolean; name: string }> {
+  return apiCall<{ deleted: boolean; name: string }>(
+    "POST",
+    "vansale.api.payment.delete_payment",
+    { name },
+  );
+}
+
 export async function save(payload: PaymentPayload): Promise<SavedPayment> {
   const clientId = genUuid();
   const clientTs = new Date().toISOString();

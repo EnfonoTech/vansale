@@ -28,7 +28,7 @@ async function onLogout() {
 }
 
 interface Link {
-  icon: "customer" | "stock" | "sync" | "refresh" | "truck" | "invoice" | "receipt" | "plus";
+  icon: "customer" | "stock" | "sync" | "refresh" | "truck" | "invoice" | "receipt" | "plus" | "payment";
   label: string;
   sub?: string;
   to: string;
@@ -39,6 +39,7 @@ interface Link {
 const links = computed<Link[]>(() => [
   { icon: "plus", label: "New invoice", sub: "Start a sale", to: "invoice-new", tone: "primary" },
   { icon: "invoice", label: "All invoices", sub: "Browse submitted & drafts", to: "invoices" },
+  { icon: "payment", label: "Payments", sub: "Collections & receipts", to: "payments", tone: "success" },
   { icon: "receipt", label: "Returns", sub: "Credit notes against invoices", to: "returns", tone: "warning" },
   { icon: "customer", label: "Customers", sub: "Browse & create", to: "customers" },
   { icon: "stock", label: "Van stock", sub: "Current warehouse", to: "van-stock", tone: "success" },
