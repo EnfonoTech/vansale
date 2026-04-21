@@ -399,7 +399,10 @@
                                     {% endif %}
                                 </div>
                                 <div style="flex:1; text-align:right; font-weight:bold;">
-                                    {% set arabic_name = frappe.db.get_value("Item", item.item_code, "custom_arabic_name") %}
+                                    {% set arabic_name = "" %}
+                                    {% if frappe.get_meta("Item").has_field("custom_arabic_name") %}
+                                        {% set arabic_name = frappe.db.get_value("Item", item.item_code, "custom_arabic_name") %}
+                                    {% endif %}
                                     {{ arabic_name or "" }}
                                 </div>
                             </div>

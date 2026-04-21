@@ -80,6 +80,16 @@ def config_defaults() -> dict:
     )
     van_code = cfg_user.parent if cfg_user else None
     sales_person = cfg_user.sales_person if cfg_user else None
+    require_location = False
+    if van_code:
+        # require_location is new (v1.0.12); guard with has_field so old sites don't crash
+        try:
+            if frappe.get_meta("Vansale Configuration").has_field("require_location"):
+                require_location = bool(
+                    frappe.db.get_value("Vansale Configuration", van_code, "require_location") or 0
+                )
+        except Exception:
+            require_location = False
     sales_person_name = None
     if sales_person:
         sales_person_name = frappe.db.get_value("Sales Person", sales_person, "sales_person_name") or sales_person
@@ -106,6 +116,7 @@ def config_defaults() -> dict:
         "currency": currency,
         "sales_person": sales_person,
         "sales_person_name": sales_person_name,
+        "require_location": require_location,
     }
 
 

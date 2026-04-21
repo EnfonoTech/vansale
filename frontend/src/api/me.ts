@@ -18,6 +18,7 @@ export interface ConfigDefaults {
   currency: string | null;
   sales_person: string | null;
   sales_person_name: string | null;
+  require_location?: boolean;
 }
 
 export function configDefaults() {

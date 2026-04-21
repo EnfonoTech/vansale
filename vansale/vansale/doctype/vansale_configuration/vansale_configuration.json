@@ -12,6 +12,8 @@
   "column_break_company",
   "company",
   "branch",
+  "section_break_visits",
+  "require_location",
   "section_break_resources",
   "warehouse",
   "cost_center",
@@ -51,6 +53,18 @@
    "fieldtype": "Link",
    "label": "Branch",
    "options": "Branch"
+  },
+  {
+   "fieldname": "section_break_visits",
+   "fieldtype": "Section Break",
+   "label": "Visits"
+  },
+  {
+   "fieldname": "require_location",
+   "fieldtype": "Check",
+   "label": "Capture location on visit end",
+   "default": "0",
+   "description": "If enabled, the app asks for GPS permission and tags end-visit with lat/lng. Off by default."
   },
   {
    "fieldname": "section_break_resources",

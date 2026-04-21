@@ -17,6 +17,7 @@
  */
 import { apiCall } from "./client";
 import { apiBase } from "@/app/platform";
+import { getCredentials, NetworkError, saveBlobToDevice } from "@/app/frappe";
 
 export const DEFAULT_SI_PRINT_FORMAT = "Vansale Tax Invoice";
 
@@ -53,6 +54,61 @@ export async function fetchPrintHtml(
  * body fragment + style block; the browser's default styles would
  * break the ZATCA format without these wrappers.
  */
+/**
+ * Download a PDF via Frappe's built-in `download_pdf` endpoint and save
+ * it to the device. On native (APK) the system print dialog cannot be
+ * summoned from inside a sandboxed iframe — the `window.print()` trick
+ * we use on web is silently ignored by the Android WebView. Instead we
+ * grab the PDF bytes (with the same auth headers as every other API
+ * call) and hand them to `saveBlobToDevice`, which writes to
+ * `Documents/` on native and triggers a browser download on web.
+ */
+export async function downloadPrintPdf(
+  doctype: string,
+  name: string,
+  printFormat = DEFAULT_SI_PRINT_FORMAT,
+  noLetterhead = false,
+): Promise<void> {
+  const qs = new URLSearchParams({
+    doctype,
+    name,
+    format: printFormat,
+    no_letterhead: noLetterhead ? "1" : "0",
+  });
+  const url = `${apiBase()}/api/method/frappe.utils.print_format.download_pdf?${qs.toString()}`;
+  const headers: Record<string, string> = { Accept: "application/pdf" };
+  const creds = await getCredentials();
+  if (creds) headers.Authorization = `token ${creds.apiKey}:${creds.apiSecret}`;
+
+  const controller = new AbortController();
+  const t = window.setTimeout(() => controller.abort(), 30_000);
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      method: "GET",
+      headers,
+      credentials: apiBase() ? "omit" : "include",
+      signal: controller.signal,
+    });
+  } catch (err) {
+    if ((err as { name?: string } | null)?.name === "AbortError") {
+      throw new NetworkError("PDF download timed out");
+    }
+    throw new NetworkError();
+  } finally {
+    window.clearTimeout(t);
+  }
+
+  if (!res.ok) {
+    throw new Error(`Could not generate PDF (HTTP ${res.status})`);
+  }
+
+  const blob = await res.blob();
+  const safeDoctype = doctype.replace(/\s+/g, "_");
+  const safeName = name.replace(/[^A-Za-z0-9._-]+/g, "_");
+  await saveBlobToDevice(blob, `${safeDoctype}-${safeName}.pdf`);
+}
+
 function buildStandalone(html: string, style: string, base: string): string {
   const absBase = base ? (base.endsWith("/") ? base : `${base}/`) : "/";
   const baseTag = `<base href="${absBase}">`;

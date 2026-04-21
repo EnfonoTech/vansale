@@ -168,11 +168,22 @@ export async function apiCall<T>(
     init.body = JSON.stringify(body);
   }
 
+  // 20s timeout so mobile WebView doesn't hang forever on flaky networks.
+  // Without this, slow/failing requests surface as indefinite blank screens.
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), 20_000);
+  init.signal = controller.signal;
+
   let res: Response;
   try {
     res = await fetch(url, fetchOpts(init));
-  } catch {
+  } catch (err) {
+    if ((err as { name?: string } | null)?.name === "AbortError") {
+      throw new NetworkError("Request timed out");
+    }
     throw new NetworkError();
+  } finally {
+    window.clearTimeout(timeoutId);
   }
 
   let data: unknown = null;

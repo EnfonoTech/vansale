@@ -383,6 +383,25 @@ def statement_json(
 
 
 @frappe.whitelist(methods=["GET"])
+def statement_pdf(name: str, from_date: str | None = None, to_date: str | None = None):
+    """Render the customer statement as a PDF binary.
+
+    Used by the APK — the WebView cannot reliably open the system print
+    dialog from inside a sandboxed iframe, so we hand it PDF bytes that
+    `saveBlobToDevice` writes to `Documents/` via the Filesystem plugin.
+    """
+    from frappe.utils.pdf import get_pdf
+
+    html = _build_statement_html(name, from_date, to_date)
+    pdf_bytes = get_pdf(html)
+    frappe.local.response.type = "download"
+    frappe.local.response.filename = f"statement-{name}.pdf"
+    frappe.local.response.filecontent = pdf_bytes
+    frappe.local.response.content_type = "application/pdf"
+    frappe.local.response.display_content_as = "attachment"
+
+
+@frappe.whitelist(methods=["GET"])
 def summary(customer: str) -> dict:
     """Aggregates for the customer detail tile strip."""
     outstanding = frappe.db.sql(

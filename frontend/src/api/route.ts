@@ -44,7 +44,6 @@ export interface EndVisitPayload {
   stop_idx: number;
   invoice?: string | null;
   payment?: string | null;
-  signature_file?: string | null;
   lat?: number | null;
   lng?: number | null;
   notes?: string | null;

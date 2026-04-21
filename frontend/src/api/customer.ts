@@ -1,5 +1,7 @@
 import { apiCall } from "./client";
 import { db, type CachedCustomer } from "@/offline/db";
+import { apiBase } from "@/app/platform";
+import { getCredentials, NetworkError, saveBlobToDevice } from "@/app/frappe";
 
 export interface CustomerRow {
   name: string;
@@ -48,6 +50,51 @@ export async function statement(
     "GET",
     `vansale.api.customer.statement_json?${qs.toString()}`,
   );
+}
+
+/**
+ * Fetch the statement as a PDF binary and save to device. Works on both
+ * web (anchor download) and native (Filesystem Documents/). The server
+ * endpoint uses `frappe.utils.pdf.get_pdf` which requires wkhtmltopdf.
+ */
+export async function downloadStatementPdf(
+  name: string,
+  fromDate?: string,
+  toDate?: string,
+): Promise<void> {
+  const qs = new URLSearchParams({ name });
+  if (fromDate) qs.set("from_date", fromDate);
+  if (toDate) qs.set("to_date", toDate);
+  const url = `${apiBase()}/api/method/vansale.api.customer.statement_pdf?${qs.toString()}`;
+  const headers: Record<string, string> = { Accept: "application/pdf" };
+  const creds = await getCredentials();
+  if (creds) headers.Authorization = `token ${creds.apiKey}:${creds.apiSecret}`;
+
+  const controller = new AbortController();
+  const t = window.setTimeout(() => controller.abort(), 30_000);
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      method: "GET",
+      headers,
+      credentials: apiBase() ? "omit" : "include",
+      signal: controller.signal,
+    });
+  } catch (err) {
+    if ((err as { name?: string } | null)?.name === "AbortError") {
+      throw new NetworkError("Statement PDF timed out");
+    }
+    throw new NetworkError();
+  } finally {
+    window.clearTimeout(t);
+  }
+
+  if (!res.ok) {
+    throw new Error(`Could not generate statement PDF (HTTP ${res.status})`);
+  }
+  const blob = await res.blob();
+  const safeName = name.replace(/[^A-Za-z0-9._-]+/g, "_");
+  await saveBlobToDevice(blob, `statement-${safeName}.pdf`);
 }
 
 export interface CustomerCreatePayload {

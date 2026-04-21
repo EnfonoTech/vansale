@@ -3,7 +3,7 @@ import { computed, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { listMine as listCustomers } from "@/api/customer";
 import { outstanding, save, modesOfPayment, type ModeOfPayment } from "@/api/payment";
-import { ApiError } from "@/app/frappe";
+import { ApiError, NetworkError } from "@/app/frappe";
 import { useSessionStore } from "@/stores/session";
 import { useToastStore } from "@/stores/toasts";
 import Icon from "@/components/Icon.vue";
@@ -25,6 +25,8 @@ const mode = ref<string>("Cash");
 const reference = ref("");
 const remarks = ref("");
 const busy = ref(false);
+const loadingOutstanding = ref(false);
+const outstandingError = ref("");
 
 onMounted(async () => {
   customers.value = await listCustomers(undefined, 200);
@@ -42,13 +44,25 @@ watch(customer, loadOutstanding);
 async function loadOutstanding() {
   selected.value = new Set();
   invoices.value = [];
-  if (customer.value) {
-    try { invoices.value = await outstanding(customer.value); }
-    catch { /* keep empty; user can still free-text a payment */ }
+  outstandingError.value = "";
+  if (!customer.value) return;
+  loadingOutstanding.value = true;
+  try {
+    invoices.value = await outstanding(customer.value);
     if (preselectInvoice) {
       const row = invoices.value.find((r) => String(r.name) === preselectInvoice);
       if (row) togglePick(row);
     }
+  } catch (e) {
+    if (e instanceof NetworkError) {
+      outstandingError.value = "Offline — outstanding invoices unavailable. You can still record a payment.";
+    } else if (e instanceof ApiError) {
+      outstandingError.value = e.serverMessage ?? "Could not load outstanding invoices";
+    } else {
+      outstandingError.value = "Could not load outstanding invoices";
+    }
+  } finally {
+    loadingOutstanding.value = false;
   }
 }
 
@@ -139,7 +153,18 @@ async function submit() {
       </label>
     </section>
 
-    <section v-if="invoices.length > 0" class="card stack">
+    <section v-if="loadingOutstanding" class="card stack">
+      <p class="hint"><Icon name="clock" :size="14" /> Loading outstanding invoices…</p>
+    </section>
+
+    <section v-else-if="outstandingError && customer" class="card stack">
+      <p class="hint error-hint" role="alert">
+        <Icon name="x" :size="14" /> {{ outstandingError }}
+      </p>
+      <button type="button" class="link-btn" @click="loadOutstanding">Retry</button>
+    </section>
+
+    <section v-else-if="invoices.length > 0" class="card stack">
       <div class="row-head">
         <h3 style="margin:0">Outstanding invoices</h3>
         <span class="muted xsmall">
@@ -247,6 +272,10 @@ async function submit() {
   font-size: var(--text-xs); color: var(--text-muted);
   background: var(--surface-muted); padding: 0.35rem 0.55rem;
   border-radius: var(--radius-sm); margin: 0;
+}
+.hint.error-hint {
+  background: color-mix(in srgb, var(--danger, #dc2626) 10%, transparent);
+  color: var(--danger, #dc2626);
 }
 .inv-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0.4rem; }
 .inv-row {

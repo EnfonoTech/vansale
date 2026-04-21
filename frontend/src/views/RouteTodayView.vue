@@ -3,23 +3,21 @@ import { computed, onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
 import { today, startVisit, endVisit, type RouteStop } from "@/api/route";
 import { currentPosition } from "@/features/van/gps";
-import { resolveSignatureToRealUrl } from "@/offline/signatures";
 import { isOnline } from "@/app/online";
+import { useSessionStore } from "@/stores/session";
 import { useToastStore } from "@/stores/toasts";
-import SignaturePad from "@/components/SignaturePad.vue";
+import { useRouteVisitStore } from "@/stores/routeVisit";
 import Icon from "@/components/Icon.vue";
 
 const router = useRouter();
 const toasts = useToastStore();
+const session = useSessionStore();
+const visit = useRouteVisitStore();
 
 const plan = ref<Record<string, string | null | undefined> | null>(null);
 const stops = ref<RouteStop[]>([]);
 const err = ref("");
 const loading = ref(false);
-
-const active = ref<RouteStop | null>(null);
-const signaturePlaceholder = ref<string | null>(null);
-const notes = ref("");
 const busy = ref(false);
 
 async function load() {
@@ -29,6 +27,13 @@ async function load() {
     const res = await today();
     plan.value = res.plan as Record<string, string | null | undefined> | null;
     stops.value = res.stops;
+    // Reconcile: if server marked the active visit as done/skipped, drop local state.
+    if (visit.active && plan.value?.name) {
+      const match = stops.value.find((s) => s.idx === visit.active?.stop.idx);
+      if (!match || match.status === "done" || match.status === "skipped") {
+        visit.clear();
+      }
+    }
   } catch (e) {
     err.value = e instanceof Error ? e.message : String(e);
   } finally {
@@ -45,9 +50,7 @@ async function onStart(stop: RouteStop) {
   if (!plan.value?.name) return;
   try {
     if (isOnline()) await startVisit(plan.value.name, stop.idx);
-    active.value = { ...stop, status: "in_progress" };
-    signaturePlaceholder.value = null;
-    notes.value = "";
+    visit.start(plan.value.name as string, stop);
     toasts.info(`Visit started · ${stop.customer}`);
   } catch (e) {
     toasts.error(e instanceof Error ? e.message : String(e));
@@ -55,30 +58,26 @@ async function onStart(stop: RouteStop) {
 }
 
 async function onEnd() {
-  if (!plan.value?.name || !active.value) return;
+  if (!visit.active) return;
   busy.value = true;
   err.value = "";
   try {
-    const geo = await currentPosition();
-    let sigUrl: string | null = null;
-    if (signaturePlaceholder.value) {
-      if (isOnline()) {
-        try { sigUrl = await resolveSignatureToRealUrl(signaturePlaceholder.value); }
-        catch { sigUrl = signaturePlaceholder.value; }
-      } else {
-        sigUrl = signaturePlaceholder.value;
-      }
+    let lat: number | undefined;
+    let lng: number | undefined;
+    if (session.requireLocation) {
+      const geo = await currentPosition();
+      lat = geo?.lat;
+      lng = geo?.lng;
     }
     const res = await endVisit({
-      plan_name: plan.value.name as string,
-      stop_idx: active.value.idx,
-      lat: geo?.lat,
-      lng: geo?.lng,
-      signature_file: sigUrl,
-      notes: notes.value || null,
+      plan_name: visit.active.planName,
+      stop_idx: visit.active.stop.idx,
+      lat,
+      lng,
+      notes: visit.active.notes || null,
     });
     toasts.success(res.queued ? "Visit queued offline" : `Visit logged ${res.name}`);
-    active.value = null;
+    visit.clear();
     await load();
   } catch (e) {
     toasts.error(e instanceof Error ? e.message : String(e));
@@ -109,6 +108,10 @@ function statusIcon(s: string | undefined): "check" | "clock" | "x" | "map-pin" 
 
 const doneCount = computed(() => stops.value.filter((s) => s.status === "done").length);
 const pendingCount = computed(() => stops.value.filter((s) => s.status === "pending").length);
+const notesModel = computed({
+  get: () => visit.active?.notes ?? "",
+  set: (v: string) => visit.setNotes(v),
+});
 </script>
 
 <template>
@@ -164,7 +167,11 @@ const pendingCount = computed(() => stops.value.filter((s) => s.status === "pend
           </span>
         </button>
         <div class="stop-actions">
-          <button v-if="s.status === 'pending'" class="start-btn" @click="onStart(s)">
+          <button
+            v-if="s.status === 'pending' && !visit.hasActive"
+            class="start-btn"
+            @click="onStart(s)"
+          >
             <Icon name="map-pin" :size="16" /> Start visit
           </button>
           <button class="ghost small" @click="openCustomer(s.customer)">
@@ -174,22 +181,21 @@ const pendingCount = computed(() => stops.value.filter((s) => s.status === "pend
       </li>
     </ul>
 
-    <section v-if="active" class="active-card card stack">
+    <section v-if="visit.active" class="active-card card stack">
       <div class="active-head">
         <Icon name="map-pin" :size="20" />
         <div>
           <span class="muted xsmall">Active visit</span>
-          <strong>{{ active.customer }}</strong>
+          <strong>{{ visit.active.stop.customer }}</strong>
         </div>
       </div>
       <p class="muted small">
-        Create invoice or collect payment from dashboard — visit stays active.
+        Create invoice or collect payment — visit stays active until you end it.
       </p>
       <label class="field">
         <span class="label">Notes</span>
-        <textarea v-model="notes" rows="2" placeholder="Observation…" />
+        <textarea v-model="notesModel" rows="2" placeholder="Observation…" />
       </label>
-      <SignaturePad v-model="signaturePlaceholder" />
       <div class="row actions">
         <button class="ghost" @click="router.push({ name: 'invoice-new' })">
           <Icon name="invoice" :size="16" /> Invoice

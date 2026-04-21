@@ -2,30 +2,23 @@
 /**
  * In-app print view.
  *
- * Why a route rather than `window.open`:
- *  - Native WebView is at `https://localhost`; relative /printview resolves
- *    to the wrong origin and 404s.
- *  - External window.open on native either opens the system browser (no
- *    auth cookie) or a blank tab. Neither prints the ZATCA format.
- *
- * Flow:
- *  1. Fetch `/printview?doctype=...&name=...&format=...` directly from
- *     the Frappe host (auth via API token on native, session on web).
- *     The `frappe.client.get_print` RPC is not available on every
- *     Frappe build, so we avoid that and hit the website route instead.
- *  2. Inject an absolute `<base href>` so the document's relative
- *     asset URLs resolve against the server, not `about:srcdoc`.
- *  3. Render inside a sandboxed iframe for CSS isolation.
- *  4. Trigger print via `iframe.contentWindow.print()` so only the
- *     invoice paper prints, not the app chrome.
+ * Two output paths:
+ *  - `Print` uses `iframe.contentWindow.print()` — works in browsers
+ *    and Capacitor's Android WebView via its default Print service.
+ *  - `Download PDF` hits Frappe's `download_pdf` endpoint and saves
+ *    the file via `saveBlobToDevice` (Documents/ on native, browser
+ *    download on web). This is what users actually want on Android —
+ *    the system print dialog from inside a sandboxed iframe is flaky.
  */
 import { computed, onMounted, ref } from "vue";
 import { useRoute } from "vue-router";
-import { fetchPrintHtml, DEFAULT_SI_PRINT_FORMAT } from "@/api/print";
+import { fetchPrintHtml, downloadPrintPdf, DEFAULT_SI_PRINT_FORMAT } from "@/api/print";
 import { ApiError, NetworkError } from "@/app/frappe";
+import { useToastStore } from "@/stores/toasts";
 import Icon from "@/components/Icon.vue";
 
 const route = useRoute();
+const toasts = useToastStore();
 const doctype = computed(() => String(route.params.doctype ?? ""));
 const name = computed(() => String(route.params.name ?? ""));
 const format = computed(() => String(route.query.format ?? DEFAULT_SI_PRINT_FORMAT));
@@ -33,6 +26,7 @@ const format = computed(() => String(route.query.format ?? DEFAULT_SI_PRINT_FORM
 const html = ref("");
 const loading = ref(false);
 const err = ref("");
+const downloading = ref(false);
 const iframe = ref<HTMLIFrameElement | null>(null);
 
 async function load() {
@@ -57,6 +51,20 @@ function doPrint() {
   frame.contentWindow.print();
 }
 
+async function doDownload() {
+  if (downloading.value) return;
+  downloading.value = true;
+  try {
+    await downloadPrintPdf(doctype.value, name.value, format.value);
+    toasts.success("PDF saved to Documents");
+  } catch (e) {
+    if (e instanceof NetworkError) toasts.error("Offline — try again when connected");
+    else toasts.error(e instanceof Error ? e.message : String(e));
+  } finally {
+    downloading.value = false;
+  }
+}
+
 onMounted(load);
 </script>
 
@@ -68,10 +76,16 @@ onMounted(load);
     <template v-if="!loading && html">
       <div class="toolbar">
         <span class="eyebrow">{{ doctype }} · {{ name }}</span>
-        <button type="button" class="primary" @click="doPrint">
-          <Icon name="receipt" :size="16" />
-          <span>Print</span>
-        </button>
+        <div class="toolbar-actions">
+          <button type="button" class="ghost" :disabled="downloading" @click="doDownload">
+            <Icon name="receipt" :size="16" />
+            <span>{{ downloading ? "Saving…" : "PDF" }}</span>
+          </button>
+          <button type="button" class="primary" @click="doPrint">
+            <Icon name="receipt" :size="16" />
+            <span>Print</span>
+          </button>
+        </div>
       </div>
       <iframe
         ref="iframe"
@@ -91,6 +105,7 @@ onMounted(load);
   justify-content: space-between;
   gap: 0.75rem;
 }
+.toolbar-actions { display: flex; gap: 0.5rem; }
 .eyebrow {
   font-size: var(--text-xs);
   color: var(--text-muted);
