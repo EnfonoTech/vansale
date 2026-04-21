@@ -34,7 +34,18 @@ const addressLine2 = ref("");
 const city = ref("");
 const stateField = ref("");
 const pincode = ref("");
-const country = ref("");
+// Default to KSA because that's where 99% of our customers are (and the
+// site-level Customer.custom_country field is Reqd on trading-demo).
+// GCC-only list keeps the dropdown short + meaningful for the driver.
+const country = ref("Saudi Arabia");
+const GCC_COUNTRIES = [
+  "Saudi Arabia",
+  "United Arab Emirates",
+  "Kuwait",
+  "Bahrain",
+  "Qatar",
+  "Oman",
+] as const;
 // KSA ZATCA Phase 2 — building number is mandatory on B2B addresses.
 const buildingNumber = ref("");
 const additionalNumber = ref("");
@@ -186,8 +197,10 @@ async function submit() {
         </label>
       </div>
       <label class="field">
-        <span class="tiny">Country</span>
-        <input type="text" v-model="country" placeholder="Saudi Arabia" />
+        <span class="tiny">Country *</span>
+        <select v-model="country">
+          <option v-for="c in GCC_COUNTRIES" :key="c" :value="c">{{ c }}</option>
+        </select>
       </label>
     </section>
 

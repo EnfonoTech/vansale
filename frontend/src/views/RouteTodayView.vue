@@ -278,6 +278,20 @@ const notesModel = computed({
   get: () => visit.active?.notes ?? "",
   set: (v: string) => visit.setNotes(v),
 });
+
+// Today's date formatted for the hero. Route plans are recurrence-based
+// (Weekly / Monthly) now, so showing "Monday, 22 April" instead of the
+// raw plan_date string helps drivers confirm they're looking at the
+// right occurrence \u2014 a stale plan_date from the server would be
+// confusing otherwise.
+const todayLabel = computed(() => {
+  const d = new Date();
+  return d.toLocaleDateString(undefined, {
+    weekday: "long",
+    day: "numeric",
+    month: "short",
+  });
+});
 </script>
 
 <template>
@@ -285,9 +299,11 @@ const notesModel = computed({
     <section v-if="plan" class="hero card stack">
       <div class="hero-head">
         <div>
-          <span class="muted xsmall">Route plan</span>
-          <h2 class="hero-date">{{ plan.route_name || plan.plan_date }}</h2>
-          <p v-if="plan.route_name" class="muted xsmall">{{ plan.plan_date }}</p>
+          <span class="muted xsmall">Route plan \u00b7 {{ todayLabel }}</span>
+          <h2 class="hero-date">{{ plan.route_name || "Today" }}</h2>
+          <p v-if="plan.frequency" class="muted xsmall">
+            {{ plan.frequency === "Monthly" ? "Monthly route" : "Weekly route" }}
+          </p>
           <p v-if="plan.notes" class="muted small">{{ plan.notes }}</p>
         </div>
         <button class="ghost icon-only" @click="load" :disabled="loading" title="Refresh">

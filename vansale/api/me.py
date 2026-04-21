@@ -122,9 +122,21 @@ def config_defaults() -> dict:
 
 def current_user_sales_person() -> str | None:
     """Shared helper — used by invoice.save to auto-tag sales_team."""
+    return user_to_sales_person(frappe.session.user)
+
+
+def user_to_sales_person(user: str | None) -> str | None:
+    """Map a User to their linked Sales Person via Vansale Configuration.
+
+    Used by the Van Route Plan desk-side customer filter (route.py
+    customer_query) — the driver they're building the route for may
+    not be the logged-in admin, so we can't use session.user.
+    """
+    if not user:
+        return None
     return frappe.db.get_value(
         "Vansale Configuration User",
-        {"user": frappe.session.user},
+        {"user": user},
         "sales_person",
     )
 

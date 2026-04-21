@@ -7,7 +7,11 @@ import type { QueuedVisit } from "@/offline/db";
 export interface RoutePlan {
   name: string;
   route_name?: string | null;
+  /** Today's date (YYYY-MM-DD). Recurrence-based now \u2014 this is display-only. */
   plan_date: string;
+  /** Optional anchor date from the doctype. Null for no-anchor plans. */
+  effective_from?: string | null;
+  frequency?: "Weekly" | "Monthly";
   warehouse?: string;
   notes?: string;
   status?: "Active" | "Completed";
@@ -36,7 +40,12 @@ export interface TodayRoute {
 }
 
 export async function today(): Promise<TodayRoute> {
-  return apiCall("GET", "vansale.api.route.today");
+  // Send client-local YYYY-MM-DD so server resolves day-of-week against the
+  // driver's phone clock, not CEST server wall time. Without this, a driver
+  // in Riyadh on Wed morning can get a "Tuesday" plan because the server
+  // hasn't rolled over yet (observed 2026-04-22).
+  const clientDate = new Date().toLocaleDateString("en-CA"); // YYYY-MM-DD in local tz
+  return apiCall("GET", `vansale.api.route.today?client_date=${encodeURIComponent(clientDate)}`);
 }
 
 export async function startVisit(planName: string, stopIdx: number): Promise<{ started_at: string }> {

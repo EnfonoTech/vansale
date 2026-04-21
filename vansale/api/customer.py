@@ -190,7 +190,18 @@ def create(
                 )
             )
 
-    doc = frappe.get_doc({
+    # Resolve country once — used for both Customer.custom_country (a
+    # site-custom reqd Link field added on trading-demo) and the primary
+    # Address. Default to KSA when the caller doesn't pick one; fall back
+    # to Global Defaults before that so sites with a different home
+    # country keep working.
+    resolved_country = (
+        country
+        or frappe.db.get_single_value("Global Defaults", "country")
+        or "Saudi Arabia"
+    )
+
+    customer_payload: dict = {
         "doctype": "Customer",
         "customer_name": customer_name,
         "customer_type": "Company" if is_b2b else "Individual",
@@ -199,7 +210,14 @@ def create(
         "territory": territory or frappe.db.get_single_value("Selling Settings", "territory") or "All Territories",
         "customer_group": customer_group or frappe.db.get_single_value("Selling Settings", "customer_group") or "All Customer Groups",
         "tax_id": tax_id,
-    })
+    }
+    # Only set `custom_country` if the field actually exists on Customer
+    # for this site (ksa_compliance / customer-specific customization).
+    # Keeping the API portable to sites without the custom field.
+    customer_meta = frappe.get_meta("Customer")
+    if customer_meta.has_field("custom_country"):
+        customer_payload["custom_country"] = resolved_country
+    doc = frappe.get_doc(customer_payload)
     # Auto-stamp the creating van user's sales_person into Sales Team so
     # the customer shows up in list_mine() without a manual admin tag +
     # so invoice commission tracking works from the first invoice.
@@ -220,7 +238,7 @@ def create(
             "city": city,
             "state": state,
             "pincode": pincode,
-            "country": country or frappe.db.get_single_value("Global Defaults", "country") or "Saudi Arabia",
+            "country": resolved_country,
             "phone": mobile_no,
             "email_id": email_id,
             "is_primary_address": 1,

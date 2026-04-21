@@ -12,114 +12,141 @@ from frappe import _
 from vansale.api.datetime_util import naive_site_to_utc_iso, parse_client_ts
 
 
-_WEEKDAY_KEYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
+_WEEKDAY_CHECK_FIELDS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
 
 
-def _parse_days(raw: str | None) -> set[str]:
+def _parse_days_of_month(raw: str | None) -> set[int]:
+    """Parse the CSV `days_of_month` free-text field into a set of ints.
+
+    Invalid tokens silently dropped — the field is human-edited so we'd
+    rather show the driver a route than crash on a typo like "1, 15,,".
+    """
     if not raw:
         return set()
-    return {d.strip().lower()[:3] for d in raw.split(",") if d.strip()}
+    out: set[int] = set()
+    for tok in raw.split(","):
+        tok = tok.strip()
+        if not tok:
+            continue
+        try:
+            n = int(tok)
+        except ValueError:
+            continue
+        if 1 <= n <= 31:
+            out.add(n)
+    return out
 
 
-def _recurrence_matches(plan: dict, today_: date) -> bool:
+def _recurrence_matches(plan: dict, today_: "date") -> bool:
     """Does a recurring plan fire today?
 
-    Each frequency has its own rule. For Custom we fall back to
-    `interval_days` from the anchor `plan_date`. Plans with `valid_until`
-    set are ignored past that date.
+    Weekly: one of the 7 per-day Check fields (mon..sun) is set AND the
+    current weekday matches. Monthly: today's day-of-month is in the
+    CSV `days_of_month` list. An optional `plan_date` gates "not before
+    this date" so admins can schedule a route to start next month.
     """
-    freq = (plan.get("frequency") or "One-time").lower()
     anchor: date | None = plan.get("plan_date")
-    valid_until: date | None = plan.get("valid_until")
-    if valid_until and today_ > valid_until:
+    if anchor and today_ < anchor:
         return False
-    if freq == "one-time":
-        return anchor == today_
-    if not anchor or today_ < anchor:
-        return False
-    today_key = _WEEKDAY_KEYS[today_.weekday()]
-    days = _parse_days(plan.get("days_of_week"))
-    if freq == "daily":
-        return True
-    if freq == "weekly":
-        return today_key in days if days else today_.weekday() == anchor.weekday()
-    if freq == "biweekly":
-        weeks = (today_ - anchor).days // 7
-        if weeks % 2 != 0:
-            return False
-        return today_key in days if days else today_.weekday() == anchor.weekday()
-    if freq == "monthly":
-        return today_.day == anchor.day
-    if freq == "custom":
-        interval = int(plan.get("interval_days") or 0)
-        if interval <= 0:
-            return False
-        delta = (today_ - anchor).days
-        if delta < 0:
-            return False
-        if days and today_key not in days:
-            return False
-        return delta % interval == 0
+    freq = (plan.get("frequency") or "Weekly")
+    if freq == "Weekly":
+        today_field = _WEEKDAY_CHECK_FIELDS[today_.weekday()]
+        return bool(plan.get(today_field))
+    if freq == "Monthly":
+        return today_.day in _parse_days_of_month(plan.get("days_of_month"))
     return False
 
 
-def _resolve_todays_plan(user: str) -> str | None:
-    """Resolve the plan that fires for `user` today, honouring frequency.
+def _parse_iso_date(raw: str | None) -> date | None:
+    """Parse a YYYY-MM-DD string from the client; silently accept None."""
+    if not raw:
+        return None
+    try:
+        parts = raw.split("-")
+        return date(int(parts[0]), int(parts[1]), int(parts[2]))
+    except (ValueError, IndexError):
+        return None
 
-    Order of precedence:
-        1. One-time plan with `plan_date == today`
-        2. Future one-time plan (earliest upcoming)
-        3. Any recurring plan whose rule fires today
+
+def _auto_reopen_for_new_day(doc, today_: date) -> None:
+    """Reset a Completed plan to Active when it fires again on a later day.
+
+    Recurring plans share a single doctype row across every occurrence
+    (every Mon/Wed/Fri for the same Weekly plan). Without this reset a
+    route completed on Monday would still look Completed when the driver
+    opens the app on Wednesday.
+
+    Stop statuses are also reset so pending/done/skipped don't leak
+    across occurrences. completion_summary is preserved on the row for
+    historical audit \u2014 it's cleared when the new occurrence closes.
     """
-    today_ = date.today()
-    # (1) exact one-time hit
-    name = frappe.db.get_value(
-        "Van Route Plan",
-        {"user": user, "plan_date": today_, "frequency": ["in", ["One-time", ""]]},
-        "name",
-    )
-    if name:
-        return name
-    # (3) recurring matches
+    if (getattr(doc, "status", None) or "Active") != "Completed":
+        return
+    completed_at = getattr(doc, "completed_at", None)
+    if not completed_at:
+        return
+    completed_date = completed_at.date() if hasattr(completed_at, "date") else None
+    if completed_date and completed_date >= today_:
+        return  # completed earlier today \u2014 don't reset yet
+    doc.status = "Active"
+    doc.completed_at = None
+    doc.completion_summary = None
+    for s in doc.stops:
+        s.status = "pending"
+        s.started_at = None
+        s.ended_at = None
+        s.invoice = None
+        s.payment = None
+        s.signature_file = None
+    doc.save(ignore_permissions=True)
+    frappe.db.commit()
+
+
+def _resolve_todays_plan(user: str, today_: date) -> str | None:
+    """Resolve the plan that fires for `user` on `today_`.
+
+    Fetches every Active plan for the user and returns the first whose
+    recurrence rule matches. Weekly plans win over Monthly (routes are
+    usually weekly day-of-week runs and the monthly pattern is the
+    fallback for per-month specials like "end-of-month collection").
+
+    `today_` is the driver's local date \u2014 pass it in rather than
+    calling `date.today()` here because the server timezone can lag the
+    driver's phone by hours (user report 2026-04-22).
+    """
     candidates = frappe.get_all(
         "Van Route Plan",
-        filters={
-            "user": user,
-            "frequency": ["in", ["Daily", "Weekly", "Biweekly", "Monthly", "Custom"]],
-        },
-        fields=["name", "frequency", "days_of_week", "interval_days", "plan_date", "valid_until"],
+        filters={"user": user},
+        fields=[
+            "name", "frequency", "plan_date",
+            "mon", "tue", "wed", "thu", "fri", "sat", "sun",
+            "days_of_month",
+        ],
+        order_by="frequency asc, modified desc",  # Weekly < Monthly alphabetically
     )
     for c in candidates:
         if _recurrence_matches(c, today_):
             return c["name"]
-    # (2) next upcoming one-time
-    return frappe.db.get_value(
-        "Van Route Plan",
-        {"user": user, "plan_date": [">=", today_]},
-        "name",
-        order_by="plan_date asc",
-    )
+    return None
 
 
 @frappe.whitelist(methods=["GET"])
-def today() -> dict:
-    """Return today's plan (or the next upcoming plan) for the current user.
+def today(client_date: Optional[str] = None) -> dict:
+    """Return today's plan for the current user, by recurrence.
 
-    Respects the Frequency field on Van Route Plan so ops can set up
-    "every Monday / Wednesday" or "every 3 days" and the driver's app
-    sees the right stops without a fresh plan row per day.
-
-    Also surfaces `status`, `completed_at`, `completion_summary` so the
-    app knows whether the driver already closed this route today — prior
-    behaviour kept prompting "Complete route?" on every page-open after
-    the user had already completed it, because completion wasn't
-    persisted on the server.
+    `client_date` (YYYY-MM-DD) is the driver's **local** date. Server
+    time zone can lag the driver's phone by several hours — the 2026-04-22
+    user report "today is 22nd and in app showing 21" was exactly this:
+    server date.today() was still Apr 21 CEST when the phone rolled into
+    Apr 22 IST. When the app sends its own date we trust it.
     """
     user = frappe.session.user
-    plan_name = _resolve_todays_plan(user)
+    today_ = _parse_iso_date(client_date) or date.today()
+    plan_name = _resolve_todays_plan(user, today_)
     if not plan_name:
         return {"plan": None, "stops": []}
     doc = frappe.get_doc("Van Route Plan", plan_name)
+    _auto_reopen_for_new_day(doc, today_)
     summary_raw = getattr(doc, "completion_summary", None)
     try:
         summary = json.loads(summary_raw) if summary_raw else None
@@ -129,12 +156,11 @@ def today() -> dict:
         "plan": {
             "name": doc.name,
             "route_name": getattr(doc, "route_name", None) or None,
-            "plan_date": str(doc.plan_date),
+            "plan_date": str(today_),
+            "effective_from": str(doc.plan_date) if getattr(doc, "plan_date", None) else None,
             "warehouse": doc.warehouse,
             "notes": doc.notes,
-            "frequency": getattr(doc, "frequency", None) or "One-time",
-            "days_of_week": getattr(doc, "days_of_week", None),
-            "valid_until": str(doc.valid_until) if getattr(doc, "valid_until", None) else None,
+            "frequency": getattr(doc, "frequency", None) or "Weekly",
             "status": getattr(doc, "status", None) or "Active",
             "completed_at": naive_site_to_utc_iso(getattr(doc, "completed_at", None)),
             "completion_summary": summary,
@@ -160,14 +186,42 @@ def today() -> dict:
 
 
 @frappe.whitelist(methods=["POST"])
-def create_plan(plan_date: str, stops: list[dict], warehouse: Optional[str] = None, notes: Optional[str] = None) -> dict:
-    if not plan_date:
-        frappe.throw(_("plan_date required"))
+def create_plan(
+    route_name: str,
+    stops: list[dict],
+    frequency: str = "Weekly",
+    days_of_week: list[str] | None = None,
+    days_of_month: str | None = None,
+    warehouse: Optional[str] = None,
+    notes: Optional[str] = None,
+    plan_date: Optional[str] = None,
+) -> dict:
+    """Create a recurring Van Route Plan for the current user.
+
+    `days_of_week` accepts a list of lowercase short keys (mon, tue,
+    wed, thu, fri, sat, sun) and maps them onto the corresponding
+    Check fields on the doctype. `days_of_month` is a CSV string that
+    the doctype validates; we persist it verbatim.
+    """
+    if not route_name:
+        frappe.throw(_("route_name required"))
+    if not stops:
+        frappe.throw(_("At least one stop required"))
     doc = frappe.new_doc("Van Route Plan")
+    doc.route_name = route_name
     doc.user = frappe.session.user
-    doc.plan_date = plan_date
     doc.warehouse = warehouse
     doc.notes = notes
+    doc.frequency = frequency
+    if plan_date:
+        doc.plan_date = plan_date
+    if frequency == "Weekly" and days_of_week:
+        for key in days_of_week:
+            k = key.strip().lower()[:3]
+            if k in _WEEKDAY_CHECK_FIELDS:
+                setattr(doc, k, 1)
+    if frequency == "Monthly" and days_of_month:
+        doc.days_of_month = days_of_month
     for stop in stops:
         if not stop.get("customer"):
             frappe.throw(_("Each stop must have a customer"))
@@ -179,6 +233,67 @@ def create_plan(plan_date: str, stops: list[dict], warehouse: Optional[str] = No
     doc.insert(ignore_permissions=False)
     frappe.db.commit()
     return {"name": doc.name}
+
+
+@frappe.whitelist()
+def customer_query(
+    doctype: str,
+    txt: str,
+    searchfield: str,
+    start: int,
+    page_len: int,
+    filters: dict | None = None,
+):
+    """Link-field query for the `stops.customer` picker on Van Route Plan.
+
+    Filters the customer list to those whose Sales Team includes the
+    plan's Sales User via that user's linked Sales Person (resolved
+    through the Vansale Configuration mapping the rest of the codebase
+    uses). Admins who haven't mapped the user to a sales person get the
+    full customer list \u2014 better than an empty picker with no
+    explanation.
+    """
+    from vansale.api.me import user_to_sales_person
+
+    user = (filters or {}).get("user")
+    txt_like = f"%{txt or ''}%"
+    # No user picked yet \u2014 admin is still filling the form. Show every
+    # active customer so they're not stuck.
+    if not user:
+        return frappe.db.sql(
+            """
+            SELECT name, customer_name, mobile_no
+            FROM `tabCustomer`
+            WHERE disabled = 0 AND (name LIKE %(t)s OR customer_name LIKE %(t)s OR mobile_no LIKE %(t)s)
+            ORDER BY modified DESC LIMIT %(s)s, %(p)s
+            """,
+            {"t": txt_like, "s": int(start or 0), "p": int(page_len or 20)},
+        )
+    sp = user_to_sales_person(user)
+    if not sp:
+        # User isn't mapped to a sales person \u2014 fall back to all customers.
+        return frappe.db.sql(
+            """
+            SELECT name, customer_name, mobile_no
+            FROM `tabCustomer`
+            WHERE disabled = 0 AND (name LIKE %(t)s OR customer_name LIKE %(t)s OR mobile_no LIKE %(t)s)
+            ORDER BY modified DESC LIMIT %(s)s, %(p)s
+            """,
+            {"t": txt_like, "s": int(start or 0), "p": int(page_len or 20)},
+        )
+    return frappe.db.sql(
+        """
+        SELECT DISTINCT c.name, c.customer_name, c.mobile_no
+        FROM `tabCustomer` c
+        JOIN `tabSales Team` st
+          ON st.parent = c.name AND st.parenttype = 'Customer'
+        WHERE c.disabled = 0
+          AND st.sales_person = %(sp)s
+          AND (c.name LIKE %(t)s OR c.customer_name LIKE %(t)s OR c.mobile_no LIKE %(t)s)
+        ORDER BY c.modified DESC LIMIT %(s)s, %(p)s
+        """,
+        {"sp": sp, "t": txt_like, "s": int(start or 0), "p": int(page_len or 20)},
+    )
 
 
 def _guard_plan_not_completed(plan) -> None:
@@ -329,9 +444,15 @@ def _compute_daily_report(plan_name: str, plan_date: str) -> dict:
 
 @frappe.whitelist(methods=["GET"])
 def daily_report(plan_date: Optional[str] = None) -> dict:
+    """Today's report for the logged-in driver.
+
+    Plans are recurring now (Weekly/Monthly), so `plan_date` is kept as
+    a label on the payload for continuity with older PWAs but we always
+    resolve the plan via the recurrence rule.
+    """
     user = frappe.session.user
     when = plan_date or str(date.today())
-    plan_name = frappe.db.get_value("Van Route Plan", {"user": user, "plan_date": when}, "name")
+    plan_name = _resolve_todays_plan(user)
     if not plan_name:
         return {"plan_date": when, "visits": 0, "sales": 0.0, "collections": 0.0, "returns": 0.0, "stop_count": 0}
     return _compute_daily_report(plan_name, when)
@@ -381,7 +502,10 @@ def complete_route(plan_name: str, force: int = 0) -> dict:
             "in_progress_stops": in_progress,
         }
 
-    summary = _compute_daily_report(plan.name, str(plan.plan_date))
+    # plan_date is optional "Effective From" anchor now — fall back to
+    # today when it isn't set, so the summary always has a readable date.
+    summary_date = str(plan.plan_date) if getattr(plan, "plan_date", None) else str(date.today())
+    summary = _compute_daily_report(plan.name, summary_date)
     plan.status = "Completed"
     plan.completed_at = frappe.utils.now_datetime()
     plan.completion_summary = json.dumps(summary)

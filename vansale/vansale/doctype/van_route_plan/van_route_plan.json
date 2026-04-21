@@ -1,21 +1,29 @@
 {
  "actions": [],
- "autoname": "format:VRP-{user}-{plan_date}",
+ "autoname": "naming_series:",
  "creation": "2026-04-19 00:00:00",
  "doctype": "DocType",
  "engine": "InnoDB",
  "field_order": [
+  "naming_series",
   "route_name",
   "user",
-  "plan_date",
+  "warehouse",
   "status",
   "completed_at",
-  "warehouse",
   "frequency_section",
   "frequency",
-  "days_of_week",
-  "interval_days",
-  "valid_until",
+  "days_section",
+  "mon",
+  "tue",
+  "wed",
+  "thu",
+  "fri",
+  "sat",
+  "sun",
+  "days_of_month",
+  "legacy_section",
+  "plan_date",
   "notes",
   "stops",
   "completion_section",
@@ -23,26 +31,36 @@
  ],
  "fields": [
   {
+   "fieldname": "naming_series",
+   "fieldtype": "Select",
+   "label": "Series",
+   "options": "VRP-.#####",
+   "default": "VRP-.#####",
+   "reqd": 1,
+   "hidden": 1
+  },
+  {
    "fieldname": "route_name",
    "fieldtype": "Data",
    "label": "Route Name",
+   "reqd": 1,
    "in_list_view": 1,
-   "description": "Friendly name shown to the driver (e.g. 'North Jeddah — Monday'). Optional today; will be required in a future release."
+   "description": "Friendly name shown to the driver (e.g. 'North Jeddah Monday run')."
   },
   {
    "fieldname": "user",
    "fieldtype": "Link",
-   "label": "Salesperson (User)",
+   "label": "Sales User",
    "options": "User",
    "reqd": 1,
-   "in_list_view": 1
+   "in_list_view": 1,
+   "description": "The van driver this route belongs to. Used to scope the customer picker below."
   },
   {
-   "fieldname": "plan_date",
-   "fieldtype": "Date",
-   "label": "Plan Date",
-   "reqd": 1,
-   "in_list_view": 1
+   "fieldname": "warehouse",
+   "fieldtype": "Link",
+   "label": "Van Warehouse",
+   "options": "Warehouse"
   },
   {
    "fieldname": "status",
@@ -52,19 +70,13 @@
    "default": "Active",
    "in_list_view": 1,
    "read_only": 1,
-   "description": "Set to Completed by the driver's app. Do not edit by hand — controls whether the driver can still act on stops."
+   "description": "Set to Completed by the driver's app when they tap 'Complete Route'. Resets to Active on the next day the route fires."
   },
   {
    "fieldname": "completed_at",
    "fieldtype": "Datetime",
    "label": "Completed At",
    "read_only": 1
-  },
-  {
-   "fieldname": "warehouse",
-   "fieldtype": "Link",
-   "label": "Van Warehouse",
-   "options": "Warehouse"
   },
   {
    "fieldname": "frequency_section",
@@ -75,30 +87,76 @@
    "fieldname": "frequency",
    "fieldtype": "Select",
    "label": "Frequency",
-   "options": "One-time\nDaily\nWeekly\nBiweekly\nMonthly\nCustom",
-   "default": "One-time",
-   "in_list_view": 1,
-   "description": "How often this route plan repeats. One-time = the single plan_date only."
+   "options": "Weekly\nMonthly",
+   "default": "Weekly",
+   "reqd": 1,
+   "in_list_view": 1
   },
   {
-   "fieldname": "days_of_week",
+   "fieldname": "days_section",
+   "fieldtype": "Section Break",
+   "label": "Days"
+  },
+  {
+   "fieldname": "mon",
+   "fieldtype": "Check",
+   "label": "Monday",
+   "depends_on": "eval:doc.frequency===\"Weekly\""
+  },
+  {
+   "fieldname": "tue",
+   "fieldtype": "Check",
+   "label": "Tuesday",
+   "depends_on": "eval:doc.frequency===\"Weekly\""
+  },
+  {
+   "fieldname": "wed",
+   "fieldtype": "Check",
+   "label": "Wednesday",
+   "depends_on": "eval:doc.frequency===\"Weekly\""
+  },
+  {
+   "fieldname": "thu",
+   "fieldtype": "Check",
+   "label": "Thursday",
+   "depends_on": "eval:doc.frequency===\"Weekly\""
+  },
+  {
+   "fieldname": "fri",
+   "fieldtype": "Check",
+   "label": "Friday",
+   "depends_on": "eval:doc.frequency===\"Weekly\""
+  },
+  {
+   "fieldname": "sat",
+   "fieldtype": "Check",
+   "label": "Saturday",
+   "depends_on": "eval:doc.frequency===\"Weekly\""
+  },
+  {
+   "fieldname": "sun",
+   "fieldtype": "Check",
+   "label": "Sunday",
+   "depends_on": "eval:doc.frequency===\"Weekly\""
+  },
+  {
+   "fieldname": "days_of_month",
    "fieldtype": "Small Text",
-   "label": "Days of Week",
-   "depends_on": "eval:[\"Weekly\",\"Biweekly\",\"Custom\"].includes(doc.frequency)",
-   "description": "Comma-separated short names: mon,tue,wed,thu,fri,sat,sun. Applies to Weekly/Biweekly/Custom."
+   "label": "Days of Month",
+   "depends_on": "eval:doc.frequency===\"Monthly\"",
+   "description": "Comma-separated day numbers (1-31). Example: 1,15,28 fires on the 1st, 15th and 28th of each month."
   },
   {
-   "fieldname": "interval_days",
-   "fieldtype": "Int",
-   "label": "Interval (days)",
-   "depends_on": "eval:doc.frequency==\"Custom\"",
-   "description": "For Custom frequency: number of days between repeats."
+   "fieldname": "legacy_section",
+   "fieldtype": "Section Break",
+   "label": "Admin",
+   "collapsible": 1
   },
   {
-   "fieldname": "valid_until",
+   "fieldname": "plan_date",
    "fieldtype": "Date",
-   "label": "Valid Until",
-   "description": "Optional end date for the recurrence window."
+   "label": "Effective From",
+   "description": "Optional anchor date. The route only fires on or after this date; leave blank to start immediately."
   },
   {
    "fieldname": "notes",
@@ -109,7 +167,9 @@
    "fieldname": "stops",
    "fieldtype": "Table",
    "label": "Stops",
-   "options": "Van Route Stop"
+   "options": "Van Route Stop",
+   "reqd": 1,
+   "description": "Customers the driver visits on this route. The customer picker is filtered to customers whose Sales Team includes the Sales User above \u2014 assign customers to the user's sales person to make them appear here."
   },
   {
    "fieldname": "completion_section",
@@ -123,25 +183,21 @@
    "fieldtype": "Long Text",
    "label": "Completion Summary (JSON)",
    "read_only": 1,
-   "description": "Daily-report snapshot captured at the moment Complete Route was tapped. Never mutate — used by the app to show a stable summary when the driver reopens a completed route."
+   "description": "Daily-report snapshot captured at the moment Complete Route was tapped. Never mutate \u2014 used by the app to show a stable summary when the driver reopens a completed route."
   }
  ],
  "index_web_pages_for_search": 0,
  "links": [],
- "modified": "2026-04-20 00:00:00",
+ "modified": "2026-04-22 00:00:00",
  "modified_by": "Administrator",
  "module": "Vansale",
  "name": "Van Route Plan",
  "owner": "Administrator",
  "permissions": [
-  {
-   "read": 1, "write": 1, "create": 1, "delete": 1, "role": "System Manager"
-  },
-  {
-   "read": 1, "write": 1, "role": "Sales User"
-  }
+  {"read": 1, "write": 1, "create": 1, "delete": 1, "role": "System Manager"},
+  {"read": 1, "write": 1, "role": "Sales User"}
  ],
- "sort_field": "plan_date",
+ "sort_field": "modified",
  "sort_order": "DESC",
  "track_changes": 1
 }
