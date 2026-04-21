@@ -51,6 +51,18 @@ function openCustomer(name: string) {
 async function onStart(stop: RouteStop) {
   if (!plan.value?.name) return;
   try {
+    // Capture GPS at start too so ops can see the van was actually at the
+    // customer when the visit began — prior flow only recorded lat/lng on
+    // End, which meant a "start from across town, drive later" looked
+    // identical to "started at the stop". requireLocation gates the ask.
+    if (session.requireLocation) {
+      try {
+        await currentPosition();
+      } catch {
+        // Soft-fail: if the user denies or GPS is off, still start the
+        // visit rather than blocking van-sales entirely.
+      }
+    }
     if (isOnline()) await startVisit(plan.value.name, stop.idx);
     visit.start(plan.value.name as string, stop);
     toasts.info(`Visit started · ${stop.customer}`);
@@ -135,14 +147,17 @@ const pendingCount = computed(() => stops.value.filter((s) => s.status === "pend
 const skippedCount = computed(() => stops.value.filter((s) => s.status === "skipped").length);
 const inProgressCount = computed(() => stops.value.filter((s) => s.status === "in_progress").length);
 
-// "Complete Route" is surfaced only when every stop is resolved — done or
-// skipped. We also require no locally-active visit so the user finishes
-// their in-flight stop first instead of orphaning it on submit.
+// "Complete Route" is now always surfaced once a plan exists — the v1.0.18
+// build gated it on every-stop-resolved, and multiple drivers reported
+// they couldn't find the button because pendingCount never hit 0 (they
+// don't skip non-visits, they just leave them). Always-visible with an
+// early-close confirm matches the mental model of "I'm done for today,
+// here's my summary". The confirm tells them exactly how many are open.
+const unresolvedCount = computed(() =>
+  pendingCount.value + inProgressCount.value,
+);
 const canCompleteRoute = computed(() =>
-  stops.value.length > 0 &&
-  pendingCount.value === 0 &&
-  inProgressCount.value === 0 &&
-  !visit.hasActive,
+  stops.value.length > 0 && !visit.hasActive,
 );
 
 const report = ref<DailyReport | null>(null);
@@ -151,10 +166,14 @@ const reportErr = ref("");
 
 async function onCompleteRoute() {
   if (!plan.value?.name || !canCompleteRoute.value) return;
+  const hasUnresolved = unresolvedCount.value > 0;
   const ok = await confirm.ask({
-    title: "Complete today's route?",
-    message: `You've handled all ${stops.value.length} stops (${doneCount.value} done, ${skippedCount.value} skipped). View your daily summary?`,
-    confirmText: "Complete",
+    title: hasUnresolved ? "Close route now?" : "Complete today's route?",
+    message: hasUnresolved
+      ? `${unresolvedCount.value} of ${stops.value.length} stops still open (${doneCount.value} done, ${skippedCount.value} skipped). Close anyway and view summary?`
+      : `You've handled all ${stops.value.length} stops (${doneCount.value} done, ${skippedCount.value} skipped). View your daily summary?`,
+    confirmText: hasUnresolved ? "Close anyway" : "Complete",
+    danger: hasUnresolved,
   });
   if (!ok) return;
   reporting.value = true;
@@ -204,6 +223,26 @@ const notesModel = computed({
         <div class="stat" data-tone="success"><strong>{{ doneCount }}</strong><span class="muted xsmall">Done</span></div>
         <div class="stat"><strong>{{ pendingCount }}</strong><span class="muted xsmall">Pending</span></div>
       </div>
+      <!--
+        Always-visible Complete Route button. The v1.0.18 build gated this
+        below the list so drivers who don't skip non-visits never saw it.
+        Keep it here in the hero — disabled only while a visit is actively
+        open (finish that first), never hidden. Label is "Close early" when
+        stops remain so the driver knows what they're confirming.
+      -->
+      <button
+        v-if="stops.length > 0 && !report"
+        class="complete-btn"
+        :disabled="reporting || visit.hasActive"
+        @click="onCompleteRoute"
+        :class="{ 'is-partial': unresolvedCount > 0 }"
+      >
+        <Icon name="check" :size="16" />
+        <span v-if="visit.hasActive">End active visit first</span>
+        <span v-else-if="reporting">Wrapping up…</span>
+        <span v-else-if="unresolvedCount > 0">Close route ({{ unresolvedCount }} open)</span>
+        <span v-else>Complete route</span>
+      </button>
     </section>
 
     <div v-else-if="loading" class="stack">
@@ -277,26 +316,7 @@ const notesModel = computed({
       </li>
     </ul>
 
-    <!--
-      Complete Route CTA. Shows once every stop is resolved so the user has
-      an unambiguous "I'm done for the day" action. Tap triggers a confirm
-      + daily-summary fetch; the summary lives inline below instead of as
-      a modal (better on mobile — no focus trap, no backdrop click dance).
-    -->
-    <section v-if="canCompleteRoute && !report" class="complete-cta card stack">
-      <div class="cta-head">
-        <Icon name="check" :size="22" />
-        <div>
-          <strong>Route complete</strong>
-          <span class="muted small">All {{ stops.length }} stops resolved.</span>
-        </div>
-      </div>
-      <button class="submit" :disabled="reporting" @click="onCompleteRoute">
-        <Icon name="check" :size="18" />
-        {{ reporting ? "Wrapping up…" : "Complete route" }}
-      </button>
-      <p v-if="reportErr" class="error">{{ reportErr }}</p>
-    </section>
+    <p v-if="reportErr" class="error">{{ reportErr }}</p>
 
     <!-- Inline daily summary after Complete Route succeeds. -->
     <section v-if="report" class="summary card stack">
@@ -404,15 +424,22 @@ const notesModel = computed({
   border: 1px solid color-mix(in srgb, var(--primary) 30%, transparent);
 }
 
-.complete-cta {
-  background: linear-gradient(135deg,
-    color-mix(in srgb, var(--success, #16a34a) 12%, var(--surface)) 0%,
-    var(--surface) 100%);
-  border: 1px solid color-mix(in srgb, var(--success, #16a34a) 30%, transparent);
+.complete-btn {
+  margin-top: 0.25rem;
+  min-height: 2.75rem;
+  width: 100%;
+  background: var(--success, #16a34a);
+  color: #fff;
+  border: none;
+  border-radius: var(--radius-sm);
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
 }
-.complete-cta .submit { background: var(--success, #16a34a); color: #fff; }
-.cta-head { display: flex; align-items: center; gap: 0.6rem; color: var(--success, #16a34a); }
-.cta-head strong { display: block; color: var(--text); }
+.complete-btn:disabled { opacity: 0.55; cursor: not-allowed; }
+.complete-btn.is-partial { background: color-mix(in srgb, var(--warning, #d97706) 85%, var(--success, #16a34a)); }
 
 .summary {
   background: linear-gradient(135deg,

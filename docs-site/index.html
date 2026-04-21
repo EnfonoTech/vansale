@@ -1,0 +1,225 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Van Sales — Demo Preview</title>
+  <meta name="description" content="Van Sales: a field-sales companion app for ERPNext. Live demo build with walk-through, credentials, and Android APK." />
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,400..700&family=Manrope:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%23d97706'/%3E%3Ctext x='16' y='22' text-anchor='middle' font-family='serif' font-size='20' font-weight='700' fill='white'%3EV%3C/text%3E%3C/svg%3E" />
+
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <div class="grain" aria-hidden="true"></div>
+
+  <header class="topbar">
+    <a href="/" class="brand">
+      <span class="brand-mark">V</span>
+      <span class="brand-word">Van Sales</span>
+    </a>
+    <nav>
+      <a href="#credentials">Demo</a>
+      <a href="#features">Features</a>
+      <a href="#install">Install</a>
+    </nav>
+    <span class="version" id="app-version">v1.0.19</span>
+  </header>
+
+  <main>
+    <section class="hero">
+      <p class="eyebrow">Demo preview · Field sales companion</p>
+      <h1 class="display">
+        Van sales,<br />
+        <em class="accent">done from the seat</em><br />
+        of a Hilux.
+      </h1>
+      <p class="lede">
+        A mobile-first ERPNext companion for field reps &mdash; plan a route,
+        visit a customer, cut an invoice, collect cash, print from a Bluetooth
+        printer, close out the day. Works offline. Ships as an Android APK.
+      </p>
+      <div class="cta-row">
+        <a class="btn primary" href="#install" data-track="cta-download">
+          <span>Download APK</span>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>
+        </a>
+        <a class="btn ghost" href="#credentials">See demo credentials</a>
+      </div>
+      <div class="hero-meta">
+        <span>Android 8+</span>
+        <span class="dot">·</span>
+        <span>English / العربية</span>
+        <span class="dot">·</span>
+        <span>Offline queue</span>
+      </div>
+    </section>
+
+    <section class="section credentials" id="credentials">
+      <div class="section-head">
+        <span class="tag">01</span>
+        <h2>Demo credentials</h2>
+      </div>
+      <p class="muted">
+        Pre-loaded on <code>trading-demo.enfonoerp.com</code>. Shared login &mdash;
+        treat data as ephemeral.
+      </p>
+      <div class="cred-card">
+        <dl>
+          <div class="cred-row">
+            <dt>Email</dt>
+            <dd>
+              <code id="demo-email">vanuser@gmail.com</code>
+              <button class="copy" data-copy="vanuser@gmail.com" aria-label="Copy email">Copy</button>
+            </dd>
+          </div>
+          <div class="cred-row">
+            <dt>Password</dt>
+            <dd>
+              <code id="demo-pass">Van@123456</code>
+              <button class="copy" data-copy="Van@123456" aria-label="Copy password">Copy</button>
+            </dd>
+          </div>
+          <div class="cred-row">
+            <dt>Site</dt>
+            <dd>
+              <code>trading-demo.enfonoerp.com</code>
+            </dd>
+          </div>
+        </dl>
+      </div>
+    </section>
+
+    <section class="section features" id="features">
+      <div class="section-head">
+        <span class="tag">02</span>
+        <h2>What&rsquo;s inside</h2>
+      </div>
+      <ul class="feature-grid">
+        <li>
+          <span class="f-num">01</span>
+          <h3>Route today</h3>
+          <p>Today&rsquo;s plan with stops, GPS capture on start &amp; end, always-visible close-out with daily summary.</p>
+        </li>
+        <li>
+          <span class="f-num">02</span>
+          <h3>Invoice in hand</h3>
+          <p>Pick items, apply line &amp; invoice discounts, submit. Prints to any Android-supported Bluetooth printer.</p>
+        </li>
+        <li>
+          <span class="f-num">03</span>
+          <h3>Cash &amp; card</h3>
+          <p>Mode-of-payment aware. Captures signature, ties payment to the customer&rsquo;s ledger.</p>
+        </li>
+        <li>
+          <span class="f-num">04</span>
+          <h3>Offline queue</h3>
+          <p>Lose signal halfway down the farm road? Visit and invoice queue locally, drain when back online.</p>
+        </li>
+        <li>
+          <span class="f-num">05</span>
+          <h3>Statement of account</h3>
+          <p>Period filter, opening &amp; closing balance, printable PDF &mdash; in-app and saved to Documents.</p>
+        </li>
+        <li>
+          <span class="f-num">06</span>
+          <h3>Van stock</h3>
+          <p>Per-warehouse stock at a glance; last-purchase rate visible on the item picker.</p>
+        </li>
+      </ul>
+    </section>
+
+    <section class="section install" id="install">
+      <div class="section-head">
+        <span class="tag">03</span>
+        <h2>Install &amp; sign in</h2>
+      </div>
+      <ol class="steps">
+        <li>
+          <span class="step-num">1</span>
+          <div>
+            <h3>Download the APK</h3>
+            <p>
+              <a class="btn primary small" id="apk-link" href="https://github.com/EnfonoTech/vansale/releases/latest">
+                <span>Latest release on GitHub</span>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17 17 7"/><path d="M7 7h10v10"/></svg>
+              </a>
+            </p>
+            <p class="muted small">Android 8.0 (API 26) or newer. ~12&nbsp;MB.</p>
+          </div>
+        </li>
+        <li>
+          <span class="step-num">2</span>
+          <div>
+            <h3>Allow install from browser</h3>
+            <p>Android will ask once &mdash; tap <em>Settings &rarr; Install unknown apps &rarr; allow</em> for Chrome (or whichever browser you downloaded from).</p>
+          </div>
+        </li>
+        <li>
+          <span class="step-num">3</span>
+          <div>
+            <h3>Launch &amp; sign in</h3>
+            <p>Open <em>Van Sales</em>. Use the credentials above. The first sync takes ~3&nbsp;seconds.</p>
+          </div>
+        </li>
+      </ol>
+    </section>
+
+    <section class="section tour">
+      <div class="section-head">
+        <span class="tag">04</span>
+        <h2>A minute in the app</h2>
+      </div>
+      <ol class="tour-list">
+        <li><strong>Dashboard.</strong> Today&rsquo;s route, quick stats, recent activity.</li>
+        <li><strong>Route today.</strong> Tap a stop &rarr; <em>Start visit</em> (GPS captured). Finish customer work.</li>
+        <li><strong>Invoice.</strong> Type item name or barcode, pick rate, discount inline, <em>Submit</em>.</li>
+        <li><strong>Print.</strong> Tap <em>Print</em> on the invoice detail &mdash; Android&rsquo;s system print dialog handles the rest.</li>
+        <li><strong>Payment.</strong> Collect cash or card against the invoice. Signature optional.</li>
+        <li><strong>End visit.</strong> GPS captured again, notes saved, stop marked done.</li>
+        <li><strong>Complete route.</strong> Always-visible button on the Route screen. Opens the daily summary.</li>
+      </ol>
+    </section>
+
+    <section class="section faq">
+      <div class="section-head">
+        <span class="tag">05</span>
+        <h2>Questions</h2>
+      </div>
+      <details>
+        <summary>Can I use this with my own ERPNext?</summary>
+        <p>Yes &mdash; the backend is a Frappe app (<code>vansale</code>) and the APK is a thin Capacitor wrapper. Point the build at your server&rsquo;s base URL and rebuild; contact Enfono for the installer.</p>
+      </details>
+      <details>
+        <summary>What happens to queued work when offline?</summary>
+        <p>Visits, invoices and payments land in an IndexedDB queue. The app drains them in order when a connection returns &mdash; a sync indicator in the top bar shows pending count.</p>
+      </details>
+      <details>
+        <summary>Does print need Bluetooth setup?</summary>
+        <p>No. Print uses Android&rsquo;s system print service, which already knows about your printers (Bluetooth, Wi-Fi, or Save&nbsp;as&nbsp;PDF). The app just hands the dialog a PDF.</p>
+      </details>
+      <details>
+        <summary>Is the demo data reset?</summary>
+        <p>The demo site is shared and persistent between visitors. Please don&rsquo;t enter sensitive data. The site is rebuilt on request if it gets cluttered.</p>
+      </details>
+    </section>
+  </main>
+
+  <footer>
+    <div class="foot-row">
+      <span>Van Sales &middot; built by Enfono Technologies</span>
+      <span>
+        <a href="https://github.com/EnfonoTech/vansale">GitHub</a>
+        <span class="dot">·</span>
+        <a href="mailto:hello@enfono.com">hello@enfono.com</a>
+      </span>
+    </div>
+  </footer>
+
+  <script src="./app.js"></script>
+</body>
+</html>
