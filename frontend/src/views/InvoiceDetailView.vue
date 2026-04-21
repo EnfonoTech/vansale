@@ -4,6 +4,7 @@ import { useRoute, useRouter } from "vue-router";
 import { detail, submitDraft, deleteDraft, type InvoiceDetail } from "@/api/invoice";
 import { useSessionStore } from "@/stores/session";
 import { useToastStore } from "@/stores/toasts";
+import { useConfirmStore } from "@/stores/confirm";
 import { ApiError } from "@/app/frappe";
 import Icon from "@/components/Icon.vue";
 import SarSymbol from "@/components/SarSymbol.vue";
@@ -12,6 +13,7 @@ const route = useRoute();
 const router = useRouter();
 const session = useSessionStore();
 const toasts = useToastStore();
+const confirm = useConfirmStore();
 
 const inv = ref<InvoiceDetail | null>(null);
 const loading = ref(false);
@@ -107,8 +109,13 @@ async function submitInvoice() {
 
 async function deleteInvoice() {
   if (!inv.value || busy.value) return;
-  // eslint-disable-next-line no-alert
-  if (!confirm(`Delete draft ${inv.value.name}? This cannot be undone.`)) return;
+  const ok = await confirm.ask({
+    title: `Delete draft ${inv.value.name}?`,
+    message: "This cannot be undone.",
+    confirmText: "Delete",
+    danger: true,
+  });
+  if (!ok) return;
   busy.value = true;
   try {
     await deleteDraft(inv.value.name);

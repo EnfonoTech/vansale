@@ -42,6 +42,39 @@ export async function modesOfPayment(): Promise<ModeOfPayment[]> {
   return apiCall<ModeOfPayment[]>("GET", "vansale.api.payment.modes_of_payment");
 }
 
+export interface PaymentReference {
+  reference_doctype: string;
+  reference_name: string;
+  allocated_amount: number;
+  total_amount: number;
+  outstanding_amount: number;
+}
+
+export interface PaymentDetail {
+  name: string;
+  party: string;
+  party_name: string | null;
+  payment_type: string;
+  paid_amount: number;
+  received_amount: number;
+  mode_of_payment: string | null;
+  reference_no: string | null;
+  reference_date: string | null;
+  posting_date: string | null;
+  remarks: string | null;
+  status: string;
+  docstatus: number;
+  references: PaymentReference[];
+  modified: string | null;
+}
+
+export async function detail(name: string): Promise<PaymentDetail> {
+  return apiCall<PaymentDetail>(
+    "GET",
+    `vansale.api.payment.detail?name=${encodeURIComponent(name)}`,
+  );
+}
+
 export async function save(payload: PaymentPayload): Promise<SavedPayment> {
   const clientId = genUuid();
   const clientTs = new Date().toISOString();

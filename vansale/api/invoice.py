@@ -326,6 +326,13 @@ def update_draft(
         doc.discount_amount = float(discount_amount)
         doc.apply_discount_on = apply_discount_on or "Grand Total"
 
+    # ignore_version bypasses Frappe's optimistic-lock check (the
+    # "Document has been modified after you have opened it" error).
+    # We freshly loaded the doc via `frappe.get_doc` above so there's
+    # no stale client-side modified timestamp to collide with — the
+    # error was being thrown by ERPNext hooks that touch the parent
+    # row (e.g. tax/total recalculation) between our load and save.
+    doc.flags.ignore_version = True
     doc.save(ignore_permissions=False)
 
     if pay_type == "cash" and submit:
@@ -339,6 +346,7 @@ def update_draft(
             "account": account,
             "amount": float(doc.grand_total or 0),
         })
+        doc.flags.ignore_version = True
         doc.save()
 
     if submit:

@@ -127,7 +127,15 @@ async function submit() {
         ? "Payment queued offline"
         : `Payment ${res.name} · ${session.currency} ${res.paid_amount.toFixed(2)}`,
     );
-    setTimeout(() => router.push({ name: "dashboard" }), 700);
+    // Land on the new payment's detail view so the user sees exactly what
+    // was recorded (amount, mode, invoices covered) rather than bouncing
+    // back to the dashboard. Queued offline saves have no real name yet,
+    // so we fall back to the dashboard in that case.
+    if (!res.queued && res.name && !res.name.startsWith("QUEUED")) {
+      void router.push({ name: "payment-detail", params: { name: res.name } });
+    } else {
+      void router.push({ name: "dashboard" });
+    }
   } catch (e) {
     toasts.error(
       e instanceof ApiError ? e.serverMessage ?? e.message

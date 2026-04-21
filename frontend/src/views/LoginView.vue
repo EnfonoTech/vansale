@@ -16,18 +16,50 @@ const error = ref("");
 const busy = ref(false);
 const showPassword = ref(false);
 
+/**
+ * Offer the credentials to Android's password manager via the
+ * Credential Management API. The `<form method="post" action="/app/login">`
+ * attributes alone aren't enough on modern Chrome / Android WebView —
+ * since we intercept the submit with `@submit.prevent` the form never
+ * actually navigates, and the browser's heuristic "did a real POST just
+ * happen?" returns false. `navigator.credentials.store()` is the
+ * documented way to announce "these credentials just worked; please
+ * offer to save them". Works on Android Chrome ≥ 51 and Capacitor
+ * WebView (which is Chrome under the hood). Silent no-op on platforms
+ * without support.
+ */
+async function offerCredentialSave(user: string, pw: string) {
+  try {
+    const Cred = (window as unknown as { PasswordCredential?: new (opts: { id: string; password: string; name?: string }) => Credential }).PasswordCredential;
+    if (!Cred || !navigator.credentials) return;
+    const cred = new Cred({ id: user, password: pw, name: user });
+    await navigator.credentials.store(cred);
+  } catch {
+    /* best-effort — never block the login flow on credential save failures */
+  }
+}
+
 async function onSubmit() {
   if (busy.value) return;
   error.value = "";
   busy.value = true;
   try {
-    const res = await login(email.value.trim(), password.value);
+    const trimmedEmail = email.value.trim();
+    const pw = password.value;
+    const res = await login(trimmedEmail, pw);
     session.setLogin({
       user: res.user,
       fullName: res.full_name,
-      email: email.value.trim(),
+      email: trimmedEmail,
       language: res.language,
     });
+    // Offer Android's password manager the chance to save these
+    // credentials. Must happen AFTER successful login — saving on
+    // failed auth would pollute the autofill database with bad
+    // passwords. Runs before the router.replace so the user is still
+    // on the form when the prompt fires (the prompt is tied to the
+    // visible page that triggered it).
+    await offerCredentialSave(trimmedEmail, pw);
     // If the server reports no PIN on file, clear our cached pinVerifiedAt so
     // PinView falls into "setup" mode instead of asking the user to enter a
     // PIN that no longer exists (e.g. after the 1.0.13 PIN-wipe migration).

@@ -6,12 +6,14 @@ import { currentPosition } from "@/features/van/gps";
 import { isOnline } from "@/app/online";
 import { useSessionStore } from "@/stores/session";
 import { useToastStore } from "@/stores/toasts";
+import { useConfirmStore } from "@/stores/confirm";
 import { useRouteVisitStore } from "@/stores/routeVisit";
 import Icon from "@/components/Icon.vue";
 
 const router = useRouter();
 const toasts = useToastStore();
 const session = useSessionStore();
+const confirm = useConfirmStore();
 const visit = useRouteVisitStore();
 
 const plan = ref<Record<string, string | null | undefined> | null>(null);
@@ -91,7 +93,13 @@ async function onSkip(stop: RouteStop) {
   // Confirm destructive action — especially important when unsticking a
   // stop left hanging from a prior session. Don't want an accidental tap
   // to wipe a real in-flight visit.
-  if (!window.confirm(`Mark "${stop.customer}" as skipped?`)) return;
+  const ok = await confirm.ask({
+    title: `Skip ${stop.customer}?`,
+    message: "Marks this stop as skipped. You can still visit the customer manually.",
+    confirmText: "Skip",
+    danger: true,
+  });
+  if (!ok) return;
   try {
     await skipVisit(plan.value.name, stop.idx);
     if (visit.active && visit.active.stop.idx === stop.idx) visit.clear();
@@ -190,6 +198,22 @@ const notesModel = computed({
           >
             <Icon name="map-pin" :size="16" /> Start visit
           </button>
+          <!--
+            Active stop (in_progress AND matches this device's active visit)
+            gets an inline "End visit" button — the 2026-04-21 feedback was
+            "where is the option to complete a customer in route, you've
+            added skip what is this". Previously the End button was buried
+            in the floating active-card below the list; inline matches the
+            mental model of "close out this stop in-place".
+          -->
+          <button
+            v-if="s.status === 'in_progress' && visit.active && visit.active.stop.idx === s.idx"
+            class="start-btn end-btn"
+            :disabled="busy"
+            @click="onEnd"
+          >
+            <Icon name="check" :size="16" /> {{ busy ? "Ending…" : "End visit" }}
+          </button>
           <button
             v-if="s.status === 'in_progress' && (!visit.active || visit.active.stop.idx !== s.idx)"
             class="ghost small warning"
@@ -282,6 +306,8 @@ const notesModel = computed({
 
 .stop-actions { display: flex; gap: 0.4rem; flex-wrap: wrap; }
 .start-btn { min-height: 2.25rem; padding: 0.4rem 0.75rem; font-size: var(--text-sm); }
+.end-btn { background: var(--success, #16a34a); color: white; }
+.end-btn:disabled { opacity: 0.6; cursor: not-allowed; }
 
 .active-card {
   background: linear-gradient(135deg, var(--primary-soft) 0%, var(--surface) 100%);

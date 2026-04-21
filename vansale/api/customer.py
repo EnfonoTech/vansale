@@ -56,15 +56,24 @@ def list_mine(limit: int = 50, search: Optional[str] = None) -> list[dict]:
     roles = frappe.get_roles(frappe.session.user)
     is_admin = "System Manager" in roles or "Van Manager" in roles
 
-    # Van users are scoped to the customers tagged with their Sales Person in
-    # the Customer → Sales Team child table. Admins (System Manager / Van
-    # Manager) see everything — they need unfiltered visibility for ops.
+    # Van users are scoped to customers tagged with their Sales Person in
+    # the Customer → Sales Team child table. When the user's Vansale
+    # Configuration has no `sales_person` set we can't use that tag — fall
+    # back to owner-scoping (customers the user personally created) rather
+    # than letting the filter silently open up to every customer on the
+    # site. Before 2026-04-21 a missing sales_person collapsed to "show
+    # everything", which is how the demo user saw all 45 customers even
+    # though they're supposed to be scoped to their van.
     if not is_admin:
-        names = _assigned_customer_names(current_user_sales_person())
-        if names is not None:
+        sp = current_user_sales_person()
+        if sp:
+            names = _assigned_customer_names(sp) or []
             if not names:
-                return []  # no customers assigned — return empty, don't show everyone
+                return []  # sales_person set but no customers tagged
             filters["name"] = ["in", names]
+        else:
+            # No sales_person configured → only show customers I created.
+            filters["owner"] = frappe.session.user
 
     or_filters = {}
     if search:

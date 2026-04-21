@@ -108,6 +108,13 @@ const routes: RouteRecordRaw[] = [
     meta: { requiresAuth: true, requiresPin: true },
   },
   {
+    path: "/payment/:name",
+    name: "payment-detail",
+    component: () => import("@/views/PaymentDetailView.vue"),
+    meta: { requiresAuth: true, requiresPin: true },
+    props: true,
+  },
+  {
     path: "/route",
     name: "route-today",
     component: () => import("@/views/RouteTodayView.vue"),

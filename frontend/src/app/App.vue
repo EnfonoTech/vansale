@@ -4,6 +4,7 @@ import { useRoute, useRouter } from "vue-router";
 import TopAppBar from "@/components/TopAppBar.vue";
 import BottomNav from "@/components/BottomNav.vue";
 import Toasts from "@/components/Toasts.vue";
+import ConfirmModal from "@/components/ConfirmModal.vue";
 import Icon from "@/components/Icon.vue";
 import { useRouteVisitStore } from "@/stores/routeVisit";
 
@@ -53,6 +54,7 @@ function gotoRoute() {
 
     <BottomNav v-if="isChrome" />
     <Toasts />
+    <ConfirmModal />
   </div>
 </template>
 

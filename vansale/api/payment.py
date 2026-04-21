@@ -282,6 +282,52 @@ def outstanding(customer: str) -> list[dict]:
 
 
 @frappe.whitelist(methods=["GET"])
+def detail(name: str) -> dict:
+    """Return a Payment Entry with expanded references (invoices covered).
+
+    Used by the in-app Payment Detail view — the one the PWA opens after
+    a successful save so the user can eyeball exactly what was written
+    (amount, mode, posting date, invoices covered, remarks) without
+    bouncing back to the dashboard.
+
+    `posting_date` is a `datetime.date` (not datetime); stringify it
+    directly rather than routing through `naive_site_to_utc_iso`
+    (which expects a datetime and crashes on a plain date — see the
+    `outstanding()` comment above).
+    """
+    if not name:
+        frappe.throw(_("name required"))
+    doc = frappe.get_doc("Payment Entry", name)
+    refs = [
+        {
+            "reference_doctype": r.reference_doctype,
+            "reference_name": r.reference_name,
+            "allocated_amount": float(r.allocated_amount or 0),
+            "total_amount": float(r.total_amount or 0),
+            "outstanding_amount": float(r.outstanding_amount or 0),
+        }
+        for r in (doc.references or [])
+    ]
+    return {
+        "name": doc.name,
+        "party": doc.party,
+        "party_name": doc.party_name,
+        "payment_type": doc.payment_type,
+        "paid_amount": float(doc.paid_amount or 0),
+        "received_amount": float(doc.received_amount or 0),
+        "mode_of_payment": doc.mode_of_payment,
+        "reference_no": doc.reference_no,
+        "reference_date": str(doc.reference_date) if doc.reference_date else None,
+        "posting_date": str(doc.posting_date) if doc.posting_date else None,
+        "remarks": doc.remarks,
+        "status": doc.status,
+        "docstatus": int(doc.docstatus or 0),
+        "references": refs,
+        "modified": naive_site_to_utc_iso(doc.modified),
+    }
+
+
+@frappe.whitelist(methods=["GET"])
 def modes_of_payment() -> list[dict]:
     """Active Modes of Payment for the dropdown. Filters out disabled rows."""
     rows = frappe.get_all(
