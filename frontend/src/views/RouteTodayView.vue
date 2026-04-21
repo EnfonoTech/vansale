@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
-import { today, startVisit, endVisit, skipVisit, type RouteStop } from "@/api/route";
+import { today, startVisit, endVisit, skipVisit, dailyReport, type RouteStop, type DailyReport } from "@/api/route";
 import { currentPosition } from "@/features/van/gps";
 import { isOnline } from "@/app/online";
 import { useSessionStore } from "@/stores/session";
@@ -132,6 +132,54 @@ function statusIcon(s: string | undefined): "check" | "clock" | "x" | "map-pin" 
 
 const doneCount = computed(() => stops.value.filter((s) => s.status === "done").length);
 const pendingCount = computed(() => stops.value.filter((s) => s.status === "pending").length);
+const skippedCount = computed(() => stops.value.filter((s) => s.status === "skipped").length);
+const inProgressCount = computed(() => stops.value.filter((s) => s.status === "in_progress").length);
+
+// "Complete Route" is surfaced only when every stop is resolved — done or
+// skipped. We also require no locally-active visit so the user finishes
+// their in-flight stop first instead of orphaning it on submit.
+const canCompleteRoute = computed(() =>
+  stops.value.length > 0 &&
+  pendingCount.value === 0 &&
+  inProgressCount.value === 0 &&
+  !visit.hasActive,
+);
+
+const report = ref<DailyReport | null>(null);
+const reporting = ref(false);
+const reportErr = ref("");
+
+async function onCompleteRoute() {
+  if (!plan.value?.name || !canCompleteRoute.value) return;
+  const ok = await confirm.ask({
+    title: "Complete today's route?",
+    message: `You've handled all ${stops.value.length} stops (${doneCount.value} done, ${skippedCount.value} skipped). View your daily summary?`,
+    confirmText: "Complete",
+  });
+  if (!ok) return;
+  reporting.value = true;
+  reportErr.value = "";
+  try {
+    report.value = await dailyReport(String(plan.value.plan_date ?? ""));
+    toasts.success("Route completed — nice work!");
+  } catch (e) {
+    reportErr.value = e instanceof Error ? e.message : String(e);
+  } finally {
+    reporting.value = false;
+  }
+}
+
+function closeReport() {
+  report.value = null;
+  void router.replace({ name: "dashboard" });
+}
+
+function fmt(n: number): string {
+  return new Intl.NumberFormat(undefined, {
+    maximumFractionDigits: 2,
+    minimumFractionDigits: 2,
+  }).format(n);
+}
 const notesModel = computed({
   get: () => visit.active?.notes ?? "",
   set: (v: string) => visit.setNotes(v),
@@ -229,6 +277,48 @@ const notesModel = computed({
       </li>
     </ul>
 
+    <!--
+      Complete Route CTA. Shows once every stop is resolved so the user has
+      an unambiguous "I'm done for the day" action. Tap triggers a confirm
+      + daily-summary fetch; the summary lives inline below instead of as
+      a modal (better on mobile — no focus trap, no backdrop click dance).
+    -->
+    <section v-if="canCompleteRoute && !report" class="complete-cta card stack">
+      <div class="cta-head">
+        <Icon name="check" :size="22" />
+        <div>
+          <strong>Route complete</strong>
+          <span class="muted small">All {{ stops.length }} stops resolved.</span>
+        </div>
+      </div>
+      <button class="submit" :disabled="reporting" @click="onCompleteRoute">
+        <Icon name="check" :size="18" />
+        {{ reporting ? "Wrapping up…" : "Complete route" }}
+      </button>
+      <p v-if="reportErr" class="error">{{ reportErr }}</p>
+    </section>
+
+    <!-- Inline daily summary after Complete Route succeeds. -->
+    <section v-if="report" class="summary card stack">
+      <div class="summary-head">
+        <Icon name="check" :size="22" />
+        <div>
+          <span class="muted xsmall">Daily summary</span>
+          <strong>{{ report.plan_date }}</strong>
+        </div>
+      </div>
+      <dl class="summary-grid">
+        <div><dt class="muted xsmall">Stops</dt><dd>{{ report.stop_count }}</dd></div>
+        <div><dt class="muted xsmall">Visits</dt><dd>{{ report.visits }}</dd></div>
+        <div><dt class="muted xsmall">Sales</dt><dd>{{ session.currency }} {{ fmt(report.sales) }}</dd></div>
+        <div><dt class="muted xsmall">Collections</dt><dd>{{ session.currency }} {{ fmt(report.collections) }}</dd></div>
+        <div v-if="report.returns > 0"><dt class="muted xsmall">Returns</dt><dd>{{ session.currency }} {{ fmt(report.returns) }}</dd></div>
+      </dl>
+      <button class="submit" @click="closeReport">
+        <Icon name="check" :size="18" /> Done
+      </button>
+    </section>
+
     <section v-if="visit.active" class="active-card card stack">
       <div class="active-head">
         <Icon name="map-pin" :size="20" />
@@ -313,6 +403,37 @@ const notesModel = computed({
   background: linear-gradient(135deg, var(--primary-soft) 0%, var(--surface) 100%);
   border: 1px solid color-mix(in srgb, var(--primary) 30%, transparent);
 }
+
+.complete-cta {
+  background: linear-gradient(135deg,
+    color-mix(in srgb, var(--success, #16a34a) 12%, var(--surface)) 0%,
+    var(--surface) 100%);
+  border: 1px solid color-mix(in srgb, var(--success, #16a34a) 30%, transparent);
+}
+.complete-cta .submit { background: var(--success, #16a34a); color: #fff; }
+.cta-head { display: flex; align-items: center; gap: 0.6rem; color: var(--success, #16a34a); }
+.cta-head strong { display: block; color: var(--text); }
+
+.summary {
+  background: linear-gradient(135deg,
+    color-mix(in srgb, var(--success, #16a34a) 10%, var(--surface)) 0%,
+    var(--surface) 100%);
+}
+.summary-head { display: flex; align-items: center; gap: 0.6rem; color: var(--success, #16a34a); }
+.summary-head strong { display: block; color: var(--text); font-size: var(--text-lg); }
+.summary-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 0.6rem;
+  margin: 0;
+}
+.summary-grid > div {
+  background: var(--surface-muted);
+  padding: 0.6rem 0.7rem;
+  border-radius: var(--radius-sm);
+}
+.summary-grid dt { margin: 0 0 0.1rem; }
+.summary-grid dd { margin: 0; font-weight: 600; font-variant-numeric: tabular-nums; }
 .active-head { display: flex; align-items: center; gap: 0.6rem; color: var(--primary); }
 .active-head strong { display: block; color: var(--text); }
 

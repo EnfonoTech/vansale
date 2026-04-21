@@ -156,13 +156,18 @@ function buildStandalone(html: string, style: string, base: string): string {
   const absBase = base ? (base.endsWith("/") ? base : `${base}/`) : "/";
   const baseTag = `<base href="${absBase}">`;
   const { html: cleanHtml, inlineStyle } = normalisePrintHtml(html);
+  // Frappe's `get_html_and_style` returns `style` as raw CSS (no surrounding
+  // <style> tags). Dropping it into <head> as naked text made browsers
+  // parse-error-recover by moving it into <body>, which is why the iframe
+  // showed raw CSS source above the invoice. Always wrap in <style>.
+  const styleTag = style ? `<style>${style}</style>` : "";
   return `<!doctype html>
 <html>
 <head>
 <meta charset="utf-8">
 ${baseTag}
 <meta name="viewport" content="width=device-width, initial-scale=1">
-${style ?? ""}
+${styleTag}
 ${inlineStyle}
 <style>
   body { margin: 0; padding: 1rem; background: #f6f7fb; font-family: system-ui, -apple-system, sans-serif; }

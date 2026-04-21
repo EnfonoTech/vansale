@@ -295,21 +295,35 @@ async function doSave(submit: 0 | 1) {
     const payload = {
       customer: customer.value,
       warehouse: warehouse.value || undefined,
-      items: lines.value.map<InvoiceItem>((l, i) => ({
-        item_code: l.item_code,
-        item_name: l.item_name,
-        qty: l.qty,
-        rate: l.rate,
-        price_list_rate: l.price_list_rate,
-        discount_percentage: l.discount_percentage,
-        // Per-unit discount amount from doc-level split. ERPNext expects
-        // `discount_amount` at item level to be the per-unit amount, not
-        // the line total (hence the /qty above).
-        discount_amount: perLineExtraDisc[i] > 0 ? perLineExtraDisc[i] : undefined,
-        uom: l.uom,
-        conversion_factor: l.conversion_factor,
-        warehouse: l.warehouse,
-      })),
+      // ERPNext computes `discount_amount` + `discount_percentage` from
+      // (price_list_rate - rate). If we pass `rate == price_list_rate`
+      // AND `discount_amount`, ERPNext resets disc to 0 on validate()
+      // — which is why submitted invoices lost their discount. Collapse
+      // everything into an effective `rate`: line-% first, then doc-level
+      // split per unit. ERPNext then stores price_list_rate (original)
+      // and rate (after-discount), computes disc_%/disc_amount itself
+      // — so both the detail view and the ZATCA print format see the
+      // strike-through + discounted rate we want.
+      items: lines.value.map<InvoiceItem>((l, i) => {
+        const baseRate = Number(l.price_list_rate) || Number(l.rate) || 0;
+        const linePct = Math.max(0, Math.min(100, Number(l.discount_percentage) || 0));
+        const rateAfterLinePct = baseRate * (1 - linePct / 100);
+        const perUnitDoc = perLineExtraDisc[i] || 0;
+        const effectiveRate = Math.max(0, rateAfterLinePct - perUnitDoc);
+        return {
+          item_code: l.item_code,
+          item_name: l.item_name,
+          qty: l.qty,
+          rate: effectiveRate,
+          price_list_rate: baseRate,
+          // Do NOT send discount_percentage / discount_amount — let ERPNext
+          // derive both from (price_list_rate - rate) so the stored values
+          // survive submit (its on_submit recalc overrides stamps we send).
+          uom: l.uom,
+          conversion_factor: l.conversion_factor,
+          warehouse: l.warehouse,
+        };
+      }),
       remarks: remarks.value || undefined,
       update_stock: 1 as const,
       submit,

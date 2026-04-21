@@ -22,6 +22,23 @@ const busy = ref(false);
 
 const name = computed(() => String(route.params.name ?? ""));
 
+// Sum of implicit line-level discounts = Σ qty × (price_list_rate - rate).
+// Used as a fallback Totals row when `doc.discount_amount` is zero but
+// ERPNext stored the discount on each item row (common when we submit
+// `rate < price_list_rate`, since ERPNext moves the stamp from header
+// to line items during validate()).
+const itemDiscountTotal = computed(() => {
+  const doc = inv.value;
+  if (!doc?.items) return 0;
+  return doc.items.reduce((sum, it) => {
+    const pl = Number(it.price_list_rate) || 0;
+    const r = Number(it.rate) || 0;
+    const qty = Number(it.qty) || 0;
+    if (pl > r && qty > 0) return sum + (pl - r) * qty;
+    return sum;
+  }, 0);
+});
+
 async function load() {
   loading.value = true;
   err.value = "";
@@ -212,8 +229,15 @@ async function deleteInvoice() {
             <div class="line-meta muted xsmall">
               <span>{{ fmt(it.qty) }} {{ it.uom || "" }}</span>
               <span>×</span>
-              <span><SarSymbol :code="session.currency" />{{ fmt(it.rate) }}</span>
-              <span v-if="it.discount_percentage > 0" class="disc">- {{ fmt(it.discount_percentage) }}%</span>
+              <template v-if="it.price_list_rate && it.price_list_rate > it.rate">
+                <span class="strike"><SarSymbol :code="session.currency" />{{ fmt(it.price_list_rate) }}</span>
+                <span class="after-disc"><SarSymbol :code="session.currency" />{{ fmt(it.rate) }}</span>
+                <span class="disc">- {{ fmt(it.discount_percentage || ((it.price_list_rate - it.rate) / it.price_list_rate * 100)) }}%</span>
+              </template>
+              <template v-else>
+                <span><SarSymbol :code="session.currency" />{{ fmt(it.rate) }}</span>
+                <span v-if="it.discount_percentage > 0" class="disc">- {{ fmt(it.discount_percentage) }}%</span>
+              </template>
             </div>
           </li>
         </ul>
@@ -222,8 +246,20 @@ async function deleteInvoice() {
       <section class="card stack">
         <h3 class="section-h">Totals</h3>
         <div class="totals-row"><span class="muted">Net total</span><span><SarSymbol :code="session.currency" />{{ fmt(inv.net_total) }}</span></div>
-        <div v-if="inv.discount_amount > 0" class="totals-row">
-          <span class="muted">Discount</span><span>- <SarSymbol :code="session.currency" />{{ fmt(inv.discount_amount) }}</span>
+        <div v-if="inv.discount_amount && inv.discount_amount !== 0" class="totals-row">
+          <span class="muted">Discount</span><span>- <SarSymbol :code="session.currency" />{{ fmt(Math.abs(inv.discount_amount)) }}</span>
+        </div>
+        <!-- Sum of per-item discounts (shown when ERPNext spreads the
+             doc-level discount into item rows rather than keeping it at
+             header level). Prevents the Totals section from looking like
+             there's no discount at all when the line items clearly carry
+             a strike-through price. -->
+        <div
+          v-else-if="itemDiscountTotal > 0"
+          class="totals-row"
+        >
+          <span class="muted">Discount</span>
+          <span>- <SarSymbol :code="session.currency" />{{ fmt(itemDiscountTotal) }}</span>
         </div>
         <template v-if="inv.taxes.length">
           <div class="divider" />
@@ -292,6 +328,8 @@ async function deleteInvoice() {
 .line-head { display: flex; justify-content: space-between; gap: 0.5rem; }
 .amt { font-variant-numeric: tabular-nums; white-space: nowrap; }
 .line-meta { display: flex; gap: 0.4rem; align-items: baseline; flex-wrap: wrap; }
+.line-meta .strike { text-decoration: line-through; opacity: 0.7; }
+.line-meta .after-disc { font-weight: 600; color: var(--text); }
 .disc { color: var(--warning); }
 .truncate { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 

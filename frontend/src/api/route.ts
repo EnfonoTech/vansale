@@ -93,7 +93,16 @@ export async function skipVisit(planName: string, stopIdx: number, reason?: stri
   });
 }
 
-export function dailyReport(planDate?: string) {
+export interface DailyReport {
+  plan_date: string;
+  visits: number;
+  sales: number;
+  collections: number;
+  returns: number;
+  stop_count: number;
+}
+
+export function dailyReport(planDate?: string): Promise<DailyReport> {
   const qs = planDate ? `?plan_date=${encodeURIComponent(planDate)}` : "";
-  return apiCall("GET", `vansale.api.route.daily_report${qs}`);
+  return apiCall<DailyReport>("GET", `vansale.api.route.daily_report${qs}`);
 }
