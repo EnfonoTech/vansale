@@ -237,6 +237,30 @@ def end_visit(
     return {"name": log.name, "idempotent_replay": False}
 
 
+@frappe.whitelist(methods=["POST"])
+def skip_visit(plan_name: str, stop_idx: int, reason: Optional[str] = None) -> dict:
+    """Abandon an in-progress or pending stop. Used to unstick customers left
+    dangling in ``in_progress`` when the user backs out without completing
+    the visit, or to deliberately skip a stop without creating an invoice.
+    Idempotent — calling on an already-skipped or done stop is a no-op.
+    """
+    if not plan_name:
+        frappe.throw(_("plan_name required"))
+    plan = frappe.get_doc("Van Route Plan", plan_name)
+    stop = next((s for s in plan.stops if int(s.idx) == int(stop_idx)), None)
+    if not stop:
+        frappe.throw(_("Stop not found"))
+    if stop.status in ("done", "skipped"):
+        return {"status": stop.status, "idempotent_replay": True}
+    stop.status = "skipped"
+    stop.ended_at = frappe.utils.now_datetime()
+    if reason:
+        stop.notes = (f"{stop.notes or ''}\n{reason}").strip()
+    plan.save(ignore_permissions=True)
+    frappe.db.commit()
+    return {"status": "skipped", "idempotent_replay": False}
+
+
 @frappe.whitelist(methods=["GET"])
 def daily_report(plan_date: Optional[str] = None) -> dict:
     user = frappe.session.user

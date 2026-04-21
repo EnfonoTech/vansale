@@ -109,9 +109,41 @@ export async function downloadPrintPdf(
   await saveBlobToDevice(blob, `${safeDoctype}-${safeName}.pdf`);
 }
 
+/**
+ * Some print formats (e.g. Vansale Tax Invoice) are authored as full
+ * `<!doctype html><html><head><style/></head><body>…</body></html>`
+ * documents for stand-alone use with `wkhtmltopdf`. When Frappe's
+ * `get_html_and_style` returns that verbatim and we embed it inside
+ * another `<html>` wrapper, the browser renders the nested `<!doctype>`
+ * + `<html>`/`<head>` as visible text at the top of the page. Strip
+ * the outer wrappers so only the body + inlined `<style>` survive.
+ */
+function normalisePrintHtml(raw: string): { html: string; inlineStyle: string } {
+  let html = raw;
+  let inlineStyle = "";
+  const headMatch = html.match(/<head[^>]*>([\s\S]*?)<\/head>/i);
+  if (headMatch) {
+    const head = headMatch[1];
+    const styles = head.match(/<style[\s\S]*?<\/style>/gi);
+    if (styles) inlineStyle = styles.join("\n");
+  }
+  // Prefer the body contents when present; otherwise just strip doctype/html/head.
+  const bodyMatch = html.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
+  if (bodyMatch) {
+    html = bodyMatch[1];
+  } else {
+    html = html
+      .replace(/<!doctype[^>]*>/gi, "")
+      .replace(/<\/?html[^>]*>/gi, "")
+      .replace(/<head[\s\S]*?<\/head>/gi, "");
+  }
+  return { html, inlineStyle };
+}
+
 function buildStandalone(html: string, style: string, base: string): string {
   const absBase = base ? (base.endsWith("/") ? base : `${base}/`) : "/";
   const baseTag = `<base href="${absBase}">`;
+  const { html: cleanHtml, inlineStyle } = normalisePrintHtml(html);
   return `<!doctype html>
 <html>
 <head>
@@ -119,11 +151,12 @@ function buildStandalone(html: string, style: string, base: string): string {
 ${baseTag}
 <meta name="viewport" content="width=device-width, initial-scale=1">
 ${style ?? ""}
+${inlineStyle}
 <style>
   body { margin: 0; padding: 1rem; background: #f6f7fb; font-family: system-ui, -apple-system, sans-serif; }
   @media print { body { background: #fff; padding: 0; } }
 </style>
 </head>
-<body>${html}</body>
+<body>${cleanHtml}</body>
 </html>`;
 }

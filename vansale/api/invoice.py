@@ -246,6 +246,116 @@ def _default_mop_account(mop: str, company: str) -> Optional[str]:
 
 
 @frappe.whitelist(methods=["POST"])
+def update_draft(
+    name: str,
+    items: list[dict[str, Any]],
+    remarks: Optional[str] = None,
+    discount_amount: Optional[float] = None,
+    apply_discount_on: Optional[str] = None,
+    submit: int = 0,
+    payment_type: Optional[str] = None,
+    mode_of_payment: Optional[str] = None,
+    warehouse: Optional[str] = None,
+) -> dict:
+    """In-place update a draft Sales Invoice.
+
+    Van User roles have write permission on their own Sales Invoice drafts
+    (they created the docs) but standard Frappe doesn't grant them delete
+    permission — so the old "delete draft + resave" edit path threw
+    ``PermissionError: Insufficient Permission for Sales Invoice``. This
+    endpoint mutates the existing doc: clears + rebuilds ``items``,
+    re-applies discount, optionally submits. Owner check keeps users from
+    editing other salespeople's drafts.
+    """
+    if not name:
+        frappe.throw(_("name required"))
+    if not items:
+        frappe.throw(_("At least one item is required"))
+
+    doc = frappe.get_doc("Sales Invoice", name)
+    if int(doc.docstatus or 0) != 0:
+        frappe.throw(_("Only draft invoices can be edited"))
+    # Owner check — if you created it, you can edit it. Avoids the "no
+    # delete perm" error while still preventing cross-user edits.
+    if doc.owner != frappe.session.user:
+        # Fall back to role-based write perm — System / Accounts Manager
+        # should still be able to edit any draft.
+        if not frappe.has_permission("Sales Invoice", "write", doc=doc):
+            frappe.throw(_("You cannot edit this draft"))
+
+    set_warehouse = warehouse or doc.set_warehouse or _get_default_warehouse(doc.company)
+    doc.set_warehouse = set_warehouse
+    if remarks is not None:
+        doc.remarks = remarks
+
+    # payment_type swap: cash <-> credit. When moving to cash, set is_pos
+    # so the POS flow activates on the next save (payments row filled
+    # after save, same as `save()`).
+    pay_type = (payment_type or "").lower()
+    if pay_type == "cash":
+        doc.is_pos = 1
+    elif pay_type == "credit":
+        doc.is_pos = 0
+        doc.set("payments", [])
+
+    # Rebuild items table. Clearing + appending keeps the child-row
+    # docnames consistent with Frappe's expectations on save().
+    doc.set("items", [])
+    for item in items:
+        if not item.get("item_code"):
+            frappe.throw(_("item_code is required on every line"))
+        row = doc.append("items", {})
+        row.item_code = item["item_code"]
+        row.qty = float(item.get("qty") or 1)
+        if item.get("uom"):
+            row.uom = item["uom"]
+        if item.get("conversion_factor"):
+            row.conversion_factor = float(item["conversion_factor"])
+        if item.get("price_list_rate") is not None:
+            row.price_list_rate = float(item["price_list_rate"])
+        if item.get("rate") is not None:
+            row.rate = float(item["rate"])
+        if item.get("discount_percentage") is not None:
+            row.discount_percentage = float(item["discount_percentage"])
+        if item.get("discount_amount") is not None:
+            row.discount_amount = float(item["discount_amount"])
+        if set_warehouse:
+            row.warehouse = item.get("warehouse") or set_warehouse
+
+    if discount_amount is not None:
+        doc.discount_amount = float(discount_amount)
+        doc.apply_discount_on = apply_discount_on or "Grand Total"
+
+    doc.save(ignore_permissions=False)
+
+    if pay_type == "cash" and submit:
+        mop = mode_of_payment or "Cash"
+        account = _default_mop_account(mop, doc.company)
+        if not account:
+            frappe.throw(_("No default account configured for Mode of Payment {0}").format(mop))
+        doc.set("payments", [])
+        doc.append("payments", {
+            "mode_of_payment": mop,
+            "account": account,
+            "amount": float(doc.grand_total or 0),
+        })
+        doc.save()
+
+    if submit:
+        doc.submit()
+
+    frappe.db.commit()
+    return {
+        "name": doc.name,
+        "grand_total": float(doc.grand_total or 0),
+        "outstanding_amount": float(doc.outstanding_amount or 0),
+        "status": doc.status,
+        "docstatus": int(doc.docstatus or 0),
+        "modified": naive_site_to_utc_iso(doc.modified),
+    }
+
+
+@frappe.whitelist(methods=["POST"])
 def return_against(
     client_id: str,
     original_name: str,
@@ -391,6 +501,7 @@ def list_mine(
             "posting_time",
             "is_return",
             "return_against",
+            "docstatus",
             "modified",
         ],
         order_by="posting_date desc, posting_time desc",

@@ -30,7 +30,7 @@ except ImportError:  # pragma: no cover — bench env always has bcrypt via requ
 from vansale.utils.secrets import get_or_create_stable_secret
 
 _PIN_MIN = 4
-_PIN_MAX = 8
+_PIN_MAX = 4
 
 
 def _ensure_bcrypt() -> None:
@@ -43,7 +43,12 @@ def _validate_pin(pin: str) -> str:
         frappe.throw(_("PIN must be a string"))
     pin = pin.strip()
     if not pin.isdigit() or not (_PIN_MIN <= len(pin) <= _PIN_MAX):
-        frappe.throw(_("PIN must be {0}–{1} digits").format(_PIN_MIN, _PIN_MAX))
+        # Keep range-style message even when min==max so future expansion stays single-source.
+        frappe.throw(
+            _("PIN must be {0} digits").format(_PIN_MIN)
+            if _PIN_MIN == _PIN_MAX
+            else _("PIN must be {0}–{1} digits").format(_PIN_MIN, _PIN_MAX)
+        )
     return pin
 
 

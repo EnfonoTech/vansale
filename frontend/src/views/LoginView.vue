@@ -28,6 +28,10 @@ async function onSubmit() {
       email: email.value.trim(),
       language: res.language,
     });
+    // If the server reports no PIN on file, clear our cached pinVerifiedAt so
+    // PinView falls into "setup" mode instead of asking the user to enter a
+    // PIN that no longer exists (e.g. after the 1.0.13 PIN-wipe migration).
+    if (!res.has_pin) session.clearPinWindow();
     await router.replace({ name: "pin" });
   } catch (err) {
     if (err instanceof ApiError) error.value = err.serverMessage ?? "Incorrect email or password";
@@ -48,13 +52,30 @@ async function onSubmit() {
         <p class="muted small">Sign in to continue</p>
       </div>
 
-      <form class="card stack" @submit.prevent="onSubmit" novalidate>
-        <label class="field">
+      <!--
+        Chrome / Android WebView credential save heuristics require proper
+        form + input metadata: `name` + `id` on both fields, an `action`
+        URL, and `method="post"`. Even with `@submit.prevent` we keep the
+        real URL on action — the WebView password manager reads the form
+        attributes (not the actual network request) when deciding whether
+        to offer a save prompt.
+      -->
+      <form
+        class="card stack"
+        method="post"
+        action="/app/login"
+        name="vansale-login"
+        autocomplete="on"
+        @submit.prevent="onSubmit"
+      >
+        <label class="field" for="vansale-email">
           <span class="label">Email</span>
           <input
+            id="vansale-email"
+            name="username"
             v-model="email"
             type="email"
-            autocomplete="email"
+            autocomplete="username"
             inputmode="email"
             required
             autofocus
@@ -62,10 +83,12 @@ async function onSubmit() {
             placeholder="you@company.com"
           />
         </label>
-        <label class="field">
+        <label class="field" for="vansale-password">
           <span class="label">Password</span>
           <div class="pw-wrap">
             <input
+              id="vansale-password"
+              name="password"
               v-model="password"
               :type="showPassword ? 'text' : 'password'"
               autocomplete="current-password"

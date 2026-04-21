@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
-import { today, startVisit, endVisit, type RouteStop } from "@/api/route";
+import { today, startVisit, endVisit, skipVisit, type RouteStop } from "@/api/route";
 import { currentPosition } from "@/features/van/gps";
 import { isOnline } from "@/app/online";
 import { useSessionStore } from "@/stores/session";
@@ -83,6 +83,22 @@ async function onEnd() {
     toasts.error(e instanceof Error ? e.message : String(e));
   } finally {
     busy.value = false;
+  }
+}
+
+async function onSkip(stop: RouteStop) {
+  if (!plan.value?.name) return;
+  // Confirm destructive action — especially important when unsticking a
+  // stop left hanging from a prior session. Don't want an accidental tap
+  // to wipe a real in-flight visit.
+  if (!window.confirm(`Mark "${stop.customer}" as skipped?`)) return;
+  try {
+    await skipVisit(plan.value.name, stop.idx);
+    if (visit.active && visit.active.stop.idx === stop.idx) visit.clear();
+    toasts.info(`Skipped · ${stop.customer}`);
+    await load();
+  } catch (e) {
+    toasts.error(e instanceof Error ? e.message : String(e));
   }
 }
 
@@ -173,6 +189,14 @@ const notesModel = computed({
             @click="onStart(s)"
           >
             <Icon name="map-pin" :size="16" /> Start visit
+          </button>
+          <button
+            v-if="s.status === 'in_progress' && (!visit.active || visit.active.stop.idx !== s.idx)"
+            class="ghost small warning"
+            @click="onSkip(s)"
+            title="Clear a stuck visit (marks the stop as skipped)"
+          >
+            <Icon name="x" :size="14" /> Skip
           </button>
           <button class="ghost small" @click="openCustomer(s.customer)">
             <Icon name="customer" :size="14" /> Open

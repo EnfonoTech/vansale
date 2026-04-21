@@ -1,22 +1,38 @@
 <script setup lang="ts">
-import { onMounted, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { detail, type CustomerDetail } from "@/api/customer";
 import { listMine as listInvoices } from "@/api/invoice";
+import { endVisit } from "@/api/route";
+import { currentPosition } from "@/features/van/gps";
 import { useSessionStore } from "@/stores/session";
+import { useRouteVisitStore } from "@/stores/routeVisit";
+import { useToastStore } from "@/stores/toasts";
 import Icon from "@/components/Icon.vue";
 import SarSymbol from "@/components/SarSymbol.vue";
 
 const route = useRoute();
 const router = useRouter();
 const session = useSessionStore();
+const visit = useRouteVisitStore();
+const toasts = useToastStore();
 
 const customer = ref<CustomerDetail | null>(null);
 const invoices = ref<Array<Record<string, unknown>>>([]);
 const loading = ref(false);
 const err = ref("");
+const ending = ref(false);
 
 const customerName = String(route.params.name ?? "");
+
+// True when this detail page is for the customer currently checked-in on
+// the route. We show an inline End-visit card so the user never has to
+// back out through multiple screens to close the visit (user complaint
+// from v1.0.12 — once a customer was opened from the route, the only
+// way to end the visit was to navigate all the way back to RouteToday).
+const activeForThisCustomer = computed(
+  () => visit.hasActive && visit.activeCustomer === customerName,
+);
 
 async function load() {
   if (!customerName) return;
@@ -58,6 +74,34 @@ function printStatement() {
   // (same auth path as everything else) and offers its own Print button.
   void router.push({ name: "customer-statement", params: { name: customerName } });
 }
+
+async function onEndVisit() {
+  if (!visit.active || ending.value) return;
+  ending.value = true;
+  try {
+    let lat: number | undefined;
+    let lng: number | undefined;
+    if (session.requireLocation) {
+      const geo = await currentPosition();
+      lat = geo?.lat;
+      lng = geo?.lng;
+    }
+    const res = await endVisit({
+      plan_name: visit.active.planName,
+      stop_idx: visit.active.stop.idx,
+      lat,
+      lng,
+      notes: visit.active.notes || null,
+    });
+    toasts.success(res.queued ? "Visit queued offline" : `Visit closed · ${res.name}`);
+    visit.clear();
+    void router.replace({ name: "route-today" });
+  } catch (e) {
+    toasts.error(e instanceof Error ? e.message : String(e));
+  } finally {
+    ending.value = false;
+  }
+}
 </script>
 
 <template>
@@ -69,6 +113,20 @@ function printStatement() {
     <p v-if="err" class="error">{{ err }}</p>
 
     <template v-if="customer">
+      <section v-if="activeForThisCustomer" class="card stack visit-banner">
+        <div class="visit-head">
+          <Icon name="map-pin" :size="18" />
+          <div>
+            <span class="muted xsmall">Active visit</span>
+            <strong>{{ customer.customer_name }}</strong>
+          </div>
+        </div>
+        <button class="submit danger" :disabled="ending" @click="onEndVisit">
+          <Icon name="check" :size="18" />
+          {{ ending ? "Closing…" : "End visit" }}
+        </button>
+      </section>
+
       <section class="card stack">
         <div class="header-row">
           <span class="avatar">
@@ -193,4 +251,12 @@ function printStatement() {
 }
 .inv-row:first-of-type { border-top: none; }
 .inv-row:active { background: var(--surface-muted); }
+
+.visit-banner {
+  background: linear-gradient(135deg, var(--primary-soft) 0%, var(--surface) 100%);
+  border: 1px solid color-mix(in srgb, var(--primary) 30%, transparent);
+}
+.visit-head { display: flex; align-items: center; gap: 0.6rem; color: var(--primary); }
+.visit-head strong { display: block; color: var(--text); }
+.submit.danger { background: var(--success); min-height: 3rem; }
 </style>

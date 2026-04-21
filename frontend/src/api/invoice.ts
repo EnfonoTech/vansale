@@ -159,6 +159,33 @@ export async function deleteDraft(name: string): Promise<void> {
   void sync.refresh();
 }
 
+export interface UpdateDraftPayload {
+  name: string;
+  items: InvoiceItem[];
+  remarks?: string;
+  discount_amount?: number;
+  apply_discount_on?: "Grand Total" | "Net Total";
+  submit?: 0 | 1;
+  payment_type?: "cash" | "credit";
+  mode_of_payment?: string;
+  warehouse?: string;
+}
+
+/**
+ * In-place draft update. Previously we deleted-and-recreated, but Van
+ * Users don't have delete permission on Sales Invoice — they got
+ * "Insufficient Permission" even though they'd created the draft.
+ * Server-side `update_draft` mutates the existing doc under the owner's
+ * write permission and (optionally) submits it.
+ */
+export async function updateDraft(payload: UpdateDraftPayload): Promise<SavedInvoice> {
+  const res = await apiCall<SavedInvoice>("POST", "vansale.api.invoice.update_draft", payload);
+  const sync = useSyncStore();
+  void sync.refresh();
+  // updateDraft works on an existing doc — there is no clientId to return.
+  return { ...res, clientId: "" };
+}
+
 export interface ReturnLine {
   item_code: string;
   qty: number;                 // positive — server negates

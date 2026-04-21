@@ -26,7 +26,7 @@ const error = ref("");
 const busy = ref(false);
 const shake = ref(false);
 
-const MAX_LEN = 8;
+const PIN_LEN = 4;
 
 const heading = computed(() => {
   if (mode.value === "unlock") return "Enter PIN";
@@ -34,13 +34,12 @@ const heading = computed(() => {
 });
 const hint = computed(() => {
   if (mode.value === "unlock") return session.email ?? "";
-  return step.value === "enter" ? "Choose 4 to 8 digits" : "Re-enter to confirm";
+  return step.value === "enter" ? "Choose 4 digits" : "Re-enter to confirm";
 });
 
 const dots = computed(() => {
-  const slots = 6;
   const n = pin.value.length;
-  return Array.from({ length: slots }, (_, i) => (i < n ? "full" : "empty"));
+  return Array.from({ length: PIN_LEN }, (_, i) => (i < n ? "full" : "empty"));
 });
 
 function buzz() {
@@ -49,9 +48,12 @@ function buzz() {
 }
 
 function press(d: string) {
-  if (busy.value || pin.value.length >= MAX_LEN) return;
+  if (busy.value || pin.value.length >= PIN_LEN) return;
   pin.value += d;
   if (error.value) error.value = "";
+  // Auto-advance once all digits entered — keeps the UX snappy and prevents the
+  // user wondering if they also need to hit the "Unlock" button.
+  if (pin.value.length === PIN_LEN) void submit();
 }
 function del() {
   if (busy.value) return;
@@ -59,11 +61,11 @@ function del() {
   if (error.value) error.value = "";
 }
 
-function isValid(v: string): boolean { return /^\d{4,8}$/.test(v); }
+function isValid(v: string): boolean { return new RegExp(`^\\d{${PIN_LEN}}$`).test(v); }
 
 async function submit() {
   if (busy.value) return;
-  if (!isValid(pin.value)) { error.value = "PIN must be 4 to 8 digits"; buzz(); return; }
+  if (!isValid(pin.value)) { error.value = `PIN must be ${PIN_LEN} digits`; buzz(); return; }
 
   if (mode.value === "setup" && step.value === "enter") {
     firstPin.value = pin.value;
@@ -146,7 +148,7 @@ const cta = computed(() => {
           </button>
         </div>
 
-        <button class="submit" type="button" :disabled="busy || pin.length < 4" @click="submit">
+        <button class="submit" type="button" :disabled="busy || pin.length < PIN_LEN" @click="submit">
           {{ cta }}
         </button>
       </div>

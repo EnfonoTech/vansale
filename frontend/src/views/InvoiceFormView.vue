@@ -24,7 +24,7 @@ import {
   type ItemRow,
   type ItemUom,
 } from "@/api/item";
-import { save, detail, deleteDraft, type InvoiceItem } from "@/api/invoice";
+import { save, detail, updateDraft, type InvoiceItem } from "@/api/invoice";
 import { ApiError } from "@/app/frappe";
 import { useSessionStore } from "@/stores/session";
 import { useToastStore } from "@/stores/toasts";
@@ -320,18 +320,24 @@ async function doSave(submit: 0 | 1) {
       discount_amount: undefined,
       apply_discount_on: undefined,
     };
-    // Edit mode: delete the old draft first so we don't leave an orphan. The
-    // server names a new draft, but that's an acceptable trade-off — no
-    // external references point at draft names.
-    if (isEditMode.value) {
-      try { await deleteDraft(editName.value); }
-      catch (err) {
-        // If delete fails (race condition / already submitted elsewhere),
-        // bail — don't create a duplicate.
-        throw err instanceof Error ? err : new Error(String(err));
-      }
-    }
-    const res = await save(payload);
+    // Edit mode uses server-side `update_draft` which mutates the existing
+    // doc in place — Van Users have write perm on their own drafts but NOT
+    // delete perm, so the previous delete-then-save flow always raised
+    // "Insufficient Permission for Sales Invoice". Keep the same payload
+    // shape; `updateDraft` swaps the endpoint.
+    const res = isEditMode.value
+      ? await updateDraft({
+          name: editName.value,
+          items: payload.items,
+          remarks: payload.remarks,
+          warehouse: payload.warehouse,
+          submit: payload.submit,
+          payment_type: payload.payment_type,
+          mode_of_payment: payload.mode_of_payment,
+          discount_amount: payload.discount_amount,
+          apply_discount_on: payload.apply_discount_on,
+        })
+      : await save(payload);
     toasts.success(
       res.queued
         ? "Saved offline — will sync when online"

@@ -1,3 +1,4 @@
 # Patches executed in sequence on `bench migrate`.
 # Append `module.path.function_name` per line.
 vansale.patches.v1_0.install_vansale_tax_invoice
+vansale.patches.v1_0.reset_pins_to_four_digit

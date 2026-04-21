@@ -85,6 +85,14 @@ export async function endVisit(payload: EndVisitPayload): Promise<{ name: string
   return { name: `QUEUED:${clientId.slice(0, 8)}`, queued: true, clientId };
 }
 
+export async function skipVisit(planName: string, stopIdx: number, reason?: string): Promise<{ status: string }> {
+  return apiCall("POST", "vansale.api.route.skip_visit", {
+    plan_name: planName,
+    stop_idx: stopIdx,
+    reason,
+  });
+}
+
 export function dailyReport(planDate?: string) {
   const qs = planDate ? `?plan_date=${encodeURIComponent(planDate)}` : "";
   return apiCall("GET", `vansale.api.route.daily_report${qs}`);

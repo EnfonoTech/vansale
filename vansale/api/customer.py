@@ -8,6 +8,7 @@ import frappe
 from frappe import _
 
 from vansale.api.datetime_util import naive_site_to_utc_iso
+from vansale.api.me import current_user_sales_person
 
 
 _LIST_FIELDS = [
@@ -25,21 +26,46 @@ _LIST_FIELDS = [
 ]
 
 
-def _customer_filters_for_user() -> dict:
-    """Return the base filter set for Customer queries.
+def _assigned_customer_names(sales_person: str | None) -> list[str] | None:
+    """Names of customers assigned to the given sales person.
 
-    Customer-level scoping happens via Frappe's User Permission system
-    (Territory, Customer Group) when admins configure it. The Vansale
-    Configuration pattern — mirroring RMAX's Branch Configuration —
-    doesn't create Customer-level User Permissions, so every Van User
-    sees all active customers unless the admin restricts explicitly.
+    Assignment is read from the Customer → Sales Team child table — the
+    same column that `vansale.api.invoice.save` writes to when tagging
+    new invoices. Returns ``None`` when there's no sales_person to scope
+    by (admins / non-van users see everything); returns ``[]`` when the
+    sales person has nothing assigned (UI shows an empty list rather
+    than silently falling back to every customer).
     """
-    return {"disabled": 0}
+    if not sales_person:
+        return None
+    rows = frappe.db.sql(
+        """
+        SELECT DISTINCT parent AS name
+        FROM `tabSales Team`
+        WHERE parenttype = 'Customer' AND sales_person = %s
+        """,
+        (sales_person,),
+        as_dict=True,
+    )
+    return [r["name"] for r in rows]
 
 
 @frappe.whitelist(methods=["GET"])
 def list_mine(limit: int = 50, search: Optional[str] = None) -> list[dict]:
-    filters = _customer_filters_for_user()
+    filters: dict = {"disabled": 0}
+    roles = frappe.get_roles(frappe.session.user)
+    is_admin = "System Manager" in roles or "Van Manager" in roles
+
+    # Van users are scoped to the customers tagged with their Sales Person in
+    # the Customer → Sales Team child table. Admins (System Manager / Van
+    # Manager) see everything — they need unfiltered visibility for ops.
+    if not is_admin:
+        names = _assigned_customer_names(current_user_sales_person())
+        if names is not None:
+            if not names:
+                return []  # no customers assigned — return empty, don't show everyone
+            filters["name"] = ["in", names]
+
     or_filters = {}
     if search:
         s = f"%{search}%"
