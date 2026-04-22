@@ -10,7 +10,49 @@ from typing import Optional
 import frappe
 from frappe import _
 
-from vansale.api.datetime_util import naive_site_to_utc_iso
+from vansale.api.datetime_util import naive_site_to_utc_iso, parse_client_ts
+
+
+def _existing_stock_entry_by_client_id(client_id: str | None) -> Optional[str]:
+    """Return the Stock Entry the given offline client_id already drained as,
+    or None. Mirrors `invoice.save` / `customer.create` — Vansale Outbox is
+    the single source of truth for idempotency so retries after a network
+    blip don't duplicate van replenishments.
+    """
+    if not client_id:
+        return None
+    name = frappe.db.get_value(
+        "Vansale Outbox",
+        {"client_id": client_id, "event_type": "stock_adjust"},
+        "ref_name",
+    )
+    if name and frappe.db.exists("Stock Entry", name):
+        return name
+    return None
+
+
+def _record_stock_entry_outbox(
+    client_id: str | None,
+    ref_name: str,
+    posting_ts: str | None,
+    payload: dict,
+) -> None:
+    if not client_id:
+        return
+    if frappe.db.exists("Vansale Outbox", client_id):
+        doc = frappe.get_doc("Vansale Outbox", client_id)
+    else:
+        doc = frappe.new_doc("Vansale Outbox")
+        doc.client_id = client_id
+    doc.event_type = "stock_adjust"
+    doc.user = frappe.session.user
+    doc.client_ts = parse_client_ts(posting_ts) if posting_ts else None
+    doc.drained_at = frappe.utils.now_datetime()
+    doc.status = "processed"
+    doc.ref_doctype = "Stock Entry"
+    doc.ref_name = ref_name
+    doc.payload_json = frappe.as_json(payload)
+    doc.save(ignore_permissions=True)
 
 
 def _user_van_warehouse() -> Optional[str]:
@@ -77,8 +119,30 @@ def transfer_in(
     items: list[dict],
     to_warehouse: Optional[str] = None,
     reason: Optional[str] = None,
+    client_id: Optional[str] = None,
+    posting_ts: Optional[str] = None,
 ) -> dict:
-    """Create a Material Transfer Stock Entry from ``from_warehouse`` to the user's van."""
+    """Create a Material Transfer Stock Entry from ``from_warehouse`` to the user's van.
+
+    Idempotent via ``client_id`` — when the offline queue replays this
+    call, the server returns the previously-persisted Stock Entry
+    instead of creating a duplicate load. Uses Vansale Outbox
+    (event_type="stock_adjust"), matching the invoice/payment/return
+    pattern.
+    """
+    # Replay short-circuit — done BEFORE validation so a retry of a
+    # successful load doesn't re-throw "At least one item required"
+    # because the caller trimmed the payload.
+    if client_id:
+        prior = _existing_stock_entry_by_client_id(client_id)
+        if prior:
+            prior_doc = frappe.get_doc("Stock Entry", prior)
+            return {
+                "name": prior_doc.name,
+                "modified": naive_site_to_utc_iso(prior_doc.modified),
+                "idempotent_replay": True,
+            }
+
     target = to_warehouse or _user_van_warehouse()
     if not target:
         frappe.throw(_("No destination warehouse"))
@@ -103,4 +167,20 @@ def transfer_in(
     doc.insert(ignore_permissions=False)
     doc.submit()
     frappe.db.commit()
+
+    # Outbox row recorded post-commit so a rolled-back Stock Entry
+    # doesn't leave a ghost idempotency key (§ frappe-vue-pwa 4.4).
+    if client_id:
+        _record_stock_entry_outbox(
+            client_id,
+            doc.name,
+            posting_ts,
+            {
+                "from_warehouse": from_warehouse,
+                "to_warehouse": target,
+                "reason": reason,
+                "items": items,
+            },
+        )
+
     return {"name": doc.name, "modified": naive_site_to_utc_iso(doc.modified)}

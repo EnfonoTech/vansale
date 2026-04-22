@@ -53,6 +53,8 @@ export async function totalPending(): Promise<number> {
     "payment_queue",
     "return_queue",
     "visit_queue",
+    "customer_queue",
+    "stock_entry_queue",
   ];
   const counts = await Promise.all(stores.map(countPending));
   return counts.reduce((a, b) => a + b, 0);

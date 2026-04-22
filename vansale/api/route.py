@@ -54,21 +54,52 @@ def _resolve_sales_person(user: str | None) -> str | None:
     return user_to_sales_person(user)
 
 
-def _list_customers_for_sales_person(sales_person: str) -> list[dict]:
+VALID_WEEKDAYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
+
+
+def _weekday_code(d: date) -> str:
+    """ISO weekday → three-letter lowercase code. Matches `custom_visit_days`."""
+    return VALID_WEEKDAYS[d.weekday()]
+
+
+def _customer_runs_today(visit_days_csv: str | None, today_: date) -> bool:
+    """True iff a customer's visit_days CSV covers `today_`.
+
+    Empty / None means every day (backwards compatible). Unknown codes
+    are silently ignored so a stray value doesn't silently hide a
+    customer from the driver.
+    """
+    if not visit_days_csv or not visit_days_csv.strip():
+        return True
+    needle = _weekday_code(today_)
+    days = {p.strip().lower() for p in visit_days_csv.split(",") if p.strip()}
+    return needle in days
+
+
+def _list_customers_for_sales_person(
+    sales_person: str,
+    visit_date: date | None = None,
+) -> list[dict]:
     """Customers whose Sales Team row references this Sales Person.
 
     Ordered by `custom_van_sort_order` asc (nulls last → `COALESCE, big
     number`), then by customer_name for stability. Disabled customers
     are excluded; drivers never see a deactivated account.
+
+    When `visit_date` is given, customers whose `custom_visit_days` CSV
+    does not include that weekday are filtered out. When it's None we
+    return every tagged customer regardless of schedule — used by the
+    admin assignment page so operators can see and edit the full roster.
     """
-    return frappe.db.sql(
+    rows = frappe.db.sql(
         """
         SELECT DISTINCT
             c.name AS customer,
             c.customer_name AS customer_name,
             c.mobile_no AS mobile_no,
             c.customer_primary_address AS primary_address,
-            COALESCE(c.custom_van_sort_order, 999999) AS sort_order
+            COALESCE(c.custom_van_sort_order, 999999) AS sort_order,
+            c.custom_visit_days AS visit_days
         FROM `tabCustomer` c
         INNER JOIN `tabSales Team` st
             ON st.parent = c.name AND st.parenttype = 'Customer'
@@ -78,6 +109,9 @@ def _list_customers_for_sales_person(sales_person: str) -> list[dict]:
         (sales_person,),
         as_dict=True,
     )
+    if visit_date is None:
+        return rows
+    return [r for r in rows if _customer_runs_today(r.get("visit_days"), visit_date)]
 
 
 def _fetch_visit(user: str, customer: str, visit_date: date) -> dict | None:
@@ -204,7 +238,7 @@ def today(client_date: Optional[str] = None) -> dict:
             "stops": [],
         }
 
-    customers = _list_customers_for_sales_person(sales_person)
+    customers = _list_customers_for_sales_person(sales_person, visit_date=today_)
     stops: list[dict] = []
     for i, cust in enumerate(customers, start=1):
         visit = _fetch_visit(user, cust["customer"], today_)
@@ -493,6 +527,272 @@ def list_customers_for_user(user: Optional[str] = None) -> list[dict]:
     return _list_customers_for_sales_person(sp)
 
 
+@frappe.whitelist()
+def van_user_query(
+    doctype: str = "User",
+    txt: str = "",
+    searchfield: str = "name",
+    start: int = 0,
+    page_len: int = 20,
+    filters: dict | None = None,
+):
+    """Link-field query: return only Users that appear in Vansale
+    Configuration User rows. Used by the assignment page so admins can't
+    pick a random User who has no Sales Person mapping.
+
+    Frappe's Link control calls this with its standard signature —
+    we ignore `doctype`, `filters`, and return `[(name, label), ...]`.
+    """
+    _require_manager()
+    txt_like = f"%{txt or ''}%"
+    return frappe.db.sql(
+        """
+        SELECT DISTINCT u.name, CONCAT(u.full_name, ' · ', COALESCE(vcu.sales_person, '-'))
+        FROM `tabVansale Configuration User` vcu
+        JOIN `tabUser` u ON u.name = vcu.user
+        WHERE u.enabled = 1
+          AND (u.name LIKE %(t)s OR u.full_name LIKE %(t)s OR vcu.sales_person LIKE %(t)s)
+        ORDER BY u.full_name ASC
+        LIMIT %(s)s, %(p)s
+        """,
+        {"t": txt_like, "s": int(start or 0), "p": int(page_len or 20)},
+    )
+
+
+@frappe.whitelist()
+def list_available_customers(
+    sales_person: str,
+    include_assigned: int = 0,
+    search: str | None = None,
+    limit: int = 0,
+) -> list[dict]:
+    """Pool of customers for the right-side picker.
+
+    Default (include_assigned=0): customers with no Sales Team rows at all
+    OR with only this sales_person (latter are already on this roster so
+    the UI filters them out via `assigned_set`). We specifically exclude
+    customers assigned to a DIFFERENT sales_person so the admin doesn't
+    accidentally double-book.
+
+    include_assigned=1: return every active customer and include an
+    `assigned_to` field listing the other sales_persons already tagged.
+    The UI shows these with a "reassign" button — clicking calls
+    `reassign_customer_sales_person` which atomically wipes prior
+    sales_team rows before the normal bulk_assign path runs.
+    """
+    _require_manager()
+    if not sales_person:
+        return []
+    search_like = f"%{(search or '').strip()}%"
+    lim = int(limit or 0)
+    lim_clause = f"LIMIT {lim}" if lim > 0 else ""
+
+    if int(include_assigned or 0):
+        rows = frappe.db.sql(
+            f"""
+            SELECT c.name AS customer,
+                   c.customer_name AS customer_name,
+                   c.mobile_no AS mobile_no,
+                   GROUP_CONCAT(DISTINCT st.sales_person) AS assigned_to
+            FROM `tabCustomer` c
+            LEFT JOIN `tabSales Team` st
+                ON st.parent = c.name AND st.parenttype = 'Customer'
+            WHERE c.disabled = 0
+              AND (c.name LIKE %(s)s OR c.customer_name LIKE %(s)s OR c.mobile_no LIKE %(s)s)
+            GROUP BY c.name, c.customer_name, c.mobile_no
+            ORDER BY c.customer_name ASC
+            {lim_clause}
+            """,
+            {"s": search_like},
+            as_dict=True,
+        )
+    else:
+        # Exclude customers tagged with a different sales person. Customers
+        # with NO sales_team rows are kept; customers with only this
+        # sales_person are kept (they'll be filtered client-side because
+        # they're already on the roster).
+        rows = frappe.db.sql(
+            f"""
+            SELECT c.name AS customer,
+                   c.customer_name AS customer_name,
+                   c.mobile_no AS mobile_no,
+                   NULL AS assigned_to
+            FROM `tabCustomer` c
+            WHERE c.disabled = 0
+              AND (c.name LIKE %(s)s OR c.customer_name LIKE %(s)s OR c.mobile_no LIKE %(s)s)
+              AND NOT EXISTS (
+                SELECT 1 FROM `tabSales Team` st
+                WHERE st.parent = c.name AND st.parenttype = 'Customer'
+                  AND st.sales_person != %(sp)s
+              )
+            ORDER BY c.customer_name ASC
+            {lim_clause}
+            """,
+            {"s": search_like, "sp": sales_person},
+            as_dict=True,
+        )
+    return rows
+
+
+@frappe.whitelist(methods=["POST"])
+def reassign_customer_sales_person(
+    customer: str,
+    sales_person: str,
+    percentage: float = 100,
+) -> dict:
+    """Atomically move a customer from their current sales_person(s) to a
+    new one. Strips all prior Sales Team rows then inserts a single fresh
+    row for `sales_person`. Bypasses Customer.save to dodge mandatory
+    validation on unrelated fields (e.g. Customer Country)."""
+    _require_manager()
+    if not customer or not sales_person:
+        frappe.throw(_("customer and sales_person required"))
+    frappe.db.sql(
+        """DELETE FROM `tabSales Team`
+           WHERE parent = %s AND parenttype = 'Customer'""",
+        (customer,),
+    )
+    row = frappe.new_doc("Sales Team")
+    row.parent = customer
+    row.parenttype = "Customer"
+    row.parentfield = "sales_team"
+    row.idx = 1
+    row.sales_person = sales_person
+    row.allocated_percentage = percentage
+    row.db_insert()
+    frappe.db.sql(
+        "UPDATE `tabCustomer` SET modified=%s WHERE name=%s",
+        (frappe.utils.now(), customer),
+    )
+    frappe.db.commit()
+    return {"customer": customer, "sales_person": sales_person}
+
+
+@frappe.whitelist()
+def driver_roster_overview() -> list[dict]:
+    """Flat list for the Van Driver Roster viewer: every Vansale user ×
+    their customers. Ordered by (user, customer_name). Empty drivers get
+    a single row with customer=None so the viewer can show "no
+    customers" for them explicitly rather than hiding them."""
+    _require_manager()
+    rows = frappe.db.sql(
+        """
+        SELECT vcu.user AS user,
+               u.full_name AS full_name,
+               vcu.sales_person AS sales_person,
+               c.name AS customer,
+               c.customer_name AS customer_name,
+               c.mobile_no AS mobile_no,
+               c.custom_visit_days AS visit_days
+        FROM `tabVansale Configuration User` vcu
+        JOIN `tabUser` u ON u.name = vcu.user
+        LEFT JOIN `tabSales Team` st
+            ON st.sales_person = vcu.sales_person AND st.parenttype = 'Customer'
+        LEFT JOIN `tabCustomer` c
+            ON c.name = st.parent AND c.disabled = 0
+        WHERE u.enabled = 1 AND vcu.sales_person IS NOT NULL AND vcu.sales_person != ''
+        ORDER BY u.full_name ASC, c.customer_name ASC
+        """,
+        as_dict=True,
+    )
+    return rows
+
+
+@frappe.whitelist()
+def resolve_user_sales_person(user: str) -> dict:
+    """Resolve a driver's Sales Person without exposing the
+    `Vansale Configuration User` child doctype (which inherits its
+    permissions from the System-Manager-only Vansale Configuration
+    parent) to Van Manager role users."""
+    _require_manager()
+    if not user:
+        return {"user": None, "sales_person": None}
+    return {"user": user, "sales_person": user_to_sales_person(user)}
+
+
+@frappe.whitelist()
+def list_assigned_customers(sales_person: str) -> list[dict]:
+    """Customers currently tagged to `sales_person`.
+
+    Mirrors `_list_customers_for_sales_person` under a manager-gated
+    endpoint so the admin assignment page doesn't have to hit
+    `frappe.client.get_list` (which is permission-checked per role and
+    fails for Van Manager without explicit Customer DocPerms).
+
+    Admin view — returns the full roster regardless of today's weekday
+    so operators see every assignment they can edit.
+    """
+    _require_manager()
+    if not sales_person:
+        return []
+    return _list_customers_for_sales_person(sales_person, visit_date=None)
+
+
+def _normalize_visit_days(days: list | str | None) -> str:
+    """Coerce incoming days payload to canonical `mon,tue,wed` CSV."""
+    if days is None:
+        return ""
+    if isinstance(days, str):
+        try:
+            parsed = json.loads(days)
+            if isinstance(parsed, list):
+                days = parsed
+            else:
+                days = [p.strip() for p in days.split(",") if p.strip()]
+        except json.JSONDecodeError:
+            days = [p.strip() for p in days.split(",") if p.strip()]
+    cleaned: list[str] = []
+    seen: set[str] = set()
+    for raw in days or []:
+        code = str(raw).strip().lower()
+        if code in VALID_WEEKDAYS and code not in seen:
+            cleaned.append(code)
+            seen.add(code)
+    return ",".join(cleaned)
+
+
+@frappe.whitelist(methods=["POST"])
+def set_customer_visit_days(customer: str, days: list | str | None = None) -> dict:
+    """Write `custom_visit_days` on a single Customer."""
+    _require_manager()
+    if not customer:
+        frappe.throw(_("customer required"))
+    canonical = _normalize_visit_days(days)
+    frappe.db.set_value("Customer", customer, "custom_visit_days", canonical, update_modified=True)
+    frappe.db.commit()
+    return {"customer": customer, "visit_days": canonical}
+
+
+@frappe.whitelist(methods=["POST"])
+def bulk_set_visit_days(customers: list | str | None = None, days: list | str | None = None) -> dict:
+    """Write `custom_visit_days` on many customers in one call."""
+    _require_manager()
+    customer_list = _coerce_customer_list(customers)
+    if not customer_list:
+        return {"updated": 0, "visit_days": ""}
+    canonical = _normalize_visit_days(days)
+    for c in customer_list:
+        frappe.db.set_value("Customer", c, "custom_visit_days", canonical, update_modified=True)
+    frappe.db.commit()
+    return {"updated": len(customer_list), "visit_days": canonical}
+
+
+@frappe.whitelist()
+def customer_summary(customer: str) -> dict:
+    """Name + phone for a single customer — manager-gated, used by the
+    assignment page to label freshly picked customers."""
+    _require_manager()
+    if not customer:
+        return {}
+    row = frappe.db.get_value(
+        "Customer",
+        customer,
+        ["customer_name", "mobile_no"],
+        as_dict=True,
+    )
+    return row or {}
+
+
 @frappe.whitelist(methods=["POST"])
 def bulk_assign_sales_person(
     sales_person: Optional[str] = None,
@@ -517,16 +817,35 @@ def bulk_assign_sales_person(
 
     assigned = 0
     skipped = 0
+    now = frappe.utils.now()
     for customer in customer_list:
-        doc = frappe.get_doc("Customer", customer)
-        if any((row.sales_person or "") == sp for row in (doc.sales_team or [])):
+        # Direct child-table insert bypasses Customer.save — which would
+        # otherwise trip on unrelated mandatory fields (e.g. customer
+        # country) on legacy rows and block the whole batch.
+        existing = frappe.db.exists(
+            "Sales Team",
+            {"parent": customer, "parenttype": "Customer", "sales_person": sp},
+        )
+        if existing:
             skipped += 1
             continue
-        doc.append("sales_team", {
-            "sales_person": sp,
-            "allocated_percentage": percentage,
-        })
-        doc.save(ignore_permissions=True)
+        max_idx = frappe.db.sql(
+            """SELECT COALESCE(MAX(idx), 0) FROM `tabSales Team`
+               WHERE parent = %s AND parenttype = 'Customer'""",
+            (customer,),
+        )[0][0]
+        row = frappe.new_doc("Sales Team")
+        row.parent = customer
+        row.parenttype = "Customer"
+        row.parentfield = "sales_team"
+        row.idx = (max_idx or 0) + 1
+        row.sales_person = sp
+        row.allocated_percentage = percentage
+        row.db_insert()
+        frappe.db.sql(
+            "UPDATE `tabCustomer` SET modified=%s WHERE name=%s",
+            (now, customer),
+        )
         assigned += 1
     frappe.db.commit()
     return {"assigned": assigned, "skipped": skipped, "sales_person": sp}
@@ -549,15 +868,23 @@ def bulk_unassign_sales_person(
         return {"unassigned": 0}
 
     count = 0
+    now = frappe.utils.now()
     for customer in customer_list:
-        doc = frappe.get_doc("Customer", customer)
-        removed = False
-        for row in list(doc.sales_team or []):
-            if (row.sales_person or "") == sp:
-                doc.remove(row)
-                removed = True
-        if removed:
-            doc.save(ignore_permissions=True)
+        # Same direct-delete approach as bulk_assign_sales_person: never
+        # load the Customer doc, so mandatory-field validation on
+        # unrelated fields can't block an unassignment.
+        deleted = frappe.db.sql(
+            """DELETE FROM `tabSales Team`
+               WHERE parent = %s AND parenttype = 'Customer'
+                 AND sales_person = %s""",
+            (customer, sp),
+        )
+        affected = frappe.db.sql("SELECT ROW_COUNT()")[0][0]
+        if affected:
+            frappe.db.sql(
+                "UPDATE `tabCustomer` SET modified=%s WHERE name=%s",
+                (now, customer),
+            )
             count += 1
     frappe.db.commit()
     return {"unassigned": count, "sales_person": sp}

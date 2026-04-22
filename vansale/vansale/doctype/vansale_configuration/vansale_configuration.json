@@ -12,6 +12,8 @@
   "column_break_company",
   "company",
   "branch",
+  "section_break_pricing",
+  "selling_price_list",
   "section_break_visits",
   "require_location",
   "section_break_resources",
@@ -53,6 +55,18 @@
    "fieldtype": "Link",
    "label": "Branch",
    "options": "Branch"
+  },
+  {
+   "fieldname": "section_break_pricing",
+   "fieldtype": "Section Break",
+   "label": "Pricing"
+  },
+  {
+   "fieldname": "selling_price_list",
+   "fieldtype": "Link",
+   "label": "Selling Price List",
+   "options": "Price List",
+   "description": "Van-level selling price list. Takes effect when a customer has no Customer-specific default price list. Falls back to Customer Group → Selling Settings when unset."
   },
   {
    "fieldname": "section_break_visits",

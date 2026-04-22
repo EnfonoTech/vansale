@@ -19,6 +19,7 @@ export interface ConfigDefaults {
   sales_person: string | null;
   sales_person_name: string | null;
   require_location?: boolean;
+  selling_price_list?: string | null;
 }
 
 export function configDefaults() {

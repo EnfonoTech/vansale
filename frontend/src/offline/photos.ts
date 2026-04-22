@@ -118,7 +118,14 @@ export async function resolveToRealUrl(placeholder: string | null | undefined): 
 
   // Rewrite every queue entry that pointed at this placeholder so the
   // drain engine doesn't try to re-upload a deleted blob.
-  for (const store of ["invoice_queue", "payment_queue", "return_queue", "visit_queue"] as const) {
+  for (const store of [
+    "invoice_queue",
+    "payment_queue",
+    "return_queue",
+    "visit_queue",
+    "customer_queue",
+    "stock_entry_queue",
+  ] as const) {
     const all = await (d.getAll as (s: typeof store) => Promise<Array<Record<string, unknown>>>)(
       store,
     );

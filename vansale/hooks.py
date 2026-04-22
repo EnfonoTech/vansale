@@ -50,6 +50,13 @@ permission_query_conditions = {
 # Before-validate hooks — force cost_center + warehouse to the user's
 # defaults on stock-affecting docs.
 doc_events = {
+    "Customer": {
+        "before_insert": "vansale.customer_hooks.auto_assign_sales_person",
+    },
+    "Vansale Configuration User": {
+        "after_insert": "vansale.customer_hooks.clear_module_active_cache",
+        "on_trash": "vansale.customer_hooks.clear_module_active_cache",
+    },
     "Sales Invoice": {
         "before_validate": [
             "vansale.van_defaults.override_cost_center_from_van",

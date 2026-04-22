@@ -58,9 +58,28 @@ def after_migrate() -> None:
     _ensure_role(VAN_USER_ROLE)
     _ensure_role(VAN_MANAGER_ROLE)
     _apply_role_permissions(VAN_USER_ROLE, VAN_USER_PERMISSIONS)
+    _apply_role_permissions(VAN_MANAGER_ROLE, VAN_MANAGER_PERMISSIONS)
     _reapply_user_permissions()
     _ensure_custom_fields()
     frappe.db.commit()
+
+
+# Van Manager = ops admin. Read-only on reference data + full write on
+# Customer so they can reorder the driver list / edit phone numbers, and
+# read on Sales Person so the Van Customer Assignment page's Link field
+# pickers resolve without hitting "Not permitted". Everything that
+# mutates assignments goes through manager-gated whitelisted endpoints
+# (see vansale/api/route.py), not direct DocType writes, so we don't
+# need Sales Team / Vansale Configuration perms on this role.
+VAN_MANAGER_PERMISSIONS: list[dict] = [
+    {"parent": "Customer", "read": 1, "write": 1, "create": 1, "submit": 0, "cancel": 0, "delete": 0, "print": 1, "email": 1, "report": 1, "export": 1, "share": 1},
+    {"parent": "Sales Person", "read": 1, "write": 0, "create": 0, "submit": 0, "cancel": 0, "delete": 0, "print": 0, "email": 0, "report": 1, "export": 0, "share": 0},
+    {"parent": "User", "read": 1, "write": 0, "create": 0, "submit": 0, "cancel": 0, "delete": 0, "print": 0, "email": 0, "report": 0, "export": 0, "share": 0},
+    {"parent": "Sales Invoice", "read": 1, "write": 0, "create": 0, "submit": 0, "cancel": 0, "delete": 0, "print": 1, "email": 0, "report": 1, "export": 1, "share": 0},
+    {"parent": "Payment Entry", "read": 1, "write": 0, "create": 0, "submit": 0, "cancel": 0, "delete": 0, "print": 1, "email": 0, "report": 1, "export": 1, "share": 0},
+    {"parent": "Van Daily Visit", "read": 1, "write": 0, "create": 0, "submit": 0, "cancel": 0, "delete": 0, "print": 1, "email": 0, "report": 1, "export": 0, "share": 0},
+    {"parent": "Van Visit Log", "read": 1, "write": 0, "create": 0, "submit": 0, "cancel": 0, "delete": 0, "print": 1, "email": 0, "report": 1, "export": 0, "share": 0},
+]
 
 
 # Custom fields owned by this app. Kept close to the migrate hook so the
@@ -77,6 +96,14 @@ VANSALE_CUSTOM_FIELDS: dict[str, list[dict]] = {
             "fieldtype": "Int",
             "insert_after": "default_sales_partner",
             "description": "Driver sees customers ordered ascending by this value. Leave blank to sort by name.",
+            "module": "Vansale",
+        },
+        {
+            "fieldname": "custom_visit_days",
+            "label": "Visit Days",
+            "fieldtype": "Data",
+            "insert_after": "custom_van_sort_order",
+            "description": "Lower-case CSV of weekday codes when this customer is visited: mon,tue,wed,thu,fri,sat,sun. Blank = visited every day.",
             "module": "Vansale",
         },
     ],

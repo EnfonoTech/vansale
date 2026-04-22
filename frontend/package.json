@@ -7,31 +7,36 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "type-check": "vue-tsc --noEmit"
+    "type-check": "vue-tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
-    "vue": "^3.4.21",
-    "vue-router": "^4.3.0",
-    "pinia": "^2.1.7",
-    "vue-i18n": "^9.13.1",
-    "idb": "^8.0.0",
-    "@capacitor/core": "^6.1.0",
     "@capacitor/app": "^6.0.0",
+    "@capacitor/core": "^6.1.0",
     "@capacitor/filesystem": "^6.0.0",
     "@capacitor/geolocation": "^6.0.0",
-    "@capacitor/preferences": "^6.0.0",
     "@capacitor/network": "^6.0.0",
+    "@capacitor/preferences": "^6.0.0",
     "@capacitor/splash-screen": "^6.0.0",
     "@capacitor/status-bar": "^6.0.0",
     "@fontsource-variable/manrope": "^5.0.21",
     "@fontsource-variable/plus-jakarta-sans": "^5.0.21",
-    "@fontsource/cairo": "^5.0.17"
+    "@fontsource/cairo": "^5.0.17",
+    "idb": "^8.0.0",
+    "pinia": "^2.1.7",
+    "vue": "^3.4.21",
+    "vue-i18n": "^9.13.1",
+    "vue-router": "^4.3.0"
   },
   "devDependencies": {
     "@types/node": "^20.11.30",
     "@vitejs/plugin-vue": "^5.0.4",
+    "fake-indexeddb": "^6.2.5",
+    "happy-dom": "^14.12.3",
     "typescript": "^5.4.3",
     "vite": "^5.2.6",
+    "vitest": "^1.6.1",
     "vue-tsc": "^2.0.7"
   }
 }

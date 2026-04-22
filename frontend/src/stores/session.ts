@@ -60,6 +60,7 @@ export const useSessionStore = defineStore("session", {
     currency: (s) => s.defaults?.currency ?? null,
     isVanUser: (s) => Boolean(s.defaults?.is_van_user),
     requireLocation: (s) => Boolean(s.defaults?.require_location),
+    vanPriceList: (s) => s.defaults?.selling_price_list ?? null,
   },
   actions: {
     setLogin(payload: { user: string; fullName: string; email: string; language?: string }) {

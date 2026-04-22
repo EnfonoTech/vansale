@@ -139,6 +139,17 @@ const routes: RouteRecordRaw[] = [
     meta: { requiresAuth: true, requiresPin: true },
   },
   {
+    // `:store` is the IDB store name (e.g. "invoice_queue"), `:id` the
+    // auto-incremented primary key. Coarse-grained on purpose — the
+    // view itself handles the per-store payload shape so we don't have
+    // to grow a route per queue type.
+    path: "/sync/edit/:store/:id",
+    name: "sync-edit-entry",
+    component: () => import("@/views/EditQueueEntryView.vue"),
+    meta: { requiresAuth: true, requiresPin: true },
+    props: true,
+  },
+  {
     path: "/more",
     name: "more",
     component: () => import("@/views/MoreView.vue"),

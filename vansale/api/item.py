@@ -73,13 +73,29 @@ def list_mine(limit: int = 100, search: Optional[str] = None, warehouse: Optiona
 def _customer_price_list(customer: Optional[str]) -> Optional[str]:
     """Resolve the effective selling Price List for a customer.
 
-    Priority: Customer.default_price_list → Customer Group.default_price_list →
-    Selling Settings.selling_price_list.
+    Priority (first hit wins):
+      1. ``Customer.default_price_list`` — customer-specific override.
+      2. ``Vansale Configuration.selling_price_list`` — van-level default
+         set by the Van Manager (e.g. different route pricing tiers).
+      3. ``Customer Group.default_price_list``.
+      4. ``Selling Settings.selling_price_list`` — site-wide fallback.
+
+    The van PL sits ABOVE Customer Group so a route operating on a
+    discounted tier doesn't get the group's sticker price when it hits
+    an unclassified customer.
     """
+    from vansale.api.me import current_user_van_price_list
+
     if customer:
         cust_pl = frappe.db.get_value("Customer", customer, "default_price_list")
         if cust_pl:
             return cust_pl
+
+    van_pl = current_user_van_price_list()
+    if van_pl:
+        return van_pl
+
+    if customer:
         cg = frappe.db.get_value("Customer", customer, "customer_group")
         if cg:
             cg_pl = frappe.db.get_value("Customer Group", cg, "default_price_list")

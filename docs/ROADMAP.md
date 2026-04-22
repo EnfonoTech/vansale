@@ -4,134 +4,117 @@
 
 - ✅ Shipped
 - 🟡 In progress / partial
-- 🔵 Next up
-- ⚪ Planned
+- 🔵 Next up (committed)
+- ⚪ Planned (later)
 
 ---
 
-## ✅ Shipped (Phase 1–5 + Van User pattern)
+## ✅ Shipped
 
 | Area | What |
 |---|---|
 | Auth | Email+PW login, PIN unlock, stable `api_secret`, offline PIN hash |
 | Offline | IDB queue, ordered drain, signature/photo uploader, `ApiError`/network split |
 | Sales | Invoice create + submit, Payment Entry, dashboard tiles, idempotent `client_id` |
-| Scoping | Vansale Configuration → User Permissions (Company / Warehouse / Cost Center defaults) + `Van User` role + list-view filters + before-validate cost-center guard |
+| Scoping | Vansale Configuration → User Permissions (Company / Warehouse / Cost Center) + `Van User` role + list-view filters + before-validate cost-center guard |
+| Routing | Van Customer Assignment page (day-wise table, driver dropdown, reassign flow, auto-assign `before_insert` hook w/ cached module-active check + site_config opt-out) |
+| Routing | Van Driver Roster page (day-wise grouped read-only viewer, in workspace) |
 | Deploy | PWA pipeline; Capacitor scripts (keystore + build-customer + gradle patch) |
 | Admin | Workspace, `admin.set_user_password` helper, testing checklist |
 
 ---
 
-## 🟡 In progress / partial
+## 🔵 Committed roadmap (current focus)
 
-| Area | Status |
-|---|---|
-| UI polish | Utilitarian baseline; redesign pass scoped below |
-| Arabic / RTL | Locale keys present; not smoke-tested |
-| Item search | By name/code works; barcode scan not wired into InvoiceForm |
+### 1. Offline hardening
 
----
+- [ ] Extend IDB queue coverage — every mutation path (Customer create, Payment Entry, Sales Return, Stock Entry, visit logs) must queue cleanly when offline
+- [ ] Conflict resolution — server rejects replay → surface reason to user, let them retry/edit/discard
+- [ ] Drain observability — "N pending" badge on dashboard + drawer listing each queued op w/ age + last error
+- [ ] Long-offline resilience — auto-drain retries with exponential backoff, cap on queue size, purge-with-confirm for orphaned rows
+- [ ] Unit tests for `offline/*.ts` processors (happy path + server-rejection path + network-loss mid-drain)
+- [ ] Server idempotency tests (`client_id` dedup guarantees across Sales Invoice, Payment Entry, Visit Log)
 
-## 🔵 Next up (next session)
+### 2. ZATCA offline sync
 
-### 1. Route planning — proper end-to-end
+- [ ] Stamp every queued Sales Invoice w/ ZATCA-required fields at CREATE time (not submit) — UUID, invoice_hash precursors, cryptographic stamp inputs staged client-side
+- [ ] Offline QR generation — TLV fields computable locally, embed in print without waiting for server
+- [ ] On drain, server re-signs + replaces the preliminary QR with ZATCA-authorized one; printer gets updated copy for re-print if invoice pulled up later
+- [ ] Reconcile `zatca_integration` app hook chain with our `custom_client_id` field — verify no hook override breaks signing order
+- [ ] Failure mode: ZATCA reporting endpoint rejects a batched invoice → mark invoice w/ `zatca_status=rejected` + error + retry UI
 
-**Backend (mostly done):**
-- `Van Route Plan` + child `Van Route Stop` + `Van Visit Log` DocTypes ✅
-- `route.today`, `start_visit`, `end_visit`, `create_plan`, `daily_report` endpoints ✅
+### 3. Reports (driver + manager)
 
-**Frontend gaps to close:**
-- [ ] **Manager: create today's plan for a van user** — desk form works now, but add a simpler mobile/web workspace shortcut with a single-page planner (pick driver, pick warehouse, add customer stops with planned time)
-- [ ] **Driver: RouteTodayView shows the list of stops** ✅ (exists) — add:
-  - Tap a stop → opens stop detail with "Navigate" button (open Google Maps at customer address)
-  - "Start visit" logs `started_at` + captures GPS
-  - From a stop, "New Invoice" pre-fills customer; "Collect Payment" pre-fills customer
-  - "End visit" → capture signature + GPS + sync invoice/payment IDs back to the stop
-  - Stop status transitions: pending → in_progress → done / skipped
-- [ ] **Reorder stops** via drag
-- [ ] **Route map view** — all stops pinned on a mini-map (OpenLayers or Leaflet, offline tiles cached)
-- [ ] **Daily report view** — read-only summary at end of shift (total visits, sales, collections, returns, missed stops)
-- [ ] **Notification** when a stop is scheduled ≤15 min ahead (PWA push / native local notification)
+- [ ] **Daily Closing Sheet** — per-driver EOD — collections (cash + card breakdown), sales (invoice count + total), returns (count + value), cash-on-hand reconciled vs expected, signature capture, print
+- [ ] **Stock Reconciliation EOD** — van start stock (from van start snapshot) vs van end stock (from stock ledger - sold - returned) → variance report per item, flag shrinkage > threshold
+- [ ] **Commission Report per Sales Person** — filter by date range, group by sales person, columns: invoices, gross sales, returns, net sales, commission rate, commission amount. Source of truth = Sales Invoice `Sales Team` child (already populated by auto-assign hook)
 
-### 2. UI redesign (proposal below — awaiting confirmation)
+### 4. Bluetooth thermal printer direct print
 
-See **"UI redesign scope"** section.
+- [ ] Replace Android print-dialog path with direct ESC/POS over `@capacitor-community/bluetooth-le` (already installed)
+- [ ] Printer discovery + pairing UI in Settings (list discovered devices, save last-used MAC to localStorage)
+- [ ] ESC/POS command builder (header, item lines w/ qty × rate × amount, totals, tax breakdown, QR for ZATCA, signature image, footer)
+- [ ] Auto-print on invoice submit + payment entry (configurable toggle)
+- [ ] Retry + fallback — if print fails, keep invoice submitted, surface "Reprint" action on invoice detail
+- [ ] Paper width variants — 58mm + 80mm
 
-### 3. First signed APK
+### 5. Sales Return UI
 
-- [ ] `scripts/generate-keystore.sh demo`
-- [ ] `scripts/build-customer.sh demo` → `dist/vansale-demo-1.0.X.apk`
-- [ ] Install + run through this doc's testing checklist
-- [ ] Upload to GitHub release
+- [ ] Return flow entry point — from Invoice detail view → "Return items" button
+- [ ] Pick-items-from-invoice screen — list original invoice lines w/ original qty + return qty input (default 0, max = original)
+- [ ] Reason dropdown per line (damaged / expired / wrong item / customer refusal / other) + free-text note
+- [ ] Auto-post Sales Invoice w/ `is_return=1`, negative amounts, linked `return_against` — server already supports; UI wires it up
+- [ ] Offline-safe — queue return via same `client_id` idempotency as regular invoice
+- [ ] Return receipt print (BT thermal once item 4 lands)
+- [ ] List view — "Returns" tab in dashboard showing recent returns w/ status
 
----
+### 6. PDF invoice download
 
-## ⚪ Planned
+- [ ] Server endpoint `vansale.api.invoice.pdf(invoice_name)` — renders ERPNext standard Sales Invoice print format → PDF bytes
+- [ ] Client: Filesystem plugin (Capacitor) writes PDF to Documents/Vansale/ + opens share sheet
+- [ ] Web fallback — browser triggers download via blob URL
+- [ ] Cache last 20 PDFs locally for offline re-view
+- [ ] "Download PDF" button on invoice detail view
 
-### Domain features
-- **Sales Return** UI (backend done — need pick-items-from-invoice flow)
-- **PDF download** for Sales Invoice (Filesystem-backed on native)
-- **Barcode scan** wired into invoice form (helper exists)
-- **Receipt print** over Bluetooth ESC/POS on invoice submit (helper exists)
-- **Van stock transfer** UI (main warehouse → van)
-- **Customer address picker** with GPS-assisted "nearest customer" hint
-- **Price list** per customer (currently uses `Item.standard_rate`)
-- **Discounts** + free-item promotions
+### 7. Price list in Vansale Configuration
 
-### Compliance
-- **ZATCA** (KSA e-invoice) QR + compliance fields on every submitted Sales Invoice (the `zatca_integration` app is already on `trading` — need to verify our custom_client_id field doesn't break their hook chain)
-- **Audit log** for offline events (Vansale Outbox is in place; add a simple report)
+- [ ] Add `price_list` Link field to Vansale Configuration (default blank → fallback to `Item.standard_rate` current behavior)
+- [ ] Boot payload exposes `price_list` + bundled `Item Price` rows for items in van's warehouse (cached per config)
+- [ ] InvoiceForm item-rate lookup priority:  `Vansale Configuration.price_list` Item Price → else `Item.standard_rate`
+- [ ] UI shows price source subtle pill ("Configured" vs "Default") on item line
+- [ ] Price list respects validity dates (`valid_from` / `valid_upto`)
+- [ ] Offline — item prices pre-downloaded during boot/sync; no network needed on invoice create
 
-### Manager / ops
-- **Daily report** view (backend done)
-- **Van stock reconciliation** — physical count vs ledger
-- **Expense claims** (ERPNext HRMS integration for driver expenses: fuel, tolls, meals)
-- **Trip sheet** print-out at end of shift
-- **Multi-van dashboard** for fleet managers
+### 8. UI redesign (proposal — awaiting approval)
 
-### Quality + ops
-- **Unit tests** for `offline/*.ts` processors
-- **Server tests** for idempotency (re-post same `client_id`, verify dedup)
-- **Playwright E2E** for offline → drain → verify
-- **`~/.claude/skills/vansale/SKILL.md`** — mirror of the fatehhr skill so future agents inherit context
+One PR per phase, keep data layer untouched (`api/*`, `offline/*`, `stores/*`).
+
+- [ ] **Design tokens + brand accent** — color scale, shadows, radii, motion tokens
+- [ ] **Icon set** — 24×24 stroke 1.75 currentColor, `Icon.vue` pattern mirrored from fatehhr
+- [ ] **Bottom nav bar** — 5 icons: Home / Route / Sales / Stock / More (replaces dashboard grid)
+- [ ] **Skeleton loaders + proper empty states + toast notifications** — replace "Loading…" text + inline messages
+- [ ] **Typography scale** — 12 / 14 / 16 / 20 / 24, system-font stack
 
 ---
 
-## UI redesign scope (proposal)
+## ⚪ Out of scope for this roadmap
 
-Current UI is utility-grade. A focused redesign — not a rewrite — can lift it significantly with limited risk.
+(Previously planned — parked for later review once the 8 items above ship.)
 
-### What changes (mobile-first, no layout rewrite of individual forms)
-
-1. **Bottom navigation bar** (5 icons): Home / Route / Sales / Stock / More — replaces the grid of buttons on the dashboard
-2. **Design tokens** (already exist; needs a theme pass): add a visual accent (brand gradient on primary), shadow scale, richer neutrals
-3. **Icon set** (reuse fatehhr's `Icon.vue` pattern — 24×24 stroke 1.75, currentColor)
-4. **Card shadows + density** — tighter cards, bigger tap targets (44px min)
-5. **Empty states** — every list has a proper empty illustration + CTA
-6. **Loading states** — skeleton shimmers instead of "Loading…"
-7. **Toasts** — for save / queue / drain feedback (currently inline messages)
-8. **Typography** — adopt a system-font stack with a deliberate scale (12/14/16/20/24)
-9. **Arabic / RTL pass** — verify flip on every view
-10. **Dashboard hero tile** — combine today's sales + collection into one hero with sparkline (skipped for now — needs a chart lib decision)
-
-### What doesn't change
-- Data layer (`api/*`, `offline/*`, `stores/*`)
-- Router structure
-- API surface
-
-### Delivery approach
-- One PR per phase (tokens → icons → bottom nav → empty states → toasts → polish)
-- Keep existing views behind the scenes; swap components in-place
-- Each phase passes `pnpm type-check` + browser smoke before ship
-
-Confirm the approach + I'll start with tokens + icons (one commit, ~30 mins each).
+- Route planning frontend end-to-end (stop detail, navigate, map view, drag reorder, notifications)
+- Barcode scan wire-up, Van stock transfer UI, Customer address picker w/ GPS
+- Discounts + free-item promos
+- Arabic/RTL smoke pass (tokens landing first)
+- Playwright E2E offline → drain
+- Multi-van dashboard, trip sheet, expense claims (HRMS)
+- `~/.claude/skills/vansale/SKILL.md` agent-context mirror
 
 ---
 
-## Out of scope (for now)
+## Out of scope (permanent)
 
-- Native iOS build (we target Android only)
-- Multi-tenant / multi-company per van user (one van = one company)
-- Complex tax rules beyond what ERPNext's default tax engine provides
-- Real-time chat between driver and manager
-- Marketing features (promotions, campaigns, loyalty)
+- Native iOS build (Android-only target)
+- Multi-tenant / multi-company per van user
+- Complex tax rules beyond ERPNext default engine
+- Real-time chat driver ↔ manager
+- Marketing / promotions / loyalty

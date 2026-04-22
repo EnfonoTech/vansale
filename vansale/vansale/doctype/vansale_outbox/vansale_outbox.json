@@ -22,7 +22,7 @@
    "fieldname": "event_type",
    "fieldtype": "Select",
    "label": "Event Type",
-   "options": "invoice\npayment\nreturn\nvisit\nstock_adjust",
+   "options": "invoice\npayment\nreturn\nvisit\nstock_adjust\ncustomer",
    "reqd": 1,
    "in_list_view": 1
   },

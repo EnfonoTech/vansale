@@ -11,24 +11,29 @@
  * entry for the user to RETRY or DISMISS. **Never silently delete user
  * work** — commandment 3.
  */
-import { ApiError, NetworkError } from "@/app/frappe";
 import { db, type QueueStoreName, type QueuedBase } from "./db";
 import { getAllEntries, updateEntry, deleteEntry } from "./queue";
 import { resolveToRealUrl } from "./photos";
 import { resolveSignatureToRealUrl } from "./signatures";
+import { classifyError } from "./classify";
 
 export type DrainProcessor<T extends QueuedBase> = (entry: T) => Promise<{ refName: string }>;
 
-const UNRECOVERABLE = [
-  /not\s+found/i,
-  /locked\s+by/i,
-  /already\s+submitted/i,
-  /invalid\s+status/i,
-  /permission/i,
-];
+/**
+ * Exponential backoff cap. Caps the retry window at 30 minutes so a
+ * permanently-broken entry doesn't starve the device but also doesn't
+ * chew battery polling every few seconds.
+ */
+const BACKOFF_CAP_MS = 30 * 60_000;
+const BACKOFF_BASE_MS = 60_000;
 
-function isUnrecoverable(msg: string): boolean {
-  return UNRECOVERABLE.some((re) => re.test(msg));
+/**
+ * `attempts` is the count PRIOR to this failure — so the very first
+ * failure (attempts=0) waits 1 minute, then 2, 4, 8, 16, 30 (capped).
+ */
+function computeBackoff(attempts: number): number {
+  const raw = BACKOFF_BASE_MS * Math.pow(2, Math.max(0, attempts));
+  return Math.min(raw, BACKOFF_CAP_MS);
 }
 
 function placeholders(payload: Record<string, unknown>): string[] {
@@ -75,6 +80,12 @@ export async function drainStore<T extends QueuedBase & { payload: Record<string
       summary.skipped += 1;
       continue;
     }
+    // Exponential-backoff gate — skip entries whose retry window hasn't
+    // opened yet. Prior failure stamped `nextAttemptAt`.
+    if (typeof entry.nextAttemptAt === "number" && entry.nextAttemptAt > Date.now()) {
+      summary.skipped += 1;
+      continue;
+    }
     try {
       await resolvePlaceholders(entry);
       // Re-read so we work with the rewritten payload.
@@ -95,49 +106,64 @@ export async function drainStore<T extends QueuedBase & { payload: Record<string
       summary.processed += 1;
       void res;
     } catch (err) {
-      const next: T = { ...entry, attempts: (entry.attempts ?? 0) + 1 };
-      if (err instanceof ApiError) {
-        const msg = err.serverMessage ?? err.message;
-        next.lastError = msg;
-        if (isUnrecoverable(msg)) {
-          next.status = "pending";
-          await updateEntry(store, next);
-          summary.failed += 1;
-          continue;
-        }
-        // Other ApiErrors — still surface to user but keep pending for retry.
-        await updateEntry(store, next);
-        summary.failed += 1;
+      const classified = classifyError(err);
+
+      // Server already has this clientId — our local entry is redundant.
+      // Delete it and count as processed so the user's "pending" counter
+      // drops as expected.
+      if (classified.treatAsSuccess && typeof entry.id === "number") {
+        await deleteEntry(store, entry.id);
+        summary.processed += 1;
         continue;
       }
-      if (err instanceof NetworkError) {
-        next.lastError = "Offline";
-        await updateEntry(store, next);
-        summary.skipped += 1;
-        continue;
-      }
-      next.lastError = err instanceof Error ? err.message : String(err);
+
+      const priorAttempts = entry.attempts ?? 0;
+      const next: T = {
+        ...entry,
+        attempts: priorAttempts + 1,
+        nextAttemptAt: Date.now() + computeBackoff(priorAttempts),
+        lastError: classified.message,
+        errorKind: classified.kind,
+      };
+
+      // Network = transient → `skipped` (no user-facing error). All other
+      // classifications surface to the user via the sync-errors view.
+      const bucket: "skipped" | "failed" = classified.kind === "network" ? "skipped" : "failed";
       await updateEntry(store, next);
-      summary.failed += 1;
+      summary[bucket] += 1;
     }
   }
   return summary;
 }
 
 export interface DrainResult {
+  customers: Awaited<ReturnType<typeof drainStore>>;
+  stockEntries: Awaited<ReturnType<typeof drainStore>>;
   invoices: Awaited<ReturnType<typeof drainStore>>;
   payments: Awaited<ReturnType<typeof drainStore>>;
   returns: Awaited<ReturnType<typeof drainStore>>;
   visits: Awaited<ReturnType<typeof drainStore>>;
 }
 
+/**
+ * Drain order — customers MUST run first so any downstream invoice/
+ * payment/return that references a brand-new customer has a concrete
+ * `Customer.name` to point at. Stock entries (van replenishments) run
+ * next so that invoices drafted against newly-loaded items don't throw
+ * "negative stock" on the server. Once those are online we replay the
+ * rest in cause → effect order: invoices → payments → returns → visits.
+ */
 export async function drainAll(): Promise<DrainResult> {
+  const { drainCustomer } = await import("./processors/customer");
+  const { drainStockEntry } = await import("./processors/stock_entry");
   const { drainInvoice } = await import("./processors/invoice");
   const { drainPayment } = await import("./processors/payment");
   const { drainReturn } = await import("./processors/return");
   const { drainVisit } = await import("./processors/visit");
 
   return {
+    customers: await drainStore("customer_queue", drainCustomer),
+    stockEntries: await drainStore("stock_entry_queue", drainStockEntry),
     invoices: await drainStore("invoice_queue", drainInvoice),
     payments: await drainStore("payment_queue", drainPayment),
     returns: await drainStore("return_queue", drainReturn),
@@ -157,6 +183,8 @@ export async function flagOrphans(): Promise<number> {
     "payment_queue",
     "return_queue",
     "visit_queue",
+    "customer_queue",
+    "stock_entry_queue",
   ] as const) {
     const all = (await (d.getAll as (s: typeof store) => Promise<unknown[]>)(store)) as Array<{
       id?: number;

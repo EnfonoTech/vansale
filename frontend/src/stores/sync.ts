@@ -6,6 +6,7 @@
 import { defineStore } from "pinia";
 import { totalPending } from "@/offline/queue";
 import { drainAll, flagOrphans } from "@/offline/drain";
+import { queueUtilization, maxUtilization, type WorstUtilization } from "@/offline/capacity";
 import { isOnline } from "@/app/online";
 
 interface State {
@@ -13,13 +14,24 @@ interface State {
   lastDrainAt: number | null;
   lastError: string | null;
   draining: boolean;
+  /** Worst-case queue fullness — drives the SyncBadge capacity pill.
+   *  `null` until the first `refresh()` completes. */
+  capacity: WorstUtilization | null;
 }
 
 export const useSyncStore = defineStore("sync", {
-  state: (): State => ({ pending: 0, lastDrainAt: null, lastError: null, draining: false }),
+  state: (): State => ({
+    pending: 0,
+    lastDrainAt: null,
+    lastError: null,
+    draining: false,
+    capacity: null,
+  }),
   actions: {
     async refresh() {
       this.pending = await totalPending();
+      const util = await queueUtilization();
+      this.capacity = maxUtilization(util);
     },
     async requestDrain(): Promise<void> {
       if (this.draining || !isOnline()) return;
@@ -30,7 +42,12 @@ export const useSyncStore = defineStore("sync", {
         const res = await drainAll();
         this.lastDrainAt = Date.now();
         const totalFailed =
-          res.invoices.failed + res.payments.failed + res.returns.failed + res.visits.failed;
+          res.customers.failed +
+          res.stockEntries.failed +
+          res.invoices.failed +
+          res.payments.failed +
+          res.returns.failed +
+          res.visits.failed;
         if (totalFailed > 0) this.lastError = `${totalFailed} entr${totalFailed === 1 ? "y" : "ies"} needs attention`;
       } catch (err) {
         this.lastError = err instanceof Error ? err.message : String(err);

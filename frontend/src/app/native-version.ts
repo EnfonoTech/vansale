@@ -3,5 +3,5 @@
  * Do not edit by hand — bump-version keeps this in lockstep with the
  * Android `versionCode` / `versionName`. See `frappe-vue-pwa` §5 rule 15.
  */
-export const NATIVE_VERSION = "1.0.23";
-export const NATIVE_VERSION_CODE = 24;
+export const NATIVE_VERSION = "1.0.24";
+export const NATIVE_VERSION_CODE = 25;

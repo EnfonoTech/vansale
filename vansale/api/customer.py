@@ -7,8 +7,51 @@ from typing import Optional
 import frappe
 from frappe import _
 
-from vansale.api.datetime_util import naive_site_to_utc_iso
+from vansale.api.datetime_util import naive_site_to_utc_iso, parse_client_ts
 from vansale.api.me import current_user_sales_person
+
+
+def _existing_customer_by_client_id(client_id: str | None) -> Optional[str]:
+    """Look up a previously-created Customer by the offline client_id.
+
+    Mirrors the `invoice.save` pattern — Vansale Outbox is the single
+    source of truth for idempotency. Returns the Customer.name if the
+    outbox row still points at a live Customer, else None (stale row).
+    """
+    if not client_id:
+        return None
+    name = frappe.db.get_value(
+        "Vansale Outbox",
+        {"client_id": client_id, "event_type": "customer"},
+        "ref_name",
+    )
+    if name and frappe.db.exists("Customer", name):
+        return name
+    return None
+
+
+def _record_customer_outbox(
+    client_id: str | None,
+    ref_name: str,
+    posting_ts: str | None,
+    payload: dict,
+) -> None:
+    if not client_id:
+        return
+    if frappe.db.exists("Vansale Outbox", client_id):
+        doc = frappe.get_doc("Vansale Outbox", client_id)
+    else:
+        doc = frappe.new_doc("Vansale Outbox")
+        doc.client_id = client_id
+    doc.event_type = "customer"
+    doc.user = frappe.session.user
+    doc.client_ts = parse_client_ts(posting_ts) if posting_ts else None
+    doc.drained_at = frappe.utils.now_datetime()
+    doc.status = "processed"
+    doc.ref_doctype = "Customer"
+    doc.ref_name = ref_name
+    doc.payload_json = frappe.as_json(payload)
+    doc.save(ignore_permissions=True)
 
 
 _LIST_FIELDS = [
@@ -158,8 +201,16 @@ def create(
     building_number: str | None = None,
     additional_number: str | None = None,
     district: str | None = None,
+    client_id: str | None = None,
+    posting_ts: str | None = None,
 ) -> dict:
     """Create a Customer + optional primary Address.
+
+    Idempotent via `client_id` (optional) — when the offline queue
+    replays a create, the server returns the previously-persisted
+    Customer instead of creating a duplicate. The lookup uses Vansale
+    Outbox (event_type="customer"), matching the invoice/payment/
+    sales_return pattern.
 
     B2B (customer_type="b2b") requires address_line1 + city and, for KSA
     ZATCA Phase 2 compliance, a **building number** (4-digit) on the
@@ -173,6 +224,21 @@ def create(
     """
     if not customer_name:
         frappe.throw(_("Customer name required"))
+
+    # Idempotent replay — return the earlier Customer if the same
+    # client_id already drained. Clients on the offline queue retry
+    # after network loss; without this guard we'd create duplicates.
+    if client_id:
+        prior = _existing_customer_by_client_id(client_id)
+        if prior:
+            doc = frappe.get_doc("Customer", prior)
+            return {
+                "name": doc.name,
+                "customer_name": doc.customer_name,
+                "customer_type": doc.customer_type,
+                "address": doc.customer_primary_address,
+                "idempotent_replay": True,
+            }
     ctype = (customer_type or "b2c").lower()
     is_b2b = ctype == "b2b"
     if is_b2b:
@@ -262,6 +328,22 @@ def create(
         frappe.db.set_value("Customer", doc.name, "customer_primary_address", address_name)
 
     frappe.db.commit()
+
+    # Record the outbox row AFTER commit so a rolled-back insert doesn't
+    # leave a ghost idempotency key.
+    if client_id:
+        _record_customer_outbox(
+            client_id,
+            doc.name,
+            posting_ts,
+            {
+                "customer_name": customer_name,
+                "customer_type": ctype,
+                "address": address_name,
+                "mobile_no": mobile_no,
+            },
+        )
+
     return {
         "name": doc.name,
         "customer_name": doc.customer_name,

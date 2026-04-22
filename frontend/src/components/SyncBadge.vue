@@ -25,9 +25,25 @@ const label = computed(() => {
   return `${sync.pending} pending`;
 });
 
-const tone = computed(() =>
-  !online.value ? "offline" : sync.lastError ? "warn" : sync.pending === 0 ? "ok" : "info",
-);
+// Capacity pressure outranks everything except an actual drain error —
+// a queue that's atCap is about to start rejecting user work, so the
+// badge must show red even when we're merely "info" otherwise.
+const tone = computed(() => {
+  if (!online.value) return "offline";
+  if (sync.capacity?.atCap) return "danger";
+  if (sync.lastError) return "warn";
+  if (sync.capacity?.nearCap) return "warn";
+  if (sync.pending === 0) return "ok";
+  return "info";
+});
+
+const capacityHint = computed(() => {
+  const c = sync.capacity;
+  if (!c) return "";
+  if (c.atCap) return `Queue full (${c.count}/${c.cap}) — go online to drain`;
+  if (c.nearCap) return `${c.count}/${c.cap} queued — drain soon`;
+  return "";
+});
 
 function onTap() {
   if (sync.pending > 0 || sync.lastError) {
@@ -39,9 +55,18 @@ function onTap() {
 </script>
 
 <template>
-  <button type="button" class="sync-badge" :data-tone="tone" @click="onTap">
+  <button
+    type="button"
+    class="sync-badge"
+    :data-tone="tone"
+    :title="capacityHint || undefined"
+    @click="onTap"
+  >
     <span class="dot" />
     <span class="text">{{ label }}</span>
+    <span v-if="sync.capacity?.atCap || sync.capacity?.nearCap" class="cap-chip">
+      {{ sync.capacity.count }}/{{ sync.capacity.cap }}
+    </span>
   </button>
 </template>
 
@@ -70,7 +95,20 @@ function onTap() {
 .sync-badge[data-tone="warn"] .dot {
   background: #fde68a;
 }
+.sync-badge[data-tone="danger"] {
+  background: rgba(220, 38, 38, 0.85);
+}
+.sync-badge[data-tone="danger"] .dot {
+  background: #fee2e2;
+}
 .sync-badge[data-tone="offline"] {
   background: rgba(0, 0, 0, 0.25);
+}
+.cap-chip {
+  font-size: 0.62rem;
+  padding: 0.05rem 0.35rem;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.25);
+  font-variant-numeric: tabular-nums;
 }
 </style>

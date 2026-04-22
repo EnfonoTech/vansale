@@ -81,6 +81,7 @@ def config_defaults() -> dict:
     van_code = cfg_user.parent if cfg_user else None
     sales_person = cfg_user.sales_person if cfg_user else None
     require_location = False
+    selling_price_list: str | None = None
     if van_code:
         # require_location is new (v1.0.12); guard with has_field so old sites don't crash
         try:
@@ -90,6 +91,14 @@ def config_defaults() -> dict:
                 )
         except Exception:
             require_location = False
+        # selling_price_list is new (v1.0.18); same has_field guard.
+        try:
+            if frappe.get_meta("Vansale Configuration").has_field("selling_price_list"):
+                selling_price_list = (
+                    frappe.db.get_value("Vansale Configuration", van_code, "selling_price_list") or None
+                )
+        except Exception:
+            selling_price_list = None
     sales_person_name = None
     if sales_person:
         sales_person_name = frappe.db.get_value("Sales Person", sales_person, "sales_person_name") or sales_person
@@ -117,6 +126,7 @@ def config_defaults() -> dict:
         "sales_person": sales_person,
         "sales_person_name": sales_person_name,
         "require_location": require_location,
+        "selling_price_list": selling_price_list,
     }
 
 
@@ -139,6 +149,36 @@ def user_to_sales_person(user: str | None) -> str | None:
         {"user": user},
         "sales_person",
     )
+
+
+def user_to_van_config(user: str | None) -> str | None:
+    """Return the Vansale Configuration van_code a user is assigned to."""
+    if not user:
+        return None
+    return frappe.db.get_value(
+        "Vansale Configuration User",
+        {"user": user},
+        "parent",
+    )
+
+
+def current_user_van_price_list() -> str | None:
+    """Return the `selling_price_list` configured on the current user's van.
+
+    Used by `item._customer_price_list` to slot van-wide pricing between
+    the Customer-specific default and Customer Group defaults. Guarded
+    with `has_field` so older sites that haven't migrated yet keep
+    working (the field lands in the v3 doctype bump).
+    """
+    van = user_to_van_config(frappe.session.user)
+    if not van:
+        return None
+    try:
+        if not frappe.get_meta("Vansale Configuration").has_field("selling_price_list"):
+            return None
+    except Exception:
+        return None
+    return frappe.db.get_value("Vansale Configuration", van, "selling_price_list") or None
 
 
 @frappe.whitelist(methods=["GET"])
