@@ -2,6 +2,7 @@ import { apiCall } from "./client";
 import { db, type CachedCustomer } from "@/offline/db";
 import { apiBase } from "@/app/platform";
 import { getCredentials, NetworkError, saveBlobToDevice } from "@/app/frappe";
+import { isOnline } from "@/app/online";
 
 export interface CustomerRow {
   name: string;
@@ -20,11 +21,68 @@ export interface CustomerDetail extends CustomerRow {
   outstanding: number;
 }
 
+/**
+ * Offline-aware customer list.
+ *
+ * Network-first with cache write-through on success, cache fallback on
+ * NetworkError. Search is applied locally against the cached set so
+ * offline users can still filter by name / mobile.
+ */
 export async function listMine(search?: string, limit = 50): Promise<CustomerRow[]> {
   const qs = new URLSearchParams();
   qs.set("limit", String(limit));
   if (search) qs.set("search", search);
-  return apiCall<CustomerRow[]>("GET", `vansale.api.customer.list_mine?${qs.toString()}`);
+
+  if (!isOnline()) {
+    return await _listFromCache(search, limit);
+  }
+  try {
+    const rows = await apiCall<CustomerRow[]>("GET", `vansale.api.customer.list_mine?${qs.toString()}`);
+    if (!search) void _writeCache(rows).catch(() => {});
+    return rows;
+  } catch (err) {
+    if (err instanceof NetworkError) return await _listFromCache(search, limit);
+    throw err;
+  }
+}
+
+async function _listFromCache(search: string | undefined, limit: number): Promise<CustomerRow[]> {
+  const d = await db();
+  const all = await d.getAll("customer_cache");
+  const rows = all.map((c) => (c.raw as unknown as CustomerRow) ?? {
+    name: c.name,
+    customer_name: c.customer_name,
+    mobile_no: c.mobile_no,
+    territory: c.territory,
+  });
+  const q = (search ?? "").trim().toLowerCase();
+  const filtered = q
+    ? rows.filter(
+        (r) =>
+          (r.customer_name ?? "").toLowerCase().includes(q) ||
+          (r.mobile_no ?? "").toLowerCase().includes(q) ||
+          (r.name ?? "").toLowerCase().includes(q),
+      )
+    : rows;
+  return filtered.slice(0, limit);
+}
+
+async function _writeCache(rows: CustomerRow[]): Promise<void> {
+  const d = await db();
+  const tx = d.transaction("customer_cache", "readwrite");
+  for (const r of rows) {
+    const entry: CachedCustomer = {
+      name: r.name,
+      customer_name: r.customer_name,
+      mobile_no: r.mobile_no,
+      territory: r.territory,
+      outstanding: 0,
+      cachedAt: Date.now(),
+      raw: r as unknown as Record<string, unknown>,
+    };
+    await tx.store.put(entry);
+  }
+  await tx.done;
 }
 
 export async function detail(name: string): Promise<CustomerDetail> {
@@ -143,22 +201,11 @@ export async function create(payload: CustomerCreatePayload): Promise<CustomerCr
 
 /** Populate the local cache (online only). Used on dashboard refresh. */
 export async function refreshCache(): Promise<CustomerRow[]> {
-  const rows = await listMine(undefined, 200);
-  const d = await db();
-  const tx = d.transaction("customer_cache", "readwrite");
-  for (const r of rows) {
-    const entry: CachedCustomer = {
-      name: r.name,
-      customer_name: r.customer_name,
-      mobile_no: r.mobile_no,
-      territory: r.territory,
-      outstanding: 0,
-      cachedAt: Date.now(),
-      raw: r as unknown as Record<string, unknown>,
-    };
-    await tx.store.put(entry);
-  }
-  await tx.done;
+  const rows = await apiCall<CustomerRow[]>(
+    "GET",
+    `vansale.api.customer.list_mine?limit=200`,
+  );
+  await _writeCache(rows);
   return rows;
 }
 

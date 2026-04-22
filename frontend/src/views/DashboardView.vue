@@ -10,6 +10,7 @@ import {
   type TodayCollection,
   type ActivityRow,
 } from "@/api/dashboard";
+import { warmCaches } from "@/offline/warm";
 import Icon from "@/components/Icon.vue";
 import SarSymbol from "@/components/SarSymbol.vue";
 
@@ -66,6 +67,11 @@ async function load() {
   } finally {
     loading.value = false;
   }
+
+  // Warm the offline caches opportunistically so the catalog + customer
+  // lists stay usable when the device loses connectivity mid-route.
+  // Runs at most once every 10 min, skips when offline, never throws.
+  void warmCaches({ warehouse: session.defaultWarehouse ?? undefined }).catch(() => {});
 }
 
 onMounted(load);

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import TopAppBar from "@/components/TopAppBar.vue";
 import BottomNav from "@/components/BottomNav.vue";
@@ -7,10 +7,27 @@ import Toasts from "@/components/Toasts.vue";
 import ConfirmModal from "@/components/ConfirmModal.vue";
 import Icon from "@/components/Icon.vue";
 import { useRouteVisitStore } from "@/stores/routeVisit";
+import { useOnline } from "@/app/online";
+import { useSessionStore } from "@/stores/session";
+import { warmCaches } from "@/offline/warm";
 
 const route = useRoute();
 const router = useRouter();
 const visit = useRouteVisitStore();
+const online = useOnline();
+const session = useSessionStore();
+
+// Offline→online transition: opportunistically warm the item + customer
+// caches so the next screen the driver opens has fresh data. The warm
+// helper internally rate-limits to once per 10 min so this never spams.
+watch(online, (isNow, wasNow) => {
+  if (isNow && !wasNow && session.isAuthenticated) {
+    void warmCaches({
+      warehouse: session.defaultWarehouse ?? undefined,
+      force: true,
+    }).catch(() => {});
+  }
+});
 
 const isChrome = computed(() => {
   const name = String(route.name ?? "");
