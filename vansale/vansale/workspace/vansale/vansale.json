@@ -1,6 +1,6 @@
 {
  "charts": [],
- "content": "[{\"id\":\"header-setup\",\"type\":\"header\",\"data\":{\"text\":\"<span class=\\\"h4\\\"><b>Setup</b></span>\",\"col\":12}},{\"id\":\"shortcut-config\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Vansale Configuration\",\"col\":4}},{\"id\":\"shortcut-outbox\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Vansale Outbox\",\"col\":4}},{\"id\":\"shortcut-pin\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Vansale Pin\",\"col\":4}},{\"id\":\"spacer-1\",\"type\":\"spacer\",\"data\":{\"col\":12}},{\"id\":\"header-route\",\"type\":\"header\",\"data\":{\"text\":\"<span class=\\\"h4\\\"><b>Route Planning</b></span>\",\"col\":12}},{\"id\":\"shortcut-route-plan\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Van Route Plan\",\"col\":4}},{\"id\":\"shortcut-visit-log\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Van Visit Log\",\"col\":4}},{\"id\":\"spacer-2\",\"type\":\"spacer\",\"data\":{\"col\":12}},{\"id\":\"header-sales\",\"type\":\"header\",\"data\":{\"text\":\"<span class=\\\"h4\\\"><b>Transactions</b></span>\",\"col\":12}},{\"id\":\"shortcut-si\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Sales Invoice\",\"col\":4}},{\"id\":\"shortcut-pe\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Payment Entry\",\"col\":4}},{\"id\":\"shortcut-customer\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Customer\",\"col\":4}}]",
+ "content": "[{\"id\":\"header-setup\",\"type\":\"header\",\"data\":{\"text\":\"<span class=\\\"h4\\\"><b>Setup</b></span>\",\"col\":12}},{\"id\":\"shortcut-config\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Vansale Configuration\",\"col\":4}},{\"id\":\"shortcut-outbox\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Vansale Outbox\",\"col\":4}},{\"id\":\"shortcut-pin\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Vansale Pin\",\"col\":4}},{\"id\":\"spacer-1\",\"type\":\"spacer\",\"data\":{\"col\":12}},{\"id\":\"header-route\",\"type\":\"header\",\"data\":{\"text\":\"<span class=\\\"h4\\\"><b>Customer Routing</b></span>\",\"col\":12}},{\"id\":\"shortcut-assign\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Van Customer Assignment\",\"col\":4}},{\"id\":\"shortcut-visit-log\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Van Visit Log\",\"col\":4}},{\"id\":\"shortcut-daily-visit\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Van Daily Visit\",\"col\":4}},{\"id\":\"spacer-2\",\"type\":\"spacer\",\"data\":{\"col\":12}},{\"id\":\"header-sales\",\"type\":\"header\",\"data\":{\"text\":\"<span class=\\\"h4\\\"><b>Transactions</b></span>\",\"col\":12}},{\"id\":\"shortcut-si\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Sales Invoice\",\"col\":4}},{\"id\":\"shortcut-pe\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Payment Entry\",\"col\":4}},{\"id\":\"shortcut-customer\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Customer\",\"col\":4}}]",
  "creation": "2026-04-20 00:00:00",
  "custom_blocks": [],
  "docstatus": 0,
@@ -56,7 +56,7 @@
   {
    "hidden": 0,
    "is_query_report": 0,
-   "label": "Route Planning",
+   "label": "Customer Routing",
    "link_count": 0,
    "onboard": 0,
    "type": "Card Break"
@@ -65,11 +65,22 @@
    "dependencies": "",
    "hidden": 0,
    "is_query_report": 0,
-   "label": "Van Route Plan",
+   "label": "Van Customer Assignment",
    "link_count": 0,
-   "link_to": "Van Route Plan",
-   "link_type": "DocType",
+   "link_to": "van-customer-assignment",
+   "link_type": "Page",
    "onboard": 1,
+   "type": "Link"
+  },
+  {
+   "dependencies": "",
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Van Daily Visit",
+   "link_count": 0,
+   "link_to": "Van Daily Visit",
+   "link_type": "DocType",
+   "onboard": 0,
    "type": "Link"
   },
   {
@@ -125,7 +136,7 @@
    "type": "Link"
   }
  ],
- "modified": "2026-04-20 00:00:00",
+ "modified": "2026-04-22 00:00:00",
  "modified_by": "Administrator",
  "module": "Vansale",
  "name": "Vansale",
@@ -164,8 +175,15 @@
   {
    "color": "Green",
    "doc_view": "",
-   "label": "Van Route Plan",
-   "link_to": "Van Route Plan",
+   "label": "Van Customer Assignment",
+   "link_to": "van-customer-assignment",
+   "type": "Page"
+  },
+  {
+   "color": "Green",
+   "doc_view": "",
+   "label": "Van Daily Visit",
+   "link_to": "Van Daily Visit",
    "type": "DocType"
   },
   {

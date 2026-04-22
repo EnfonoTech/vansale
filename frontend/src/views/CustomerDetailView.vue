@@ -87,8 +87,7 @@ async function onEndVisit() {
       lng = geo?.lng;
     }
     const res = await endVisit({
-      plan_name: visit.active.planName,
-      stop_idx: visit.active.stop.idx,
+      customer: visit.active.stop.customer,
       lat,
       lng,
       notes: visit.active.notes || null,

@@ -8,6 +8,10 @@
  * router.push. Now we hydrate from localStorage on app boot and rely
  * on pinia reactivity to drive both the route page AND an optional
  * FAB that can surface "End visit" from any screen.
+ *
+ * v1.0.23: customer-keyed model (plan abolished). `planName` dropped,
+ * `visitDate` added so an active visit from yesterday doesn't bleed
+ * into today's list after midnight.
  */
 import { defineStore } from "pinia";
 import type { RouteStop } from "@/api/route";
@@ -15,7 +19,7 @@ import type { RouteStop } from "@/api/route";
 const LS_KEY = "vansale.activeVisit";
 
 interface ActiveVisit {
-  planName: string;
+  visitDate: string; // YYYY-MM-DD (local)
   stop: RouteStop;
   startedAt: number;
   notes: string;
@@ -28,11 +32,22 @@ interface State {
 function loadPersisted(): State {
   try {
     const raw = window.localStorage.getItem(LS_KEY);
-    if (raw) return { active: JSON.parse(raw) as ActiveVisit };
+    if (!raw) return { active: null };
+    const parsed = JSON.parse(raw) as Partial<ActiveVisit> & { planName?: string };
+    // Migrate pre-v1.0.23 shape: drop planName, synthesize visitDate from today.
+    const visitDate = parsed.visitDate || new Date().toLocaleDateString("en-CA");
+    if (!parsed.stop) return { active: null };
+    return {
+      active: {
+        visitDate,
+        stop: parsed.stop as RouteStop,
+        startedAt: parsed.startedAt ?? Date.now(),
+        notes: parsed.notes ?? "",
+      },
+    };
   } catch {
-    /* ignore corrupt */
+    return { active: null };
   }
-  return { active: null };
 }
 
 function persist(state: State): void {
@@ -50,9 +65,10 @@ export const useRouteVisitStore = defineStore("routeVisit", {
     activeCustomer: (s) => s.active?.stop.customer ?? null,
   },
   actions: {
-    start(planName: string, stop: RouteStop) {
+    start(stop: RouteStop) {
+      const visitDate = new Date().toLocaleDateString("en-CA");
       this.active = {
-        planName,
+        visitDate,
         stop: { ...stop, status: "in_progress" },
         startedAt: Date.now(),
         notes: "",

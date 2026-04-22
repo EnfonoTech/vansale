@@ -1,0 +1,27 @@
+{
+ "content": null,
+ "creation": "2026-04-22 00:00:00",
+ "docstatus": 0,
+ "doctype": "Page",
+ "icon": "users",
+ "idx": 0,
+ "modified": "2026-04-22 00:00:00",
+ "modified_by": "Administrator",
+ "module": "Vansale",
+ "name": "van-customer-assignment",
+ "owner": "Administrator",
+ "page_name": "van-customer-assignment",
+ "roles": [
+  {
+   "role": "System Manager"
+  },
+  {
+   "role": "Van Manager"
+  }
+ ],
+ "script": null,
+ "standard": "Yes",
+ "style": null,
+ "system_page": 0,
+ "title": "Van Customer Assignment"
+}

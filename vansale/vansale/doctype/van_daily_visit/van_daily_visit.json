@@ -1,0 +1,101 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "hash",
+ "creation": "2026-04-22 00:00:00",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "user",
+  "customer",
+  "visit_date",
+  "status",
+  "column_break_1",
+  "started_at",
+  "ended_at",
+  "section_break_transaction",
+  "invoice",
+  "payment",
+  "column_break_2",
+  "signature_file",
+  "notes",
+  "section_break_location",
+  "lat",
+  "lng"
+ ],
+ "fields": [
+  {
+   "fieldname": "user",
+   "fieldtype": "Link",
+   "options": "User",
+   "label": "User",
+   "reqd": 1,
+   "in_list_view": 1,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "customer",
+   "fieldtype": "Link",
+   "options": "Customer",
+   "label": "Customer",
+   "reqd": 1,
+   "in_list_view": 1,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "visit_date",
+   "fieldtype": "Date",
+   "label": "Visit Date",
+   "reqd": 1,
+   "in_list_view": 1,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "options": "pending\nin_progress\ndone\nskipped",
+   "label": "Status",
+   "default": "pending",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {"fieldname": "column_break_1", "fieldtype": "Column Break"},
+  {"fieldname": "started_at", "fieldtype": "Datetime", "label": "Started At"},
+  {"fieldname": "ended_at", "fieldtype": "Datetime", "label": "Ended At"},
+  {"fieldname": "section_break_transaction", "fieldtype": "Section Break", "label": "Transaction"},
+  {"fieldname": "invoice", "fieldtype": "Link", "options": "Sales Invoice", "label": "Invoice"},
+  {"fieldname": "payment", "fieldtype": "Link", "options": "Payment Entry", "label": "Payment"},
+  {"fieldname": "column_break_2", "fieldtype": "Column Break"},
+  {"fieldname": "signature_file", "fieldtype": "Attach", "label": "Signature"},
+  {"fieldname": "notes", "fieldtype": "Small Text", "label": "Notes"},
+  {"fieldname": "section_break_location", "fieldtype": "Section Break", "label": "Location"},
+  {"fieldname": "lat", "fieldtype": "Float", "label": "Latitude"},
+  {"fieldname": "lng", "fieldtype": "Float", "label": "Longitude"}
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-04-22 00:00:00",
+ "modified_by": "Administrator",
+ "module": "Vansale",
+ "name": "Van Daily Visit",
+ "naming_rule": "Random",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "role": "System Manager",
+   "read": 1, "write": 1, "create": 1, "delete": 1, "report": 1, "export": 1
+  },
+  {
+   "role": "Van Manager",
+   "read": 1, "write": 1, "create": 1, "delete": 1, "report": 1, "export": 1
+  },
+  {
+   "role": "Sales User",
+   "read": 1, "write": 1, "create": 1
+  }
+ ],
+ "sort_field": "visit_date",
+ "sort_order": "DESC",
+ "track_changes": 1
+}

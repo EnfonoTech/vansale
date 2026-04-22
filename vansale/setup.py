@@ -29,7 +29,7 @@ VAN_USER_PERMISSIONS: list[dict] = [
     {"parent": "Contact", "read": 1, "write": 1, "create": 1, "submit": 0, "cancel": 0, "delete": 0, "print": 1, "email": 0, "report": 1, "export": 0, "share": 0},
     {"parent": "Stock Entry", "read": 1, "write": 1, "create": 1, "submit": 1, "cancel": 0, "delete": 0, "print": 1, "email": 0, "report": 1, "export": 0, "share": 0},
     # Van Sale domain — read/write own.
-    {"parent": "Van Route Plan", "read": 1, "write": 1, "create": 1, "submit": 0, "cancel": 0, "delete": 0, "print": 1, "email": 0, "report": 1, "export": 0, "share": 0},
+    {"parent": "Van Daily Visit", "read": 1, "write": 1, "create": 1, "submit": 0, "cancel": 0, "delete": 0, "print": 1, "email": 0, "report": 1, "export": 0, "share": 0},
     {"parent": "Van Visit Log", "read": 1, "write": 1, "create": 1, "submit": 0, "cancel": 0, "delete": 0, "print": 1, "email": 0, "report": 1, "export": 0, "share": 0},
     {"parent": "Vansale Outbox", "read": 1, "write": 0, "create": 1, "submit": 0, "cancel": 0, "delete": 0, "print": 0, "email": 0, "report": 0, "export": 0, "share": 0},
     # Read-only reference data.
@@ -59,7 +59,37 @@ def after_migrate() -> None:
     _ensure_role(VAN_MANAGER_ROLE)
     _apply_role_permissions(VAN_USER_ROLE, VAN_USER_PERMISSIONS)
     _reapply_user_permissions()
+    _ensure_custom_fields()
     frappe.db.commit()
+
+
+# Custom fields owned by this app. Kept close to the migrate hook so the
+# fields are idempotently re-asserted on every deploy — previously the
+# Customer country requirement and the new van_sort_order were documented
+# in code comments but never auto-installed, which caused the
+# "value missing for customer: Customer country" regression and left
+# admins with no way to reorder the driver's customer list.
+VANSALE_CUSTOM_FIELDS: dict[str, list[dict]] = {
+    "Customer": [
+        {
+            "fieldname": "custom_van_sort_order",
+            "label": "Van Sort Order",
+            "fieldtype": "Int",
+            "insert_after": "default_sales_partner",
+            "description": "Driver sees customers ordered ascending by this value. Leave blank to sort by name.",
+            "module": "Vansale",
+        },
+    ],
+}
+
+
+def _ensure_custom_fields() -> None:
+    """Create or update the app's custom fields on every migrate."""
+    try:
+        from frappe.custom.doctype.custom_field.custom_field import create_custom_fields
+    except ImportError:
+        return
+    create_custom_fields(VANSALE_CUSTOM_FIELDS, update=True)
 
 
 def _ensure_role(role: str, desk_access: int = 1) -> None:

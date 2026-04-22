@@ -130,7 +130,8 @@ def van_visit_log_query(user: str) -> str:
     return f"`tabVan Visit Log`.`user` = {frappe.db.escape(user)}"
 
 
-def van_route_plan_query(user: str) -> str:
+def van_daily_visit_query(user: str) -> str:
+    """Van User list-view scope — only their own visit rows."""
     if _is_unrestricted(user):
         return ""
-    return f"`tabVan Route Plan`.`user` = {frappe.db.escape(user)}"
+    return f"`tabVan Daily Visit`.`user` = {frappe.db.escape(user)}"

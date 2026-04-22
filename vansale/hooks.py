@@ -44,7 +44,7 @@ permission_query_conditions = {
     "Stock Entry": "vansale.van_filters.stock_entry_query",
     "Delivery Note": "vansale.van_filters.delivery_note_query",
     "Van Visit Log": "vansale.van_filters.van_visit_log_query",
-    "Van Route Plan": "vansale.van_filters.van_route_plan_query",
+    "Van Daily Visit": "vansale.van_filters.van_daily_visit_query",
 }
 
 # Before-validate hooks — force cost_center + warehouse to the user's

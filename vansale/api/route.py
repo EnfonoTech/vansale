@@ -1,4 +1,18 @@
-"""Daily route planning + visit lifecycle."""
+"""Van Sales — daily visit lifecycle (customer-keyed, plan-free).
+
+Design, 2026-04-22: the old Van Route Plan doctype and its stops child
+table are gone. A driver's day is just "every customer tagged to my
+Sales Person, ordered by the Customer's `custom_van_sort_order`". Each
+visit action (start/end/skip) upserts a Van Daily Visit row keyed by
+(user, customer, visit_date). This keeps admins out of the route-plan
+maintenance loop — they tag a customer's Sales Team once and the
+customer shows up in the driver's list from then on.
+
+Offline + idempotency: `end_visit` still writes an immutable Van Visit
+Log row keyed by `client_id` so replays from the offline queue are
+safe. The Van Daily Visit row is the live editable state; the log is
+the audit trail.
+"""
 
 from __future__ import annotations
 
@@ -10,55 +24,22 @@ import frappe
 from frappe import _
 
 from vansale.api.datetime_util import naive_site_to_utc_iso, parse_client_ts
+from vansale.api.me import user_to_sales_person
 
 
-_WEEKDAY_CHECK_FIELDS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
-
-
-def _parse_days_of_month(raw: str | None) -> set[int]:
-    """Parse the CSV `days_of_month` free-text field into a set of ints.
-
-    Invalid tokens silently dropped — the field is human-edited so we'd
-    rather show the driver a route than crash on a typo like "1, 15,,".
-    """
-    if not raw:
-        return set()
-    out: set[int] = set()
-    for tok in raw.split(","):
-        tok = tok.strip()
-        if not tok:
-            continue
-        try:
-            n = int(tok)
-        except ValueError:
-            continue
-        if 1 <= n <= 31:
-            out.add(n)
-    return out
-
-
-def _recurrence_matches(plan: dict, today_: "date") -> bool:
-    """Does a recurring plan fire today?
-
-    Weekly: one of the 7 per-day Check fields (mon..sun) is set AND the
-    current weekday matches. Monthly: today's day-of-month is in the
-    CSV `days_of_month` list. An optional `plan_date` gates "not before
-    this date" so admins can schedule a route to start next month.
-    """
-    anchor: date | None = plan.get("plan_date")
-    if anchor and today_ < anchor:
-        return False
-    freq = (plan.get("frequency") or "Weekly")
-    if freq == "Weekly":
-        today_field = _WEEKDAY_CHECK_FIELDS[today_.weekday()]
-        return bool(plan.get(today_field))
-    if freq == "Monthly":
-        return today_.day in _parse_days_of_month(plan.get("days_of_month"))
-    return False
+# ---------------------------------------------------------------------------
+# helpers
+# ---------------------------------------------------------------------------
 
 
 def _parse_iso_date(raw: str | None) -> date | None:
-    """Parse a YYYY-MM-DD string from the client; silently accept None."""
+    """Parse a YYYY-MM-DD string from the client; silently accept None.
+
+    The PWA sends its own local date with every request because the
+    server timezone can lag the driver's phone by hours (user report
+    2026-04-22: CEST server still on Apr 21 while Riyadh phone was
+    already on Apr 22). When client_date is present we trust it.
+    """
     if not raw:
         return None
     try:
@@ -68,171 +49,360 @@ def _parse_iso_date(raw: str | None) -> date | None:
         return None
 
 
-def _auto_reopen_for_new_day(doc, today_: date) -> None:
-    """Reset a Completed plan to Active when it fires again on a later day.
+def _resolve_sales_person(user: str | None) -> str | None:
+    """Current driver's Sales Person — or None if they're not a van user."""
+    return user_to_sales_person(user)
 
-    Recurring plans share a single doctype row across every occurrence
-    (every Mon/Wed/Fri for the same Weekly plan). Without this reset a
-    route completed on Monday would still look Completed when the driver
-    opens the app on Wednesday.
 
-    Stop statuses are also reset so pending/done/skipped don't leak
-    across occurrences. completion_summary is preserved on the row for
-    historical audit \u2014 it's cleared when the new occurrence closes.
+def _list_customers_for_sales_person(sales_person: str) -> list[dict]:
+    """Customers whose Sales Team row references this Sales Person.
+
+    Ordered by `custom_van_sort_order` asc (nulls last → `COALESCE, big
+    number`), then by customer_name for stability. Disabled customers
+    are excluded; drivers never see a deactivated account.
     """
-    if (getattr(doc, "status", None) or "Active") != "Completed":
-        return
-    completed_at = getattr(doc, "completed_at", None)
-    if not completed_at:
-        return
-    completed_date = completed_at.date() if hasattr(completed_at, "date") else None
-    if completed_date and completed_date >= today_:
-        return  # completed earlier today \u2014 don't reset yet
-    doc.status = "Active"
-    doc.completed_at = None
-    doc.completion_summary = None
-    for s in doc.stops:
-        s.status = "pending"
-        s.started_at = None
-        s.ended_at = None
-        s.invoice = None
-        s.payment = None
-        s.signature_file = None
-    doc.save(ignore_permissions=True)
-    frappe.db.commit()
-
-
-def _resolve_todays_plan(user: str, today_: date) -> str | None:
-    """Resolve the plan that fires for `user` on `today_`.
-
-    Fetches every Active plan for the user and returns the first whose
-    recurrence rule matches. Weekly plans win over Monthly (routes are
-    usually weekly day-of-week runs and the monthly pattern is the
-    fallback for per-month specials like "end-of-month collection").
-
-    `today_` is the driver's local date \u2014 pass it in rather than
-    calling `date.today()` here because the server timezone can lag the
-    driver's phone by hours (user report 2026-04-22).
-    """
-    candidates = frappe.get_all(
-        "Van Route Plan",
-        filters={"user": user},
-        fields=[
-            "name", "frequency", "plan_date",
-            "mon", "tue", "wed", "thu", "fri", "sat", "sun",
-            "days_of_month",
-        ],
-        order_by="frequency asc, modified desc",  # Weekly < Monthly alphabetically
+    return frappe.db.sql(
+        """
+        SELECT DISTINCT
+            c.name AS customer,
+            c.customer_name AS customer_name,
+            c.mobile_no AS mobile_no,
+            c.customer_primary_address AS primary_address,
+            COALESCE(c.custom_van_sort_order, 999999) AS sort_order
+        FROM `tabCustomer` c
+        INNER JOIN `tabSales Team` st
+            ON st.parent = c.name AND st.parenttype = 'Customer'
+        WHERE st.sales_person = %s AND c.disabled = 0
+        ORDER BY sort_order ASC, c.customer_name ASC
+        """,
+        (sales_person,),
+        as_dict=True,
     )
-    for c in candidates:
-        if _recurrence_matches(c, today_):
-            return c["name"]
-    return None
+
+
+def _fetch_visit(user: str, customer: str, visit_date: date) -> dict | None:
+    """Return the Van Daily Visit state for (user, customer, date), or None."""
+    row = frappe.db.get_value(
+        "Van Daily Visit",
+        {"user": user, "customer": customer, "visit_date": visit_date},
+        [
+            "name",
+            "status",
+            "started_at",
+            "ended_at",
+            "invoice",
+            "payment",
+            "signature_file",
+            "notes",
+            "lat",
+            "lng",
+        ],
+        as_dict=True,
+    )
+    return row
+
+
+def _upsert_visit(user: str, customer: str, visit_date: date, **fields) -> "frappe.model.document.Document":
+    """Get-or-create Van Daily Visit and patch fields. Returns the saved doc.
+
+    We resolve the primary key via `(user, customer, visit_date)` because
+    Frappe doctype JSON doesn't support composite unique constraints;
+    the uniqueness is enforced here. A race between two simultaneous
+    starts on the same customer is still possible but tolerable — the
+    second write wins and the Van Visit Log (on end_visit) gives us an
+    audit.
+    """
+    name = frappe.db.get_value(
+        "Van Daily Visit",
+        {"user": user, "customer": customer, "visit_date": visit_date},
+        "name",
+    )
+    if name:
+        doc = frappe.get_doc("Van Daily Visit", name)
+    else:
+        doc = frappe.new_doc("Van Daily Visit")
+        doc.user = user
+        doc.customer = customer
+        doc.visit_date = visit_date
+        doc.status = "pending"
+    for k, v in fields.items():
+        if v is None and k in {"started_at", "ended_at", "invoice", "payment", "signature_file", "notes", "lat", "lng"}:
+            # explicit None allowed — driver cleared a field
+            setattr(doc, k, v)
+        elif v is not None:
+            setattr(doc, k, v)
+    doc.save(ignore_permissions=True)
+    return doc
+
+
+def _serialize_stop(customer_row: dict, visit: dict | None, idx: int) -> dict:
+    """Merge a live customer row with its current visit state (if any)."""
+    if visit:
+        return {
+            "idx": idx,
+            "name": visit["name"],
+            "customer": customer_row["customer"],
+            "customer_name": customer_row["customer_name"],
+            "mobile_no": customer_row.get("mobile_no"),
+            "address": customer_row.get("primary_address"),
+            "status": visit["status"] or "pending",
+            "started_at": naive_site_to_utc_iso(visit["started_at"]),
+            "ended_at": naive_site_to_utc_iso(visit["ended_at"]),
+            "invoice": visit["invoice"],
+            "payment": visit["payment"],
+            "signature_file": visit["signature_file"],
+            "notes": visit["notes"],
+        }
+    return {
+        "idx": idx,
+        "name": None,
+        "customer": customer_row["customer"],
+        "customer_name": customer_row["customer_name"],
+        "mobile_no": customer_row.get("mobile_no"),
+        "address": customer_row.get("primary_address"),
+        "status": "pending",
+        "started_at": None,
+        "ended_at": None,
+        "invoice": None,
+        "payment": None,
+        "signature_file": None,
+        "notes": None,
+    }
+
+
+# ---------------------------------------------------------------------------
+# today + visit lifecycle
+# ---------------------------------------------------------------------------
 
 
 @frappe.whitelist(methods=["GET"])
 def today(client_date: Optional[str] = None) -> dict:
-    """Return today's plan for the current user, by recurrence.
+    """Return the driver's customer list for today.
 
-    `client_date` (YYYY-MM-DD) is the driver's **local** date. Server
-    time zone can lag the driver's phone by several hours — the 2026-04-22
-    user report "today is 22nd and in app showing 21" was exactly this:
-    server date.today() was still Apr 21 CEST when the phone rolled into
-    Apr 22 IST. When the app sends its own date we trust it.
+    Shape:
+        {
+          "visit_date": "2026-04-22",
+          "sales_person": "SP-Ali",
+          "stops": [ { customer, customer_name, status, ... }, ... ]
+        }
+
+    `plan` is always None — retained in the payload for backwards
+    compatibility with older PWA builds that key off it, so an old
+    device pointing at this server doesn't crash; new PWA ignores it.
     """
     user = frappe.session.user
+    if user == "Guest":
+        frappe.throw(_("Login required"))
+
     today_ = _parse_iso_date(client_date) or date.today()
-    plan_name = _resolve_todays_plan(user, today_)
-    if not plan_name:
-        return {"plan": None, "stops": []}
-    doc = frappe.get_doc("Van Route Plan", plan_name)
-    _auto_reopen_for_new_day(doc, today_)
-    summary_raw = getattr(doc, "completion_summary", None)
-    try:
-        summary = json.loads(summary_raw) if summary_raw else None
-    except (TypeError, ValueError):
-        summary = None
+    sales_person = _resolve_sales_person(user)
+    if not sales_person:
+        return {
+            "visit_date": str(today_),
+            "sales_person": None,
+            "plan": None,
+            "stops": [],
+        }
+
+    customers = _list_customers_for_sales_person(sales_person)
+    stops: list[dict] = []
+    for i, cust in enumerate(customers, start=1):
+        visit = _fetch_visit(user, cust["customer"], today_)
+        stops.append(_serialize_stop(cust, visit, i))
+
     return {
-        "plan": {
-            "name": doc.name,
-            "route_name": getattr(doc, "route_name", None) or None,
-            "plan_date": str(today_),
-            "effective_from": str(doc.plan_date) if getattr(doc, "plan_date", None) else None,
-            "warehouse": doc.warehouse,
-            "notes": doc.notes,
-            "frequency": getattr(doc, "frequency", None) or "Weekly",
-            "status": getattr(doc, "status", None) or "Active",
-            "completed_at": naive_site_to_utc_iso(getattr(doc, "completed_at", None)),
-            "completion_summary": summary,
-        },
-        "stops": [
-            {
-                "idx": s.idx,
-                "name": s.name,
-                "customer": s.customer,
-                "planned_time": str(s.planned_time) if s.planned_time else None,
-                "address": s.address,
-                "status": s.status,
-                "started_at": naive_site_to_utc_iso(s.started_at),
-                "ended_at": naive_site_to_utc_iso(s.ended_at),
-                "invoice": s.invoice,
-                "payment": s.payment,
-                "signature_file": s.signature_file,
-                "notes": s.notes,
-            }
-            for s in doc.stops
-        ],
+        "visit_date": str(today_),
+        "sales_person": sales_person,
+        "plan": None,  # deprecated placeholder
+        "stops": stops,
     }
 
 
 @frappe.whitelist(methods=["POST"])
-def create_plan(
-    route_name: str,
-    stops: list[dict],
-    frequency: str = "Weekly",
-    days_of_week: list[str] | None = None,
-    days_of_month: str | None = None,
-    warehouse: Optional[str] = None,
-    notes: Optional[str] = None,
-    plan_date: Optional[str] = None,
-) -> dict:
-    """Create a recurring Van Route Plan for the current user.
-
-    `days_of_week` accepts a list of lowercase short keys (mon, tue,
-    wed, thu, fri, sat, sun) and maps them onto the corresponding
-    Check fields on the doctype. `days_of_month` is a CSV string that
-    the doctype validates; we persist it verbatim.
-    """
-    if not route_name:
-        frappe.throw(_("route_name required"))
-    if not stops:
-        frappe.throw(_("At least one stop required"))
-    doc = frappe.new_doc("Van Route Plan")
-    doc.route_name = route_name
-    doc.user = frappe.session.user
-    doc.warehouse = warehouse
-    doc.notes = notes
-    doc.frequency = frequency
-    if plan_date:
-        doc.plan_date = plan_date
-    if frequency == "Weekly" and days_of_week:
-        for key in days_of_week:
-            k = key.strip().lower()[:3]
-            if k in _WEEKDAY_CHECK_FIELDS:
-                setattr(doc, k, 1)
-    if frequency == "Monthly" and days_of_month:
-        doc.days_of_month = days_of_month
-    for stop in stops:
-        if not stop.get("customer"):
-            frappe.throw(_("Each stop must have a customer"))
-        row = doc.append("stops", {})
-        row.customer = stop["customer"]
-        row.planned_time = stop.get("planned_time")
-        row.address = stop.get("address")
-        row.status = "pending"
-    doc.insert(ignore_permissions=False)
+def start_visit(customer: str, client_date: Optional[str] = None) -> dict:
+    """Mark a visit as in-progress. Upserts the Van Daily Visit row."""
+    if not customer:
+        frappe.throw(_("customer required"))
+    user = frappe.session.user
+    today_ = _parse_iso_date(client_date) or date.today()
+    now = frappe.utils.now_datetime()
+    doc = _upsert_visit(
+        user,
+        customer,
+        today_,
+        status="in_progress",
+        started_at=now,
+    )
     frappe.db.commit()
-    return {"name": doc.name}
+    return {"name": doc.name, "started_at": naive_site_to_utc_iso(doc.started_at)}
+
+
+@frappe.whitelist(methods=["POST"])
+def end_visit(
+    client_id: str,
+    customer: str,
+    client_date: Optional[str] = None,
+    invoice: Optional[str] = None,
+    payment: Optional[str] = None,
+    signature_file: Optional[str] = None,
+    lat: Optional[float] = None,
+    lng: Optional[float] = None,
+    notes: Optional[str] = None,
+    posting_ts: Optional[str] = None,
+) -> dict:
+    """Close a visit. Idempotent by `client_id` via Van Visit Log."""
+    if not client_id:
+        frappe.throw(_("client_id required"))
+    if not customer:
+        frappe.throw(_("customer required"))
+
+    # Idempotency: if a log with this client_id exists, replay its output.
+    existing_log = frappe.db.get_value(
+        "Van Visit Log",
+        {"client_id": client_id},
+        ["name", "customer"],
+        as_dict=True,
+    )
+    if existing_log:
+        return {"name": existing_log.name, "idempotent_replay": True}
+
+    user = frappe.session.user
+    today_ = _parse_iso_date(client_date) or date.today()
+    ended = parse_client_ts(posting_ts) if posting_ts else frappe.utils.now_datetime()
+
+    doc = _upsert_visit(
+        user,
+        customer,
+        today_,
+        status="done",
+        ended_at=ended,
+        invoice=invoice,
+        payment=payment,
+        signature_file=signature_file,
+        notes=notes,
+        lat=lat,
+        lng=lng,
+    )
+
+    # Audit log — immutable, keyed by client_id for offline replay safety.
+    log = frappe.new_doc("Van Visit Log")
+    log.client_id = client_id
+    log.customer = customer
+    log.user = user
+    log.started_at = doc.started_at
+    log.ended_at = ended
+    log.lat = lat
+    log.lng = lng
+    log.invoice = invoice
+    log.payment = payment
+    log.signature_file = signature_file
+    log.notes = notes
+    log.insert(ignore_permissions=True)
+    frappe.db.commit()
+
+    return {"name": log.name, "visit": doc.name, "idempotent_replay": False}
+
+
+@frappe.whitelist(methods=["POST"])
+def skip_visit(
+    customer: str,
+    reason: Optional[str] = None,
+    client_date: Optional[str] = None,
+) -> dict:
+    """Mark a visit as skipped. Idempotent — skipping twice is a no-op."""
+    if not customer:
+        frappe.throw(_("customer required"))
+    user = frappe.session.user
+    today_ = _parse_iso_date(client_date) or date.today()
+
+    existing = _fetch_visit(user, customer, today_)
+    if existing and existing["status"] in ("done", "skipped"):
+        return {"status": existing["status"], "idempotent_replay": True, "name": existing["name"]}
+
+    note = reason or None
+    if existing and existing.get("notes"):
+        note = f"{existing['notes']}\n{reason}".strip() if reason else existing["notes"]
+
+    doc = _upsert_visit(
+        user,
+        customer,
+        today_,
+        status="skipped",
+        ended_at=frappe.utils.now_datetime(),
+        notes=note,
+    )
+    frappe.db.commit()
+    return {"status": "skipped", "idempotent_replay": False, "name": doc.name}
+
+
+# ---------------------------------------------------------------------------
+# daily report
+# ---------------------------------------------------------------------------
+
+
+@frappe.whitelist(methods=["GET"])
+def daily_report(client_date: Optional[str] = None, plan_date: Optional[str] = None) -> dict:
+    """Aggregate today's visits for the logged-in driver.
+
+    Accepts both `client_date` (new name) and `plan_date` (legacy PWA
+    parameter) so old clients still work during rollout.
+    """
+    user = frappe.session.user
+    raw = client_date or plan_date
+    today_ = _parse_iso_date(raw) or date.today()
+
+    visits = frappe.db.sql(
+        """
+        SELECT status, invoice, payment
+        FROM `tabVan Daily Visit`
+        WHERE user = %s AND visit_date = %s
+        """,
+        (user, today_),
+        as_dict=True,
+    )
+    stop_count = len(visits)
+    done_visits = [v for v in visits if v.status in ("done", "skipped")]
+
+    invoice_names = [v.invoice for v in visits if v.invoice]
+    payment_names = [v.payment for v in visits if v.payment]
+
+    sales = 0.0
+    returns = 0.0
+    if invoice_names:
+        placeholders = ", ".join(["%s"] * len(invoice_names))
+        sales_row = frappe.db.sql(
+            f"SELECT COALESCE(SUM(grand_total), 0) FROM `tabSales Invoice` WHERE name IN ({placeholders}) AND is_return = 0",
+            tuple(invoice_names),
+        )
+        sales = float(sales_row[0][0] or 0)
+        returns_row = frappe.db.sql(
+            f"SELECT COALESCE(SUM(ABS(grand_total)), 0) FROM `tabSales Invoice` WHERE name IN ({placeholders}) AND is_return = 1",
+            tuple(invoice_names),
+        )
+        returns = float(returns_row[0][0] or 0)
+
+    collections = 0.0
+    if payment_names:
+        placeholders = ", ".join(["%s"] * len(payment_names))
+        pay_row = frappe.db.sql(
+            f"SELECT COALESCE(SUM(paid_amount), 0) FROM `tabPayment Entry` WHERE name IN ({placeholders})",
+            tuple(payment_names),
+        )
+        collections = float(pay_row[0][0] or 0)
+
+    return {
+        "plan_date": str(today_),
+        "visits": len(done_visits),
+        "sales": sales,
+        "collections": collections,
+        "returns": returns,
+        "stop_count": stop_count,
+    }
+
+
+# ---------------------------------------------------------------------------
+# admin: customer assignment
+# ---------------------------------------------------------------------------
 
 
 @frappe.whitelist()
@@ -244,43 +414,51 @@ def customer_query(
     page_len: int,
     filters: dict | None = None,
 ):
-    """Link-field query for the `stops.customer` picker on Van Route Plan.
+    """Search-as-you-type customer picker filtered by sales_person.
 
-    Filters the customer list to those whose Sales Team includes the
-    plan's Sales User via that user's linked Sales Person (resolved
-    through the Vansale Configuration mapping the rest of the codebase
-    uses). Admins who haven't mapped the user to a sales person get the
-    full customer list \u2014 better than an empty picker with no
-    explanation.
+    Used by the Van Customer Assignment page. When `filters.user` is
+    given we resolve to that user's Sales Person via Vansale
+    Configuration and return matching customers; otherwise return every
+    active customer so admins who haven't set up mapping yet can still
+    pick. When `filters.unassigned_only` is truthy we return customers
+    with NO Sales Team row for the resolved sales_person (handy for the
+    "add these customers" workflow).
     """
-    from vansale.api.me import user_to_sales_person
-
-    user = (filters or {}).get("user")
+    filters = filters or {}
+    user = filters.get("user")
+    sales_person = filters.get("sales_person") or (user_to_sales_person(user) if user else None)
+    unassigned_only = bool(filters.get("unassigned_only"))
     txt_like = f"%{txt or ''}%"
-    # No user picked yet \u2014 admin is still filling the form. Show every
-    # active customer so they're not stuck.
-    if not user:
+
+    if not sales_person:
         return frappe.db.sql(
             """
             SELECT name, customer_name, mobile_no
             FROM `tabCustomer`
-            WHERE disabled = 0 AND (name LIKE %(t)s OR customer_name LIKE %(t)s OR mobile_no LIKE %(t)s)
+            WHERE disabled = 0
+              AND (name LIKE %(t)s OR customer_name LIKE %(t)s OR mobile_no LIKE %(t)s)
             ORDER BY modified DESC LIMIT %(s)s, %(p)s
             """,
             {"t": txt_like, "s": int(start or 0), "p": int(page_len or 20)},
         )
-    sp = user_to_sales_person(user)
-    if not sp:
-        # User isn't mapped to a sales person \u2014 fall back to all customers.
+
+    if unassigned_only:
         return frappe.db.sql(
             """
-            SELECT name, customer_name, mobile_no
-            FROM `tabCustomer`
-            WHERE disabled = 0 AND (name LIKE %(t)s OR customer_name LIKE %(t)s OR mobile_no LIKE %(t)s)
-            ORDER BY modified DESC LIMIT %(s)s, %(p)s
+            SELECT c.name, c.customer_name, c.mobile_no
+            FROM `tabCustomer` c
+            WHERE c.disabled = 0
+              AND (c.name LIKE %(t)s OR c.customer_name LIKE %(t)s OR c.mobile_no LIKE %(t)s)
+              AND NOT EXISTS (
+                SELECT 1 FROM `tabSales Team` st
+                WHERE st.parent = c.name AND st.parenttype = 'Customer'
+                  AND st.sales_person = %(sp)s
+              )
+            ORDER BY c.modified DESC LIMIT %(s)s, %(p)s
             """,
-            {"t": txt_like, "s": int(start or 0), "p": int(page_len or 20)},
+            {"sp": sales_person, "t": txt_like, "s": int(start or 0), "p": int(page_len or 20)},
         )
+
     return frappe.db.sql(
         """
         SELECT DISTINCT c.name, c.customer_name, c.mobile_no
@@ -292,227 +470,112 @@ def customer_query(
           AND (c.name LIKE %(t)s OR c.customer_name LIKE %(t)s OR c.mobile_no LIKE %(t)s)
         ORDER BY c.modified DESC LIMIT %(s)s, %(p)s
         """,
-        {"sp": sp, "t": txt_like, "s": int(start or 0), "p": int(page_len or 20)},
+        {"sp": sales_person, "t": txt_like, "s": int(start or 0), "p": int(page_len or 20)},
     )
 
 
-def _guard_plan_not_completed(plan) -> None:
-    """Reject per-stop mutations on a Completed plan. Admin re-open path is
-    via the Route Plan doctype in Desk (set status back to Active manually).
-    """
-    if (getattr(plan, "status", None) or "Active") == "Completed":
-        frappe.throw(_("Route already completed. Ask ops to reopen it if you need to change a stop."))
-
-
-@frappe.whitelist(methods=["POST"])
-def start_visit(plan_name: str, stop_idx: int) -> dict:
-    if not plan_name:
-        frappe.throw(_("plan_name required"))
-    doc = frappe.get_doc("Van Route Plan", plan_name)
-    _guard_plan_not_completed(doc)
-    stop = next((s for s in doc.stops if int(s.idx) == int(stop_idx)), None)
-    if not stop:
-        frappe.throw(_("Stop not found"))
-    stop.status = "in_progress"
-    stop.started_at = frappe.utils.now_datetime()
-    doc.save(ignore_permissions=True)
-    frappe.db.commit()
-    return {"started_at": naive_site_to_utc_iso(stop.started_at)}
-
-
-@frappe.whitelist(methods=["POST"])
-def end_visit(
-    client_id: str,
-    plan_name: str,
-    stop_idx: int,
-    invoice: Optional[str] = None,
-    payment: Optional[str] = None,
-    signature_file: Optional[str] = None,
-    lat: Optional[float] = None,
-    lng: Optional[float] = None,
-    notes: Optional[str] = None,
-    posting_ts: Optional[str] = None,
-    stop_name: Optional[str] = None,
-) -> dict:
-    """Close a visit. Records a Van Visit Log, idempotent by ``client_id``."""
-    if not client_id:
-        frappe.throw(_("client_id required"))
-    # Idempotency — reuse stop_name by client_id if already logged.
-    if frappe.db.exists("Van Visit Log", {"client_id": client_id}):
-        existing = frappe.get_doc("Van Visit Log", {"client_id": client_id})
-        return {"name": existing.name, "idempotent_replay": True}
-
-    if not plan_name:
-        frappe.throw(_("plan_name required"))
-    plan = frappe.get_doc("Van Route Plan", plan_name)
-    _guard_plan_not_completed(plan)
-    stop = next((s for s in plan.stops if int(s.idx) == int(stop_idx)), None)
-    if not stop:
-        frappe.throw(_("Stop not found"))
-
-    ended = parse_client_ts(posting_ts) if posting_ts else frappe.utils.now_datetime()
-    stop.status = "done"
-    stop.ended_at = ended
-    stop.invoice = invoice
-    stop.payment = payment
-    stop.signature_file = signature_file
-    stop.notes = notes
-    plan.save(ignore_permissions=True)
-
-    log = frappe.new_doc("Van Visit Log")
-    log.client_id = client_id
-    log.route_plan = plan_name
-    log.stop_idx = stop_idx
-    log.customer = stop.customer
-    log.user = frappe.session.user
-    log.started_at = stop.started_at
-    log.ended_at = ended
-    log.lat = lat
-    log.lng = lng
-    log.invoice = invoice
-    log.payment = payment
-    log.signature_file = signature_file
-    log.notes = notes
-    log.insert(ignore_permissions=True)
-    frappe.db.commit()
-    return {"name": log.name, "idempotent_replay": False}
-
-
-@frappe.whitelist(methods=["POST"])
-def skip_visit(plan_name: str, stop_idx: int, reason: Optional[str] = None) -> dict:
-    """Abandon an in-progress or pending stop. Used to unstick customers left
-    dangling in ``in_progress`` when the user backs out without completing
-    the visit, or to deliberately skip a stop without creating an invoice.
-    Idempotent — calling on an already-skipped or done stop is a no-op.
-    """
-    if not plan_name:
-        frappe.throw(_("plan_name required"))
-    plan = frappe.get_doc("Van Route Plan", plan_name)
-    _guard_plan_not_completed(plan)
-    stop = next((s for s in plan.stops if int(s.idx) == int(stop_idx)), None)
-    if not stop:
-        frappe.throw(_("Stop not found"))
-    if stop.status in ("done", "skipped"):
-        return {"status": stop.status, "idempotent_replay": True}
-    stop.status = "skipped"
-    stop.ended_at = frappe.utils.now_datetime()
-    if reason:
-        stop.notes = (f"{stop.notes or ''}\n{reason}").strip()
-    plan.save(ignore_permissions=True)
-    frappe.db.commit()
-    return {"status": "skipped", "idempotent_replay": False}
-
-
-def _compute_daily_report(plan_name: str, plan_date: str) -> dict:
-    """Shared daily-report aggregation used by the ``daily_report`` API and the
-    ``complete_route`` snapshot. Keeping one implementation avoids the summary
-    displayed on reopen drifting from what the driver saw on tap-to-complete.
-    """
-    doc = frappe.get_doc("Van Route Plan", plan_name)
-    stop_names = [s.name for s in doc.stops]
-    visits = frappe.db.count("Van Visit Log", {"route_plan": plan_name})
-    invoices = frappe.db.sql(
-        """
-        SELECT COALESCE(SUM(grand_total), 0) FROM `tabSales Invoice`
-        WHERE name IN (SELECT invoice FROM `tabVan Visit Log` WHERE route_plan=%s) AND is_return = 0
-        """,
-        (plan_name,),
-    )[0][0]
-    returns = frappe.db.sql(
-        """
-        SELECT COALESCE(SUM(ABS(grand_total)), 0) FROM `tabSales Invoice`
-        WHERE name IN (SELECT invoice FROM `tabVan Visit Log` WHERE route_plan=%s) AND is_return = 1
-        """,
-        (plan_name,),
-    )[0][0]
-    payments = frappe.db.sql(
-        """
-        SELECT COALESCE(SUM(paid_amount), 0) FROM `tabPayment Entry`
-        WHERE name IN (SELECT payment FROM `tabVan Visit Log` WHERE route_plan=%s)
-        """,
-        (plan_name,),
-    )[0][0]
-    return {
-        "plan_date": plan_date,
-        "visits": int(visits),
-        "sales": float(invoices or 0),
-        "collections": float(payments or 0),
-        "returns": float(returns or 0),
-        "stop_count": len(stop_names),
-    }
-
-
 @frappe.whitelist(methods=["GET"])
-def daily_report(plan_date: Optional[str] = None) -> dict:
-    """Today's report for the logged-in driver.
+def list_customers_for_user(user: Optional[str] = None) -> list[dict]:
+    """Return every customer currently assigned to `user`'s Sales Person.
 
-    Plans are recurring now (Weekly/Monthly), so `plan_date` is kept as
-    a label on the payload for continuity with older PWAs but we always
-    resolve the plan via the recurrence rule.
+    Used by the admin assignment page to render the "currently assigned"
+    chips alongside the picker. Falls back to the session user when no
+    user is specified so a driver can self-inspect.
     """
-    user = frappe.session.user
-    when = plan_date or str(date.today())
-    plan_name = _resolve_todays_plan(user)
-    if not plan_name:
-        return {"plan_date": when, "visits": 0, "sales": 0.0, "collections": 0.0, "returns": 0.0, "stop_count": 0}
-    return _compute_daily_report(plan_name, when)
+    u = user or frappe.session.user
+    if frappe.session.user != u:
+        roles = frappe.get_roles(frappe.session.user)
+        if not {"System Manager", "Van Manager"} & set(roles):
+            frappe.throw(_("Not permitted"))
+    sp = user_to_sales_person(u)
+    if not sp:
+        return []
+    return _list_customers_for_sales_person(sp)
 
 
 @frappe.whitelist(methods=["POST"])
-def complete_route(plan_name: str, force: int = 0) -> dict:
-    """Mark a route plan as completed and snapshot the daily report.
+def bulk_assign_sales_person(
+    sales_person: Optional[str] = None,
+    user: Optional[str] = None,
+    customers: list | str | None = None,
+    percentage: float = 100,
+) -> dict:
+    """Append Sales Team row on multiple customers — idempotent.
 
-    The driver's app calls this when the user taps "Complete Route". We
-    persist the decision on the server so reopening the plan on the same
-    day doesn't prompt "Complete?" again (which was the 2026-04-21
-    user-reported bug — the button was client-state-only before).
-
-    Guard: if any stop is still `in_progress`, respond with a list of
-    those stops instead of closing. The app surfaces the list to the
-    driver and asks them to end those visits first. A caller can pass
-    ``force=1`` to skip the guard — used for the deliberate "close
-    anyway" escape hatch.
+    Either `sales_person` or `user` must be given. When only `user` is
+    given we resolve via Vansale Configuration so the admin can pick the
+    driver, not the (often opaque) sales_person id.
     """
-    if not plan_name:
-        frappe.throw(_("plan_name required"))
-    plan = frappe.get_doc("Van Route Plan", plan_name)
-    status = (getattr(plan, "status", None) or "Active")
-    if status == "Completed":
-        # Re-entry after refresh — just hand back the stored summary.
-        raw = getattr(plan, "completion_summary", None)
-        try:
-            summary = json.loads(raw) if raw else None
-        except (TypeError, ValueError):
-            summary = None
-        return {
-            "status": "already_completed",
-            "completed_at": naive_site_to_utc_iso(getattr(plan, "completed_at", None)),
-            "summary": summary,
-        }
+    _require_manager()
+    sp = sales_person or (user_to_sales_person(user) if user else None)
+    if not sp:
+        frappe.throw(_("sales_person or user with mapping required"))
 
-    in_progress = [
-        {"idx": int(s.idx), "customer": s.customer}
-        for s in plan.stops
-        if s.status == "in_progress"
-    ]
-    if in_progress and not int(force or 0):
-        return {
-            "status": "blocked",
-            "reason": "in_progress",
-            "in_progress_stops": in_progress,
-        }
+    customer_list = _coerce_customer_list(customers)
+    if not customer_list:
+        return {"assigned": 0, "skipped": 0}
 
-    # plan_date is optional "Effective From" anchor now — fall back to
-    # today when it isn't set, so the summary always has a readable date.
-    summary_date = str(plan.plan_date) if getattr(plan, "plan_date", None) else str(date.today())
-    summary = _compute_daily_report(plan.name, summary_date)
-    plan.status = "Completed"
-    plan.completed_at = frappe.utils.now_datetime()
-    plan.completion_summary = json.dumps(summary)
-    plan.save(ignore_permissions=True)
+    assigned = 0
+    skipped = 0
+    for customer in customer_list:
+        doc = frappe.get_doc("Customer", customer)
+        if any((row.sales_person or "") == sp for row in (doc.sales_team or [])):
+            skipped += 1
+            continue
+        doc.append("sales_team", {
+            "sales_person": sp,
+            "allocated_percentage": percentage,
+        })
+        doc.save(ignore_permissions=True)
+        assigned += 1
     frappe.db.commit()
-    return {
-        "status": "completed",
-        "completed_at": naive_site_to_utc_iso(plan.completed_at),
-        "summary": summary,
-    }
+    return {"assigned": assigned, "skipped": skipped, "sales_person": sp}
+
+
+@frappe.whitelist(methods=["POST"])
+def bulk_unassign_sales_person(
+    sales_person: Optional[str] = None,
+    user: Optional[str] = None,
+    customers: list | str | None = None,
+) -> dict:
+    """Remove Sales Team row for `sales_person` from multiple customers."""
+    _require_manager()
+    sp = sales_person or (user_to_sales_person(user) if user else None)
+    if not sp:
+        frappe.throw(_("sales_person or user with mapping required"))
+
+    customer_list = _coerce_customer_list(customers)
+    if not customer_list:
+        return {"unassigned": 0}
+
+    count = 0
+    for customer in customer_list:
+        doc = frappe.get_doc("Customer", customer)
+        removed = False
+        for row in list(doc.sales_team or []):
+            if (row.sales_person or "") == sp:
+                doc.remove(row)
+                removed = True
+        if removed:
+            doc.save(ignore_permissions=True)
+            count += 1
+    frappe.db.commit()
+    return {"unassigned": count, "sales_person": sp}
+
+
+def _coerce_customer_list(customers: list | str | None) -> list[str]:
+    if not customers:
+        return []
+    if isinstance(customers, str):
+        try:
+            customers = json.loads(customers)
+        except json.JSONDecodeError:
+            # Fallback: comma-separated plain string.
+            customers = [c.strip() for c in customers.split(",") if c.strip()]
+    return [str(c) for c in customers if c]
+
+
+def _require_manager() -> None:
+    roles = frappe.get_roles(frappe.session.user)
+    if not ({"System Manager", "Van Manager"} & set(roles)):
+        frappe.throw(_("Not permitted"))
