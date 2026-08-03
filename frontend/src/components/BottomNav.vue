@@ -1,20 +1,46 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import { useRoute, useRouter } from "vue-router";
+import { useSessionStore } from "@/stores/session";
 import Icon from "./Icon.vue";
 
 const router = useRouter();
 const route = useRoute();
+const session = useSessionStore();
 
-interface Tab { name: string; icon: "home" | "route" | "invoice" | "customer" | "more"; label: string; routes: string[] }
+interface Tab {
+  name: string;
+  icon: "home" | "route" | "stock" | "invoice" | "customer" | "more";
+  label: string;
+  routes: string[];
+}
 
-const tabs: Tab[] = [
-  { name: "dashboard", icon: "home", label: "Home", routes: ["dashboard"] },
-  { name: "route-today", icon: "route", label: "Route", routes: ["route-today"] },
-  { name: "invoices", icon: "invoice", label: "Sales", routes: ["invoices", "invoice-new", "invoice-detail"] },
-  { name: "customers", icon: "customer", label: "Customers", routes: ["customers", "customer-detail"] },
-  { name: "more", icon: "more", label: "More", routes: ["more", "van-stock", "sync-errors"] },
-];
+/**
+ * Fourth slot is Route or Van Stock, never both — a van either follows a
+ * planned route or sells freely, and a five-icon bar has no room for a
+ * sixth. `van-stock` therefore has to move between this tab's `routes` and
+ * the More tab's, or whichever tab does not own it highlights wrongly.
+ */
+const tabs = computed<Tab[]>(() => {
+  const fourth: Tab = session.routeEnabled
+    ? { name: "route-today", icon: "route", label: "Route", routes: ["route-today"] }
+    : { name: "van-stock", icon: "stock", label: "Stock", routes: ["van-stock"] };
+  const moreRoutes = session.routeEnabled
+    ? ["more", "van-stock", "sync-errors"]
+    : ["more", "sync-errors"];
+  return [
+    { name: "dashboard", icon: "home", label: "Home", routes: ["dashboard"] },
+    {
+      name: "invoices",
+      icon: "invoice",
+      label: "Sales",
+      routes: ["invoices", "invoice-new", "invoice-detail"],
+    },
+    { name: "customers", icon: "customer", label: "Customers", routes: ["customers", "customer-detail"] },
+    fourth,
+    { name: "more", icon: "more", label: "More", routes: moreRoutes },
+  ];
+});
 
 const activeName = computed(() => String(route.name ?? ""));
 

@@ -1,27 +1,41 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
-import { useRouter } from "vue-router";
-import { loginWithPin, setupPin } from "@/api/auth";
+import { useRoute, useRouter } from "vue-router";
+import { changePin, loginWithPin, setupPin } from "@/api/auth";
 import { configDefaults } from "@/api/me";
 import { useSessionStore } from "@/stores/session";
 import { ApiError, NetworkError } from "@/app/frappe";
 import { isOnline } from "@/app/online";
+import { useToastStore } from "@/stores/toasts";
 import Icon from "@/components/Icon.vue";
+import BrandMark from "@/components/BrandMark.vue";
 
 const router = useRouter();
+const route = useRoute();
 const session = useSessionStore();
+const toasts = useToastStore();
 
 if (!session.email) {
   void router.replace({ name: "login" });
 }
 
-type Mode = "setup" | "unlock";
-type Step = "enter" | "confirm";
+/**
+ * `change` is reached from More → Change PIN. It differs from `setup` in that
+ * the server demands the current PIN (`change_pin` verifies it), so the flow
+ * gains a leading "current" step. Doing it here rather than in a fourth view
+ * keeps one keypad implementation — the keypad is the fiddly part.
+ */
+type Mode = "setup" | "unlock" | "change";
+type Step = "current" | "enter" | "confirm";
 
-const mode = ref<Mode>(session.pinVerifiedAt === null ? "setup" : "unlock");
-const step = ref<Step>("enter");
+const isChange = route.query.change === "1";
+const mode = ref<Mode>(
+  isChange ? "change" : session.pinVerifiedAt === null ? "setup" : "unlock",
+);
+const step = ref<Step>(isChange ? "current" : "enter");
 const pin = ref("");
 const firstPin = ref("");
+const currentPin = ref("");
 const error = ref("");
 const busy = ref(false);
 const shake = ref(false);
@@ -30,10 +44,12 @@ const PIN_LEN = 4;
 
 const heading = computed(() => {
   if (mode.value === "unlock") return "Enter PIN";
+  if (step.value === "current") return "Current PIN";
   return step.value === "enter" ? "Set a PIN" : "Confirm PIN";
 });
 const hint = computed(() => {
   if (mode.value === "unlock") return session.email ?? "";
+  if (step.value === "current") return "Enter the PIN you use today";
   return step.value === "enter" ? "Choose 4 digits" : "Re-enter to confirm";
 });
 
@@ -67,13 +83,20 @@ async function submit() {
   if (busy.value) return;
   if (!isValid(pin.value)) { error.value = `PIN must be ${PIN_LEN} digits`; buzz(); return; }
 
-  if (mode.value === "setup" && step.value === "enter") {
+  if (mode.value === "change" && step.value === "current") {
+    currentPin.value = pin.value;
+    pin.value = "";
+    step.value = "enter";
+    return;
+  }
+  const settingNew = mode.value === "setup" || mode.value === "change";
+  if (settingNew && step.value === "enter") {
     firstPin.value = pin.value;
     pin.value = "";
     step.value = "confirm";
     return;
   }
-  if (mode.value === "setup" && step.value === "confirm" && pin.value !== firstPin.value) {
+  if (settingNew && step.value === "confirm" && pin.value !== firstPin.value) {
     error.value = "PINs do not match";
     buzz();
     pin.value = "";
@@ -84,6 +107,13 @@ async function submit() {
 
   busy.value = true;
   try {
+    if (mode.value === "change") {
+      await changePin(currentPin.value, pin.value);
+      session.markPinVerified();
+      toasts.success("PIN changed");
+      await router.replace({ name: "more" });
+      return;
+    }
     if (mode.value === "setup") await setupPin(pin.value);
     else await loginWithPin(session.email ?? "", pin.value);
     session.markPinVerified();
@@ -97,6 +127,13 @@ async function submit() {
     else error.value = "Incorrect PIN";
     buzz();
     pin.value = "";
+    if (mode.value === "change") {
+      // Restart the whole change flow — a wrong current PIN means the two
+      // later steps collected values against the wrong premise.
+      step.value = "current";
+      currentPin.value = "";
+      firstPin.value = "";
+    }
   } finally {
     busy.value = false;
   }
@@ -105,6 +142,10 @@ async function submit() {
 function signInAgain() {
   session.logout();
   void router.replace({ name: "login" });
+}
+
+function cancelChange() {
+  void router.replace({ name: "more" });
 }
 
 function onKey(e: KeyboardEvent) {
@@ -116,8 +157,9 @@ function onKey(e: KeyboardEvent) {
 
 const cta = computed(() => {
   if (busy.value) return "Working…";
-  if (mode.value === "setup" && step.value === "enter") return "Next";
-  if (mode.value === "setup") return "Save PIN";
+  if (step.value === "current") return "Next";
+  if ((mode.value === "setup" || mode.value === "change") && step.value === "enter") return "Next";
+  if (mode.value === "setup" || mode.value === "change") return "Save PIN";
   return "Unlock";
 });
 </script>
@@ -126,7 +168,7 @@ const cta = computed(() => {
   <div class="auth-wrap" @keydown="onKey" tabindex="-1">
     <div class="auth">
       <div class="brand">
-        <div class="brand-mark"><Icon name="truck" :size="24" /></div>
+        <div class="brand-mark"><BrandMark :size="24" /></div>
         <h1>{{ heading }}</h1>
         <p class="muted small">{{ hint }}</p>
       </div>
@@ -153,7 +195,12 @@ const cta = computed(() => {
         </button>
       </div>
 
-      <button class="ghost forgot" type="button" @click="signInAgain">Sign in with password instead</button>
+      <button v-if="mode === 'change'" class="ghost forgot" type="button" @click="cancelChange">
+        Cancel
+      </button>
+      <button v-else class="ghost forgot" type="button" @click="signInAgain">
+        Sign in with password instead
+      </button>
     </div>
   </div>
 </template>
@@ -181,6 +228,7 @@ const cta = computed(() => {
 
 .brand { text-align: center; display: flex; flex-direction: column; align-items: center; gap: 0.3rem; }
 .brand-mark {
+  overflow: hidden;
   width: 2.6rem; height: 2.6rem;
   border-radius: var(--radius-lg);
   background: var(--primary);

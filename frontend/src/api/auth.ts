@@ -6,6 +6,8 @@ export interface LoginResult {
   full_name: string;
   language: string;
   has_pin: boolean;
+  /** Effective PIN requirement for this user (user row -> van -> global). */
+  require_pin?: boolean;
   api_key: string;
   api_secret: string;
 }

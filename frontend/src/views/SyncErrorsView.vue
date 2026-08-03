@@ -111,6 +111,8 @@ function kindLabel(kind: EntryDescriptor["kind"]): string {
       return "Reference missing";
     case "validation":
       return "Needs edit";
+    case "blocked":
+      return "Needs admin";
     case "unknown":
     default:
       return "Error";
@@ -119,7 +121,7 @@ function kindLabel(kind: EntryDescriptor["kind"]): string {
 
 function kindTone(kind: EntryDescriptor["kind"]): string {
   if (kind === "pending" || kind === "network") return "info";
-  if (kind === "permission") return "danger";
+  if (kind === "permission" || kind === "blocked") return "danger";
   if (kind === "validation" || kind === "not-found") return "warn";
   return "warn";
 }

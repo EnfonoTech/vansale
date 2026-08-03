@@ -4,13 +4,61 @@ import { useRouter } from "vue-router";
 import { useSessionStore } from "@/stores/session";
 import { logout } from "@/api/auth";
 import { useSyncStore } from "@/stores/sync";
+import { useConfirmStore } from "@/stores/confirm";
+import { clearSiteUrl, isNative, siteUrl } from "@/app/platform";
 import Icon from "@/components/Icon.vue";
 import SarSymbol from "@/components/SarSymbol.vue";
 
 const router = useRouter();
 const session = useSessionStore();
 const sync = useSyncStore();
+const confirm = useConfirmStore();
 const appVersion = __APP_VERSION__;
+
+const showSiteRow = isNative();
+const currentSite = computed(() => (siteUrl() ?? "").replace(/^https?:\/\//, ""));
+
+function onChangePin() {
+  // Reuses PinView's keypad in `change` mode — see that view's Mode comment.
+  void router.push({ name: "pin", query: { change: "1" } });
+}
+
+/**
+ * Repoint the APK at a different Frappe site.
+ *
+ * Guarded on an empty sync queue: queued invoices, payments and stock
+ * entries belong to the site they were created against. Draining them into
+ * a different company's ledger would post real documents in the wrong
+ * books, and there is no clean way to translate customer / item / warehouse
+ * names across sites. Credentials are per-site too, so this always logs out.
+ */
+async function onChangeSite() {
+  if (sync.pending > 0) {
+    await confirm.ask({
+      title: "Sync first",
+      message:
+        `${sync.pending} item${sync.pending === 1 ? "" : "s"} still waiting to reach the server. ` +
+        `Get back online and let them sync before switching servers — they cannot be moved to another site.`,
+      confirmText: "OK",
+      cancelText: "Close",
+    });
+    return;
+  }
+  const ok = await confirm.ask({
+    title: "Change server?",
+    message: "You will be signed out and asked for the server address again.",
+    confirmText: "Change server",
+    danger: true,
+  });
+  if (!ok) return;
+  try {
+    await logout();
+  } finally {
+    session.logout();
+    await clearSiteUrl();
+    await router.replace({ name: "setup" });
+  }
+}
 
 const initials = computed(() => {
   const name = session.fullName ?? session.email ?? "";
@@ -36,23 +84,31 @@ interface Link {
   badge?: number | null;
 }
 
-const links = computed<Link[]>(() => [
-  { icon: "plus", label: "New invoice", sub: "Start a sale", to: "invoice-new", tone: "primary" },
-  { icon: "invoice", label: "All invoices", sub: "Browse submitted & drafts", to: "invoices" },
-  { icon: "payment", label: "Payments", sub: "Collections & receipts", to: "payments", tone: "success" },
-  { icon: "receipt", label: "Returns", sub: "Credit notes against invoices", to: "returns", tone: "warning" },
-  { icon: "customer", label: "Customers", sub: "Browse & create", to: "customers" },
-  { icon: "stock", label: "Van stock", sub: "Current warehouse", to: "van-stock", tone: "success" },
-  { icon: "truck", label: "Today's route", sub: "Stops, visits, signatures", to: "route-today" },
-  {
+const links = computed<Link[]>(() => {
+  const rows: Link[] = [
+    { icon: "plus", label: "New invoice", sub: "Start a sale", to: "invoice-new", tone: "primary" },
+    { icon: "invoice", label: "All invoices", sub: "Browse submitted & drafts", to: "invoices" },
+    { icon: "payment", label: "Payments", sub: "Collections & receipts", to: "payments", tone: "success" },
+    { icon: "receipt", label: "Returns", sub: "Credit notes against invoices", to: "returns", tone: "warning" },
+    { icon: "customer", label: "Customers", sub: "Browse & create", to: "customers" },
+  ];
+  // When route planning is off, Van Stock owns the fourth nav tab, so
+  // repeating it here would be dead weight. When it is on, Van Stock has no
+  // tab of its own and this is its only entry point.
+  if (session.routeEnabled) {
+    rows.push({ icon: "stock", label: "Van stock", sub: "Current warehouse", to: "van-stock", tone: "success" });
+    rows.push({ icon: "truck", label: "Today's route", sub: "Stops, visits, signatures", to: "route-today" });
+  }
+  rows.push({
     icon: "sync",
     label: "Sync errors",
     sub: sync.pending > 0 ? `${sync.pending} pending` : sync.lastError ?? "All clear",
     to: "sync-errors",
     tone: sync.pending > 0 || sync.lastError ? "danger" : undefined,
     badge: sync.pending > 0 ? sync.pending : null,
-  },
-]);
+  });
+  return rows;
+});
 </script>
 
 <template>
@@ -108,6 +164,16 @@ const links = computed<Link[]>(() => [
         <span class="muted">Currency</span>
         <span><SarSymbol :code="session.currency" /> {{ session.currency }}</span>
       </div>
+      <button v-if="session.pinRequired" class="ghost small site-btn" @click="onChangePin">
+        Change PIN
+      </button>
+      <template v-if="showSiteRow">
+        <div class="meta-row">
+          <span class="muted">Server</span>
+          <span class="truncate">{{ currentSite || "—" }}</span>
+        </div>
+        <button class="ghost small site-btn" @click="onChangeSite">Change server</button>
+      </template>
     </section>
 
     <button class="danger-ghost" @click="onLogout">
@@ -118,6 +184,8 @@ const links = computed<Link[]>(() => [
 
 <style scoped>
 .more { gap: 0.875rem; padding-bottom: 1.5rem; }
+
+.site-btn { align-self: flex-start; }
 
 .profile {
   display: grid;

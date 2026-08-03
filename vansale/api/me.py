@@ -11,6 +11,25 @@ from __future__ import annotations
 import frappe
 from frappe import _
 
+from vansale.vansale.doctype.vansale_settings.vansale_settings import global_flags
+
+
+def _resolve_mode(*modes: str | None, default: bool) -> bool:
+    """Collapse a most-specific-first chain of tri-state modes into a bool.
+
+    Each level is "Enabled", "Disabled" or "Follow Global" (also None / "" on
+    rows saved before the field existed). The first level that commits wins;
+    if every level defers, `default` — the global master switch — decides.
+
+    Kept in one helper so the per-van and per-user chains cannot drift.
+    """
+    for mode in modes:
+        if mode == "Enabled":
+            return True
+        if mode == "Disabled":
+            return False
+    return default
+
 
 @frappe.whitelist(methods=["GET"])
 def config_defaults() -> dict:
@@ -75,13 +94,15 @@ def config_defaults() -> dict:
     cfg_user = frappe.db.get_value(
         "Vansale Configuration User",
         {"user": user},
-        ["parent", "sales_person"],
+        ["parent", "sales_person", "pin_mode"],
         as_dict=True,
     )
     van_code = cfg_user.parent if cfg_user else None
     sales_person = cfg_user.sales_person if cfg_user else None
     require_location = False
     selling_price_list: str | None = None
+    van_route_mode: str | None = None
+    van_pin_mode: str | None = None
     if van_code:
         # require_location is new (v1.0.12); guard with has_field so old sites don't crash
         try:
@@ -99,6 +120,30 @@ def config_defaults() -> dict:
                 )
         except Exception:
             selling_price_list = None
+        # route_mode / pin_mode are new (v1.0.26); same has_field guard. On a
+        # site that has not migrated, both stay None → "Follow Global" → the
+        # global defaults (both on), i.e. the old always-on behaviour.
+        try:
+            meta = frappe.get_meta("Vansale Configuration")
+            wanted = [f for f in ("route_mode", "pin_mode") if meta.has_field(f)]
+            if wanted:
+                row = frappe.db.get_value(
+                    "Vansale Configuration", van_code, wanted, as_dict=True
+                ) or {}
+                van_route_mode = row.get("route_mode")
+                van_pin_mode = row.get("pin_mode")
+        except Exception:
+            van_route_mode = van_pin_mode = None
+
+    # Most specific wins: user row → van → global master switch.
+    flags = global_flags()
+    enable_route = _resolve_mode(van_route_mode, default=flags["enable_route"])
+    require_pin = _resolve_mode(
+        cfg_user.pin_mode if cfg_user else None,
+        van_pin_mode,
+        default=flags["require_pin"],
+    )
+
     sales_person_name = None
     if sales_person:
         sales_person_name = frappe.db.get_value("Sales Person", sales_person, "sales_person_name") or sales_person
@@ -127,6 +172,8 @@ def config_defaults() -> dict:
         "sales_person_name": sales_person_name,
         "require_location": require_location,
         "selling_price_list": selling_price_list,
+        "enable_route": enable_route,
+        "require_pin": require_pin,
     }
 
 

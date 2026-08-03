@@ -22,6 +22,7 @@ export type ErrorKind =
   | "permission"
   | "not-found"
   | "validation"
+  | "blocked"
   | "unknown";
 
 export interface ClassifiedError {
@@ -47,6 +48,18 @@ const IDEMPOTENT = [
 ];
 const PERMISSION = [/not\s+permitted/i, /permission/i, /forbidden/i];
 const NOT_FOUND = [/not\s+found/i, /does\s+not\s+exist/i];
+// Backend data/setup faults. The van user CANNOT fix these by editing the
+// queued payload — an admin has to set the item's valuation rate or post
+// the stock into the van warehouse. Must be tested BEFORE `VALIDATION`,
+// whose /required/i also matches "Valuation Rate ... is required to do
+// accounting entries". Misfiling these as `validation` is what left a
+// 102-day-old invoice in the queue with an Edit button that could never
+// resolve it.
+const BLOCKED = [
+  /valuation\s+rate/i,
+  /negative\s+stock/i,
+  /(not\s+enough|insufficient)\s+stock/i,
+];
 const VALIDATION = [/mandatory/i, /missing/i, /invalid/i, /required/i];
 
 function extractMessage(err: unknown): string {
@@ -96,6 +109,16 @@ export function classifyError(err: unknown): ClassifiedError {
       treatAsSuccess: false,
       userFacing: true,
       requiresEdit: true,
+      message: msg,
+    };
+  }
+  if (BLOCKED.some((re) => re.test(msg))) {
+    return {
+      kind: "blocked",
+      retryable: false,
+      treatAsSuccess: false,
+      userFacing: true,
+      requiresEdit: false,
       message: msg,
     };
   }

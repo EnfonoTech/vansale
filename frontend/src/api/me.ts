@@ -20,6 +20,10 @@ export interface ConfigDefaults {
   sales_person_name: string | null;
   require_location?: boolean;
   selling_price_list?: string | null;
+  /** Per-van route-planning toggle. Absent on sites older than v1.0.26. */
+  enable_route?: boolean;
+  /** Effective PIN requirement: user row -> van -> global master switch. */
+  require_pin?: boolean;
 }
 
 export function configDefaults() {

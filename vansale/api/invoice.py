@@ -12,6 +12,7 @@ from typing import Any, Optional
 
 import frappe
 from frappe import _
+from frappe.utils import cint, flt
 
 from vansale.api.datetime_util import naive_site_to_utc_iso, parse_client_ts
 from vansale.api.me import current_user_sales_person
@@ -359,6 +360,64 @@ def update_draft(
         "outstanding_amount": float(doc.outstanding_amount or 0),
         "status": doc.status,
         "docstatus": int(doc.docstatus or 0),
+        "modified": naive_site_to_utc_iso(doc.modified),
+    }
+
+
+@frappe.whitelist(methods=["POST"])
+def submit_draft(name: str, mode_of_payment: Optional[str] = None) -> dict:
+    """Submit an existing draft Sales Invoice, loading it from the database.
+
+    NEVER route this through ``frappe.client.submit``. That endpoint does
+    ``frappe.get_doc(<client dict>)``, which builds a fresh in-memory doc
+    from the payload instead of loading the stored one. Two consequences:
+
+    1. ``_original_modified`` is never populated from the row, so
+       ``Document.check_if_latest`` sees a mismatch and raises
+       ``TimestampMismatchError`` — the "Document has been modified after
+       you have opened it" toast the field reported.
+    2. If that check ever passed, ``db_update`` would write the payload
+       doc verbatim — blanking ``items``, taxes and totals on submit.
+
+    So the timestamp error was protecting the data, not corrupting it.
+    Loading by name fixes both.
+
+    Cash (``is_pos``) drafts need their ``payments`` row filled before
+    submit or ERPNext rejects the doc, so mirror ``update_draft``'s
+    behaviour when the row is missing.
+    """
+    if not name:
+        frappe.throw(_("name required"))
+
+    doc = frappe.get_doc("Sales Invoice", name)
+    if cint(doc.docstatus) != 0:
+        frappe.throw(_("Only draft invoices can be submitted"))
+    # Owner check first — Van Users hold write/submit on their own drafts
+    # but not on other salespeople's (same rule as `update_draft`).
+    if doc.owner != frappe.session.user:
+        if not frappe.has_permission("Sales Invoice", "submit", doc=doc):
+            frappe.throw(_("You cannot submit this invoice"))
+
+    if cint(doc.is_pos) and not doc.get("payments"):
+        mop = mode_of_payment or "Cash"
+        account = _default_mop_account(mop, doc.company)
+        if not account:
+            frappe.throw(_("No default account configured for Mode of Payment") + ": " + mop)
+        doc.append("payments", {
+            "mode_of_payment": mop,
+            "account": account,
+            "amount": flt(doc.grand_total),
+        })
+        doc.save()
+
+    doc.submit()
+    frappe.db.commit()
+    return {
+        "name": doc.name,
+        "grand_total": flt(doc.grand_total),
+        "outstanding_amount": flt(doc.outstanding_amount),
+        "status": doc.status,
+        "docstatus": cint(doc.docstatus),
         "modified": naive_site_to_utc_iso(doc.modified),
     }
 

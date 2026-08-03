@@ -12,6 +12,10 @@
   "column_break_company",
   "company",
   "branch",
+  "section_break_modules",
+  "route_mode",
+  "column_break_modules",
+  "pin_mode",
   "section_break_pricing",
   "selling_price_list",
   "section_break_visits",
@@ -55,6 +59,31 @@
    "fieldtype": "Link",
    "label": "Branch",
    "options": "Branch"
+  },
+  {
+   "fieldname": "section_break_modules",
+   "fieldtype": "Section Break",
+   "label": "Modules"
+  },
+  {
+   "fieldname": "route_mode",
+   "fieldtype": "Select",
+   "label": "Route planning",
+   "options": "Follow Global\nEnabled\nDisabled",
+   "default": "Follow Global",
+   "description": "Enabled: app shows Today's Route in the bottom bar and home. Disabled: that slot becomes Van Stock. Follow Global uses Vansale Settings."
+  },
+  {
+   "fieldname": "column_break_modules",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "pin_mode",
+   "fieldtype": "Select",
+   "label": "PIN unlock",
+   "options": "Follow Global\nEnabled\nDisabled",
+   "default": "Follow Global",
+   "description": "Applies to every user on this van unless their Assigned Users row overrides it."
   },
   {
    "fieldname": "section_break_pricing",

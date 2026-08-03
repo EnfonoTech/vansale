@@ -131,16 +131,16 @@ export async function detail(name: string): Promise<InvoiceDetail> {
 /**
  * Submit an existing draft Sales Invoice.
  *
- * Uses the generic `frappe.client.submit` which is whitelisted for
- * submitable doctypes in Frappe v15 and works regardless of whether
- * the custom `vansale.api.invoice` module exposes a submit helper.
- *
- * Server accepts either the doc dict or just `{doctype, name}`. We send
- * the minimal shape so we don't have to round-trip the full doc.
+ * Must NOT use `frappe.client.submit`. That endpoint rebuilds the doc from
+ * whatever dict the client posts, so a `{doctype, name}` payload produced
+ * "Document has been modified after you have opened it" on every submit —
+ * and would have blanked items + totals if the check had passed. The
+ * server-side `submit_draft` loads the stored doc by name instead.
  */
-export async function submitDraft(name: string): Promise<void> {
-  await apiCall("POST", "frappe.client.submit", {
-    doc: { doctype: "Sales Invoice", name },
+export async function submitDraft(name: string, modeOfPayment?: string): Promise<void> {
+  await apiCall("POST", "vansale.api.invoice.submit_draft", {
+    name,
+    ...(modeOfPayment ? { mode_of_payment: modeOfPayment } : {}),
   });
   const sync = useSyncStore();
   void sync.refresh();

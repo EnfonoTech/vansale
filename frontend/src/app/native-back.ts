@@ -10,6 +10,7 @@ import type { Router } from "vue-router";
 
 const PARENT_BY_ROUTE_NAME: Record<string, string | null> = {
   dashboard: null, // root — exit on next back
+  setup: null, // no server configured yet; back can only exit
   login: null,
   pin: null,
   customers: "dashboard",
@@ -21,7 +22,7 @@ const PARENT_BY_ROUTE_NAME: Record<string, string | null> = {
   "sync-errors": "dashboard",
 };
 
-const EXIT_ROUTES = new Set(["dashboard", "login", "pin"]);
+const EXIT_ROUTES = new Set(["dashboard", "setup", "login", "pin"]);
 
 let lastExitPromptAt = 0;
 const EXIT_WINDOW_MS = 2000;

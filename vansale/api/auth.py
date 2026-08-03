@@ -88,6 +88,10 @@ def login(usr: str, pwd: str):
         "full_name": user_doc.full_name,
         "language": user_doc.language or "en",
         "has_pin": bool(frappe.db.exists("Vansale Pin", {"user": user_doc.name})),
+        # Whether this user is asked for a PIN at all — resolved user → van →
+        # global. The client needs it in the login response so it knows
+        # whether to route to /pin or straight to Home.
+        "require_pin": _require_pin_for(user_doc.name),
         "api_key": api_key,
         "api_secret": api_secret,
     }
@@ -202,6 +206,79 @@ def change_pin(old_pin: str, new_pin: str):
     doc.save(ignore_permissions=True)
     frappe.db.commit()
     return {"ok": True}
+
+
+def _require_pin_for(user: str) -> bool:
+    """Effective PIN requirement for `user`: user row → van → global.
+
+    Delegates to `me._resolve_mode` so login and `config_defaults` can never
+    disagree about whether this driver needs a PIN.
+    """
+    from vansale.api.me import _resolve_mode
+    from vansale.vansale.doctype.vansale_settings.vansale_settings import global_flags
+
+    row = frappe.db.get_value(
+        "Vansale Configuration User", {"user": user}, ["parent", "pin_mode"], as_dict=True
+    )
+    van_mode = None
+    if row and row.parent:
+        try:
+            if frappe.get_meta("Vansale Configuration").has_field("pin_mode"):
+                van_mode = frappe.db.get_value("Vansale Configuration", row.parent, "pin_mode")
+        except Exception:
+            van_mode = None
+    return _resolve_mode(
+        row.pin_mode if row else None, van_mode, default=global_flags()["require_pin"]
+    )
+
+
+@frappe.whitelist(methods=["POST"])
+def reset_pin(user: str):
+    """Admin PIN reset — clears the target user's PIN so they set a new one.
+
+    The driver forgets their PIN in the field and cannot be walked through
+    bcrypt by phone; the office needs a one-tap fix. Deleting the `Vansale
+    Pin` row is the reset: the next login reports `has_pin: false` and the app
+    routes to PIN setup.
+
+    Permission is deliberately explicit rather than relying on the DocType's
+    DocPerms — this is a whitelisted endpoint, so any logged-in Van User could
+    otherwise clear a colleague's PIN. Van Manager or System Manager only, and
+    never a self-reset (that is what `change_pin` is for, which proves
+    knowledge of the current PIN).
+    """
+    if not user:
+        frappe.throw(_("user is required"))
+    roles = set(frappe.get_roles())
+    if not roles & {"Van Manager", "System Manager"}:
+        frappe.throw(_("Only a Van Manager can reset a PIN"), frappe.PermissionError)
+    if user == frappe.session.user:
+        frappe.throw(_("Use Change PIN to change your own PIN"))
+    if not frappe.db.exists("User", user):
+        frappe.throw(_("Unknown user"))
+
+    name = frappe.db.get_value("Vansale Pin", {"user": user}, "name")
+    if not name:
+        return {"ok": True, "cleared": False}
+    frappe.delete_doc("Vansale Pin", name, ignore_permissions=True, force=True)
+    frappe.db.commit()
+    return {"ok": True, "cleared": True}
+
+
+@frappe.whitelist(allow_guest=True, methods=["GET"])
+def site_info():
+    """Pre-login connectivity probe for the APK's site-URL setup screen.
+
+    `allow_guest` justification: the app must confirm a user-typed URL is
+    reachable AND is a Frappe site with `vansale` installed BEFORE anyone
+    can log in — there is no session to authenticate with yet. The response
+    carries no site, user or tenant data, only "yes, this app is here and
+    which version", so it leaks nothing an unauthenticated visitor cannot
+    already infer from the login page.
+    """
+    from vansale import __version__
+
+    return {"ok": True, "app": "vansale", "app_version": __version__}
 
 
 @frappe.whitelist()

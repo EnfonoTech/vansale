@@ -5,10 +5,14 @@ import { login } from "@/api/auth";
 import { useSessionStore } from "@/stores/session";
 import { ApiError, NetworkError } from "@/app/frappe";
 import { NATIVE_VERSION } from "@/app/native-version";
-import Icon from "@/components/Icon.vue";
+import BrandMark from "@/components/BrandMark.vue";
 
 const router = useRouter();
 const session = useSessionStore();
+
+// Baked in from CUSTOMER_APP_TITLE at build time — the Android launcher
+// label already comes from the same var via strings.xml.
+const appTitle = __APP_TITLE__;
 
 const email = ref("");
 const password = ref("");
@@ -64,6 +68,16 @@ async function onSubmit() {
     // PinView falls into "setup" mode instead of asking the user to enter a
     // PIN that no longer exists (e.g. after the 1.0.13 PIN-wipe migration).
     if (!res.has_pin) session.clearPinWindow();
+    // PIN unlock is configurable (user row → van → global). When the admin
+    // turned it off, skip the PIN screen entirely rather than asking the
+    // driver to invent a PIN nobody will ever check.
+    const needsPin = res.require_pin !== false;
+    session.setRequirePin(needsPin);
+    if (!needsPin) {
+      session.markPinVerified();
+      await router.replace({ name: "dashboard" });
+      return;
+    }
     await router.replace({ name: "pin" });
   } catch (err) {
     if (err instanceof ApiError) error.value = err.serverMessage ?? "Incorrect email or password";
@@ -79,8 +93,8 @@ async function onSubmit() {
   <div class="auth-wrap">
     <div class="auth">
       <div class="brand">
-        <div class="brand-mark"><Icon name="truck" :size="28" /></div>
-        <h1>Van Sale</h1>
+        <div class="brand-mark"><BrandMark :size="28" /></div>
+        <h1>{{ appTitle }}</h1>
         <p class="muted small">Sign in to continue</p>
       </div>
 
@@ -172,6 +186,7 @@ async function onSubmit() {
 
 .brand { text-align: center; display: flex; flex-direction: column; align-items: center; gap: 0.35rem; }
 .brand-mark {
+  overflow: hidden;
   width: 3rem; height: 3rem;
   border-radius: var(--radius-lg);
   background: var(--primary);

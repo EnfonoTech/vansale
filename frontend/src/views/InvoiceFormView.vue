@@ -70,6 +70,16 @@ const uomCache = reactive<Record<string, ItemUom[]>>({});
 
 const TAX_RATE = 0.15;
 
+// The catalog only lists items with stock in this van (see `loadAll`), so
+// distinguish "your search matched nothing" from "this van is empty" —
+// the second one needs the office to post a transfer, not a retype.
+const emptyCatalogHint = computed(() => {
+  if (itemSearch.value.trim()) return "No item in this van's stock matches that search.";
+  return warehouse.value
+    ? `No stock in ${warehouse.value}. Ask the office to transfer stock into the van.`
+    : "No van warehouse assigned to your user. Ask the office to set one.";
+});
+
 const netTotal = computed(() => lines.value.reduce((s, l) => s + l.amount, 0));
 const taxTotal = computed(() => (netTotal.value - (discountAmount.value || 0)) * TAX_RATE);
 const grandTotal = computed(() => netTotal.value - (discountAmount.value || 0) + taxTotal.value);
@@ -137,7 +147,10 @@ watch(customer, async (newCustomer) => {
 
 async function loadAll() {
   customers.value = await listCustomers(undefined, 200);
-  items.value = await listItems(undefined, warehouse.value || undefined, 300);
+  // `onlyInStock` — a van can only sell what it carries, and an item with
+  // no incoming stock has no valuation rate, which ERPNext rejects at
+  // submit time (surfacing as an unfixable sync error days later).
+  items.value = await listItems(undefined, warehouse.value || undefined, 300, true);
   if (isEditMode.value) {
     await prefillFromDraft(editName.value);
   }
@@ -177,7 +190,7 @@ async function prefillFromDraft(name: string) {
 }
 
 async function searchItems() {
-  items.value = await listItems(itemSearch.value || undefined, warehouse.value || undefined, 80);
+  items.value = await listItems(itemSearch.value || undefined, warehouse.value || undefined, 80, true);
 }
 
 function recalc(l: Line) {
@@ -523,6 +536,12 @@ onMounted(loadAll);
           </button>
         </li>
       </ul>
+      <!--
+        The catalog is filtered to items the van actually carries, so an
+        empty list is a stock problem, not a broken screen. Say which, or
+        the driver reads a blank panel as "the app is down".
+      -->
+      <p v-if="items.length === 0" class="muted small">{{ emptyCatalogHint }}</p>
     </section>
 
     <!-- Totals preview -->

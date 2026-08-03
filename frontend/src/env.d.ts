@@ -24,3 +24,5 @@ interface ImportMeta {
 
 declare const __BUILD_TARGET__: "web" | "native";
 declare const __APP_VERSION__: string;
+/** `CUSTOMER_APP_TITLE` baked in at build time; "Van Sale" when unset. */
+declare const __APP_TITLE__: string;

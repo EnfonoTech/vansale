@@ -21,6 +21,13 @@ interface Persisted {
   language: string;
   pinVerifiedAt: number | null;
   defaults: ConfigDefaults | null;
+  /**
+   * Effective PIN requirement (user row -> van -> global), delivered by the
+   * login response and refreshed on every `configDefaults`. Persisted so an
+   * offline relaunch does not fall back to prompting for a PIN the admin
+   * switched off.
+   */
+  requirePin: boolean;
 }
 
 function loadPersisted(): Persisted {
@@ -41,6 +48,7 @@ function initial(): Persisted {
     language: "en",
     pinVerifiedAt: null,
     defaults: null,
+    requirePin: true,
   };
 }
 
@@ -52,14 +60,25 @@ export const useSessionStore = defineStore("session", {
   state: (): Persisted => loadPersisted(),
   getters: {
     isAuthenticated: (s) => Boolean(s.user),
+    /** False when the admin turned PIN unlock off for this user or van. */
+    pinRequired: (s) => s.requirePin !== false,
+    // A disabled PIN is always "valid" — the guard must not bounce the user
+    // to a screen that would ask for a PIN they were never asked to set.
     pinStillValid: (s) =>
-      s.pinVerifiedAt !== null && Date.now() - s.pinVerifiedAt < PIN_WINDOW_MS,
+      s.requirePin === false ||
+      (s.pinVerifiedAt !== null && Date.now() - s.pinVerifiedAt < PIN_WINDOW_MS),
     defaultWarehouse: (s) => s.defaults?.default_warehouse ?? null,
     defaultCostCenter: (s) => s.defaults?.default_cost_center ?? null,
     defaultCompany: (s) => s.defaults?.company ?? null,
     currency: (s) => s.defaults?.currency ?? null,
     isVanUser: (s) => Boolean(s.defaults?.is_van_user),
     requireLocation: (s) => Boolean(s.defaults?.require_location),
+    /**
+     * Route planning is opt-out per van. Defaults to true while `defaults`
+     * is still null (first paint, or a site that predates the field) so the
+     * Route tab never flickers away on an app that does use routes.
+     */
+    routeEnabled: (s) => s.defaults?.enable_route !== false,
     vanPriceList: (s) => s.defaults?.selling_price_list ?? null,
   },
   actions: {
@@ -78,8 +97,13 @@ export const useSessionStore = defineStore("session", {
       this.pinVerifiedAt = null;
       persist(this.$state);
     },
+    setRequirePin(required: boolean) {
+      this.requirePin = required;
+      persist(this.$state);
+    },
     setDefaults(defaults: ConfigDefaults) {
       this.defaults = defaults;
+      if (typeof defaults.require_pin === "boolean") this.requirePin = defaults.require_pin;
       if (defaults.full_name) this.fullName = defaults.full_name;
       if (defaults.language) this.language = defaults.language;
       persist(this.$state);

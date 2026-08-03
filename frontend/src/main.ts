@@ -3,7 +3,7 @@ import { createPinia } from "pinia";
 import App from "./app/App.vue";
 import { router } from "./app/router";
 import { i18n, setLocale } from "./app/i18n";
-import { isNative } from "./app/platform";
+import { isNative, loadSiteUrl } from "./app/platform";
 
 // Bundled web fonts — self-hosted so the Capacitor APK stays fully offline.
 // `@fontsource-variable/*` ships a single woff2 with the whole weight axis
@@ -26,7 +26,12 @@ app.use(i18n);
 const defaultLocale = (import.meta.env.VITE_DEFAULT_LOCALE as "en" | "ar") || "en";
 setLocale(defaultLocale);
 
-app.mount("#app");
+// The stored site URL must be in memory BEFORE the first navigation guard
+// runs — `apiBase()` is synchronous, and mounting first would let the guard
+// see "no server configured" and bounce a fully set-up app to /setup.
+void loadSiteUrl().finally(() => {
+  app.mount("#app");
+});
 
 // Native bootstrap — splash + status bar + back-button wiring.
 if (isNative()) {

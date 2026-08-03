@@ -23,18 +23,19 @@ const APP_VERSION = versionMatch ? versionMatch[1] : "0.0.0";
 // `preserveSymlinks: false` (default) is load-bearing: setting it true
 // makes the Capacitor plugin proxies fail to initialise (§5 rule 13).
 export default defineConfig(({ mode }) => {
-  // Load VITE_*-prefixed vars from process.env and .env files so we can
-  // fail fast when the APK would otherwise ship without an API base URL
-  // baked in. Prior release (v1.0.17) shipped once with VITE_API_BASE
-  // missing, causing every API call to throw "VITE_API_BASE not set".
+  // `VITE_API_BASE` is now the *default* server, not the only one: the APK
+  // asks for a site URL on first run and stores it (see platform.ts
+  // `loadSiteUrl`). Baking it in is still preferred for customer builds —
+  // the tester never sees the setup screen — so a missing value warns
+  // loudly rather than passing silently. v1.0.17 shipped without it and
+  // every API call threw; back then there was no runtime fallback.
   const env = loadEnv(mode, __dirname, "VITE_");
   const apiBase = env.VITE_API_BASE ?? process.env.VITE_API_BASE;
   if (!apiBase) {
-    throw new Error(
-      "VITE_API_BASE is required for native builds. Export it (e.g. " +
-      "`VITE_API_BASE=https://host CUSTOMER_BUILD_TARGET=native pnpm exec vite build`) " +
-      "or source customers/.env.<customer> before running. Without it, " +
-      "the APK fails every network call with apiBase() throwing at runtime.",
+    console.warn(
+      "\n⚠ VITE_API_BASE not set — the APK will open the server-address " +
+      "setup screen on first run instead of connecting straight to a site.\n" +
+      "  For a customer build, source customers/.env.<customer> first.\n",
     );
   }
 
@@ -54,6 +55,9 @@ export default defineConfig(({ mode }) => {
     define: {
       __BUILD_TARGET__: JSON.stringify("native"),
       __APP_VERSION__: JSON.stringify(APP_VERSION),
+      // `build-customer.sh` sources customers/.env.<customer> with `set -a`,
+      // so CUSTOMER_* land in process.env. `loadEnv` above is VITE_-only.
+      __APP_TITLE__: JSON.stringify(process.env.CUSTOMER_APP_TITLE ?? "Van Sale"),
     },
   };
 });

@@ -4,7 +4,12 @@
  "creation": "2026-04-19 00:00:00",
  "doctype": "DocType",
  "engine": "InnoDB",
- "field_order": ["user", "role", "sales_person"],
+ "field_order": [
+  "user",
+  "role",
+  "sales_person",
+  "pin_mode"
+ ],
  "fields": [
   {
    "fieldname": "user",
@@ -30,6 +35,15 @@
    "options": "Sales Person",
    "in_list_view": 1,
    "description": "Auto-tagged on invoices for commission"
+  },
+  {
+   "fieldname": "pin_mode",
+   "fieldtype": "Select",
+   "label": "PIN unlock",
+   "options": "Follow Global\nEnabled\nDisabled",
+   "default": "Follow Global",
+   "in_list_view": 1,
+   "description": "Overrides the van's PIN setting for this driver only."
   }
  ],
  "index_web_pages_for_search": 0,

@@ -39,6 +39,45 @@ sudo supervisorctl signal QUIT frappe-bench-web:frappe-bench-frappe-web
 
 Open `/vansale` on the site.
 
+## Release an APK for a new client
+
+Four steps. Everything else is scripted.
+
+```bash
+# 1. Config — copy the template, fill in app id, title, colours, site URL
+cp customers/.env.example customers/.env.<client>
+
+# 2. Artwork — drop a 1024x1024 icon.png (and optional logo.png) in place
+mkdir -p customers/assets/<client>
+
+# 3. Signing key — ONCE per client. Back the keystore up twice.
+bash scripts/generate-keystore.sh <client>
+
+# 4. Build. Bumps the version, builds web + native, signs the APK.
+bash scripts/build-customer.sh <client>
+```
+
+Output lands in `dist/`: `vansale-<client>-<version>.apk` plus a
+`vansale-<client>-pwa.tar.gz` for serving the same build from Frappe.
+
+Rules that are load-bearing:
+
+- **`VITE_API_BASE` must be the client's real site.** The native build aborts
+  without it; a wrong value ships an APK where every call fails.
+- **`CUSTOMER_APP_ID` must be unique per client** (`com.enfono.vansale.<client>`).
+  Reusing an id makes the new APK overwrite the other client's app — and
+  a different signing key on the same id makes Android refuse to install.
+- **Never lose the keystore.** Re-signing with a new key forces every user to
+  uninstall, which discards their offline queue.
+- **Commit before building.** The script refuses a dirty tree, because the
+  version bump it writes has to be reproducible from a tag
+  (`VANSALE_ALLOW_DIRTY=1` overrides for local experiments).
+- **Never hand-edit versions.** `scripts/bump-version.mjs` keeps
+  `NATIVE_VERSION` and `versionCode` in lockstep; if they desync, Android
+  silently skips the reinstall and the tester keeps running the old build.
+
+See [`customers/assets/README.md`](customers/assets/README.md) for icon specs.
+
 ## License
 
 MIT

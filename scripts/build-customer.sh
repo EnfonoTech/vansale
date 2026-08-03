@@ -53,6 +53,11 @@ node scripts/bump-version.mjs patch
 
 mkdir -p dist
 
+# --- 0. Brand logo ----------------------------------------------------------
+# Must run BEFORE the vite builds — Vite copies `public/` at build time, so
+# staging the logo afterwards would leave it out of both bundles.
+CUSTOMER_NAME="${CUSTOMER}" node scripts/generate-customer-assets.mjs brand
+
 # --- 1. Web PWA tarball -----------------------------------------------------
 echo "▶ Building web bundle"
 (cd frontend && CUSTOMER_BUILD_TARGET=web pnpm exec vite build)
@@ -79,11 +84,13 @@ VANSALE_KEYSTORE_ALIAS="${ALIAS}" \
 CUSTOMER_APP_ID="${CUSTOMER_APP_ID}" \
 python3 scripts/_patch-build-gradle.py
 
-# Customer colors / strings
+# Customer colors / strings / launcher icon + splash
+CUSTOMER_NAME="${CUSTOMER}" \
 CUSTOMER_THEME_PRIMARY="${CUSTOMER_THEME_PRIMARY}" \
+CUSTOMER_THEME_BG="${CUSTOMER_THEME_BG:-#f8fafc}" \
 CUSTOMER_APP_TITLE="${CUSTOMER_APP_TITLE}" \
 CUSTOMER_APP_ID="${CUSTOMER_APP_ID}" \
-node scripts/generate-customer-assets.mjs
+node scripts/generate-customer-assets.mjs android
 
 # --- 3. Assemble APK --------------------------------------------------------
 if [[ -z "${VANSALE_KEYSTORE_PW:-}" ]]; then

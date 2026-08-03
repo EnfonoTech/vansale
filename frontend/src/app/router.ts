@@ -21,8 +21,10 @@
 import { createRouter, createWebHashHistory } from "vue-router";
 import type { RouteRecordRaw } from "vue-router";
 import { useSessionStore } from "@/stores/session";
+import { needsSiteSetup } from "./platform";
 
 const routes: RouteRecordRaw[] = [
+  { path: "/setup", name: "setup", component: () => import("@/views/SiteSetupView.vue") },
   { path: "/login", name: "login", component: () => import("@/views/LoginView.vue") },
   {
     path: "/pin",
@@ -171,6 +173,14 @@ export const router = createRouter({
 
 router.beforeEach((to) => {
   const session = useSessionStore();
+  // Server first: without a site URL the APK cannot reach any endpoint, so
+  // every other guard below would only produce network errors.
+  if (needsSiteSetup() && to.name !== "setup") {
+    return { name: "setup", replace: true };
+  }
+  if (to.name === "setup" && !needsSiteSetup() && session.isAuthenticated) {
+    return { name: "dashboard", replace: true };
+  }
   if (to.meta.requiresAuth && !session.isAuthenticated) {
     return { name: "login", replace: true };
   }
@@ -178,6 +188,12 @@ router.beforeEach((to) => {
     return { name: "pin", replace: true };
   }
   if (to.name === "login" && session.isAuthenticated && session.pinStillValid) {
+    return { name: "dashboard", replace: true };
+  }
+  // Route planning is per-van. When the van has it off, the screens stay
+  // registered (deep links, back stack) but bounce to Home so a stale
+  // history entry cannot resurrect a hidden module.
+  if (to.name === "route-today" && session.defaults && !session.routeEnabled) {
     return { name: "dashboard", replace: true };
   }
   return true;

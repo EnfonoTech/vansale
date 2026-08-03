@@ -6,6 +6,7 @@ from typing import Optional
 
 import frappe
 from frappe import _
+from frappe.utils import cint
 
 
 _ITEM_FIELDS = [
@@ -23,14 +24,56 @@ _ITEM_FIELDS = [
 
 
 @frappe.whitelist(methods=["GET"])
-def list_mine(limit: int = 100, search: Optional[str] = None, warehouse: Optional[str] = None) -> list[dict]:
+def list_mine(
+    limit: int = 100,
+    search: Optional[str] = None,
+    warehouse: Optional[str] = None,
+    only_in_stock: int = 0,
+) -> list[dict]:
     """Search items by code / name / barcode.
 
     v15 Item has no top-level `barcode` column — barcodes live in the
     `Item Barcode` child table. Prior build used `or_filters={'barcode': ...}`
     which silently returned 0 rows and broke the catalog search.
+
+    ``only_in_stock`` restricts results to items with a positive Bin
+    balance in ``warehouse``. A van can only sell what it carries, and an
+    item with no incoming stock transaction also has no valuation rate —
+    ERPNext then rejects the invoice at submit time with "Valuation Rate
+    for the Item ... is required to do accounting entries", which for an
+    offline-queued invoice surfaces days later as an unfixable sync error.
+    Filtering the picker is the only place that failure can be prevented.
+
+    The Bin restriction is applied as a *filter*, not a post-fetch
+    annotation: annotating after the `limit` means a stocked item outside
+    the first N rows of `modified desc` never appears in the results.
     """
     filters: dict = {"disabled": 0, "has_variants": 0}
+    if warehouse and cint(only_in_stock):
+        allowed = set(
+            frappe.get_all(
+                "Bin",
+                filters={"warehouse": warehouse, "actual_qty": [">", 0]},
+                pluck="item_code",
+                limit_page_length=0,
+            )
+        )
+        # Non-stock items (delivery charge, service lines) have no Bin row
+        # and no valuation requirement — excluding them would hide
+        # legitimate sellables. Union them in rather than adding a second
+        # or_filters group, which `get_all` cannot express alongside the
+        # search group below.
+        allowed.update(
+            frappe.get_all(
+                "Item",
+                filters={"is_stock_item": 0, "disabled": 0, "has_variants": 0},
+                pluck="name",
+                limit_page_length=0,
+            )
+        )
+        if not allowed:
+            return []
+        filters["name"] = ["in", list(allowed)]
     or_filters = None
     if search:
         s = f"%{search}%"

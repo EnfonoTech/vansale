@@ -52,6 +52,32 @@ describe("classifyError", () => {
     expect(c.requiresEdit).toBe(true);
   });
 
+  it("classifies a missing valuation rate as blocked, NOT validation", () => {
+    // Real field error. Its "is required" tail matches the VALIDATION
+    // regex, which used to file it as "Needs edit" and offer the driver an
+    // Edit button that could never fix it — an admin has to set the item's
+    // valuation rate or post stock into the van warehouse.
+    const c = classifyError(
+      new ApiError(
+        "val",
+        417,
+        "Valuation Rate for the Item 123item, is required to do accounting entries for Sales Invoice ACC-SINV-2026-00079",
+      ),
+    );
+    expect(c.kind).toBe("blocked");
+    expect(c.retryable).toBe(false);
+    expect(c.requiresEdit).toBe(false);
+    expect(c.userFacing).toBe(true);
+  });
+
+  it("classifies negative stock as blocked", () => {
+    const c = classifyError(
+      new ApiError("stock", 417, "Negative stock error for item ITEM-001 in warehouse Dammam Van"),
+    );
+    expect(c.kind).toBe("blocked");
+    expect(c.requiresEdit).toBe(false);
+  });
+
   it("falls through to unknown (retryable) for unrecognised errors", () => {
     const c = classifyError(new ApiError("boom", 500, "Internal server error"));
     expect(c.kind).toBe("unknown");

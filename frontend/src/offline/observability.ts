@@ -95,7 +95,11 @@ export function describeQueueEntry(
   const kind: DisplayKind = ((entry.errorKind ?? (entry.lastError ? "unknown" : "pending")) as DisplayKind);
   // Retry is only meaningful for network / unknown / pending. Validation /
   // not-found need the user to edit first. Permission is a hard stop.
-  const canRetry = kind === "pending" || kind === "network" || kind === "unknown";
+  // `blocked` is retryable by hand but never editable: the payload is fine,
+  // the backend data was wrong (missing valuation rate / van stock), so the
+  // button the user needs is Retry-after-admin-fixed-it, not Edit.
+  const canRetry =
+    kind === "pending" || kind === "network" || kind === "unknown" || kind === "blocked";
   const canEdit = kind === "validation" || kind === "not-found";
   return {
     store,

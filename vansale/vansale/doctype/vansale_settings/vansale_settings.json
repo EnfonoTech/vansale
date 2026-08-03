@@ -1,0 +1,80 @@
+{
+ "actions": [],
+ "creation": "2026-08-04 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "section_break_modules",
+  "enable_route",
+  "column_break_modules",
+  "require_pin",
+  "section_break_help",
+  "help_html"
+ ],
+ "fields": [
+  {
+   "fieldname": "section_break_modules",
+   "fieldtype": "Section Break",
+   "label": "Modules"
+  },
+  {
+   "fieldname": "enable_route",
+   "fieldtype": "Check",
+   "label": "Enable route planning",
+   "default": "1",
+   "description": "Master switch. Off hides Today's Route everywhere and the app shows Van Stock in that slot instead. Individual vans can override this."
+  },
+  {
+   "fieldname": "column_break_modules",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "require_pin",
+   "fieldtype": "Check",
+   "label": "Require PIN unlock",
+   "default": "1",
+   "description": "Master switch. On, drivers set a 4-digit PIN and re-enter it after 2 hours idle. Off, the app goes straight to Home after login. Individual vans and users can override this."
+  },
+  {
+   "fieldname": "section_break_help",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "help_html",
+   "fieldtype": "HTML",
+   "options": "<p class=\"text-muted small\">Override order, most specific wins: <b>Assigned User row</b> &rarr; <b>Vansale Configuration (van)</b> &rarr; these global settings. Anything left on <i>Follow Global</i> falls through to here.</p>"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "issingle": 1,
+ "links": [],
+ "modified": "2026-08-04 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Vansale",
+ "name": "Vansale Settings",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "read": 1,
+   "role": "Van Manager",
+   "write": 1
+  },
+  {
+   "read": 1,
+   "role": "Van User"
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}

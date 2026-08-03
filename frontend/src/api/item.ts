@@ -49,14 +49,20 @@ export interface PriceForResult {
  * the driver sees the last-known set and can keep booking invoices
  * (they queue).
  */
-export async function listMine(search?: string, warehouse?: string, limit = 100): Promise<ItemRow[]> {
+export async function listMine(
+  search?: string,
+  warehouse?: string,
+  limit = 100,
+  onlyInStock = false,
+): Promise<ItemRow[]> {
   const qs = new URLSearchParams();
   qs.set("limit", String(limit));
   if (search) qs.set("search", search);
   if (warehouse) qs.set("warehouse", warehouse);
+  if (onlyInStock) qs.set("only_in_stock", "1");
 
   if (!isOnline()) {
-    return await _listFromCache(search, limit);
+    return await _listFromCache(search, limit, onlyInStock);
   }
   try {
     const rows = await apiCall<ItemRow[]>("GET", `vansale.api.item.list_mine?${qs.toString()}`);
@@ -66,13 +72,17 @@ export async function listMine(search?: string, warehouse?: string, limit = 100)
     return rows;
   } catch (err) {
     if (err instanceof NetworkError) {
-      return await _listFromCache(search, limit);
+      return await _listFromCache(search, limit, onlyInStock);
     }
     throw err;
   }
 }
 
-async function _listFromCache(search: string | undefined, limit: number): Promise<ItemRow[]> {
+async function _listFromCache(
+  search: string | undefined,
+  limit: number,
+  onlyInStock = false,
+): Promise<ItemRow[]> {
   const d = await db();
   const all = await d.getAll("item_cache");
   const rows = all.map((c) => (c.raw as unknown as ItemRow) ?? {
@@ -84,13 +94,19 @@ async function _listFromCache(search: string | undefined, limit: number): Promis
     stock_qty: c.stock_qty,
   });
   const q = (search ?? "").trim().toLowerCase();
-  const filtered = q
+  let filtered = q
     ? rows.filter(
         (r) =>
           (r.item_code ?? "").toLowerCase().includes(q) ||
           (r.item_name ?? "").toLowerCase().includes(q),
       )
     : rows;
+  if (onlyInStock) {
+    // Offline mirror of the server's Bin filter. `stock_qty` is undefined
+    // for rows cached before a warehouse-scoped fetch — keep those rather
+    // than blanking the catalogue on a cold cache.
+    filtered = filtered.filter((r) => r.stock_qty === undefined || (r.stock_qty ?? 0) > 0);
+  }
   return filtered.slice(0, limit);
 }
 

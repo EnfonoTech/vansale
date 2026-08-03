@@ -91,12 +91,16 @@ const timeOfDay = computed(() => {
 });
 
 interface Quick { icon: "invoice" | "payment" | "customer" | "route" | "stock" | "receipt"; label: string; to: string; tone: string }
-const quickActions: Quick[] = [
+// Fourth card mirrors the fourth nav tab: route-driven vans get their stop
+// list, free-selling vans get what is on board instead.
+const quickActions = computed<Quick[]>(() => [
   { icon: "invoice", label: "New invoice", to: "invoice-new", tone: "primary" },
   { icon: "payment", label: "Collect payment", to: "payment-new", tone: "success" },
   { icon: "customer", label: "Customers", to: "customers", tone: "info" },
-  { icon: "route", label: "Today's route", to: "route-today", tone: "warning" },
-];
+  session.routeEnabled
+    ? { icon: "route", label: "Today's route", to: "route-today", tone: "warning" }
+    : { icon: "stock", label: "Van stock", to: "van-stock", tone: "warning" },
+]);
 
 function kindIcon(kind: ActivityRow["kind"]): "invoice" | "payment" {
   return kind === "invoice" ? "invoice" : "payment";

@@ -29,6 +29,12 @@ android-capacitor/android/app/build/
 android-capacitor/android/build/
 android-capacitor/android/.gradle/
 
+# Per-customer brand mark, staged from customers/assets/<customer>/ by
+# `generate-customer-assets.mjs brand`. Generated per build — committing it
+# would leak one client's logo into the next client's build.
+frontend/public/brand-logo.png
+android-capacitor/public/brand-logo.png
+
 # APK + release artifacts
 *.apk
 *.aab

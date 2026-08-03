@@ -57,6 +57,9 @@ export default defineConfig(({ mode, command }) => {
     define: {
       __BUILD_TARGET__: JSON.stringify(target),
       __APP_VERSION__: JSON.stringify(pkg.version),
+      __APP_TITLE__: JSON.stringify(
+        env.CUSTOMER_APP_TITLE ?? process.env.CUSTOMER_APP_TITLE ?? "Van Sale",
+      ),
     },
   };
 });
