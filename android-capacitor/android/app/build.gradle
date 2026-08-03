@@ -4,9 +4,9 @@ android {
     signingConfigs {
         release {
             def pw = System.getenv('VANSALE_KEYSTORE_PW') ?: ''
-            storeFile file('/Users/sayanthns/ERP - PWAs/vansale/android-capacitor/keystore/vansale-demo.keystore')
+            storeFile file('/Users/sayanthns/Documents/Claude Code Main/Mobile apps/vansale/android-capacitor/keystore/vansale-fateh.keystore')
             storePassword pw
-            keyAlias 'vansale-demo'
+            keyAlias 'vansale-fateh'
             keyPassword pw
             storeType 'pkcs12'
         }
@@ -14,11 +14,11 @@ android {
     namespace "com.enfono.vansale.demo"
     compileSdk rootProject.ext.compileSdkVersion
     defaultConfig {
-        applicationId "com.enfono.vansale.demo"
+        applicationId "com.enfono.vansale.fateh"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 26
-        versionName "1.0.25"
+        versionCode 27
+        versionName "1.0.26"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.

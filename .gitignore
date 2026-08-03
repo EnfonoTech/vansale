@@ -35,6 +35,21 @@ android-capacitor/android/.gradle/
 frontend/public/brand-logo.png
 android-capacitor/public/brand-logo.png
 
+# Per-customer launcher icon + splash, regenerated from
+# customers/assets/<customer>/ by `generate-customer-assets.mjs android`.
+# Tracking them would mean the tree carries whichever customer built last —
+# and since build-customer.sh refuses a dirty tree, a demo build right after
+# a fateh build would be blocked by nothing but artwork churn.
+android-capacitor/android/app/src/main/res/mipmap-*/ic_launcher*.png
+android-capacitor/android/app/src/main/res/drawable*/splash.png
+android-capacitor/android/app/src/main/res/drawable-night*/
+android-capacitor/android/app/src/main/res/drawable-*-night-*/
+android-capacitor/android/app/src/main/res/drawable-*-ldpi/
+android-capacitor/android/app/src/main/res/mipmap-ldpi/
+android-capacitor/android/app/src/main/res/values/colors.xml
+android-capacitor/android/app/src/main/res/values/strings.xml
+android-capacitor/android/app/src/main/res/values/ic_launcher_background.xml
+
 # APK + release artifacts
 *.apk
 *.aab
