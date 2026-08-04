@@ -1,0 +1,39 @@
+{
+ "creation": "2026-08-04 00:00:00.000000",
+ "docstatus": 0,
+ "idx": 0,
+ "modified": "2026-08-04 00:00:00.000000",
+ "modified_by": "Administrator",
+ "owner": "Administrator",
+ "module": "Vansale",
+ "cards": [
+  {
+   "card": "Van Sales Today"
+  },
+  {
+   "card": "Van Invoices Today"
+  },
+  {
+   "card": "Van Collection Today"
+  },
+  {
+   "card": "Van Outstanding"
+  }
+ ],
+ "chart_options": "",
+ "charts": [
+  {
+   "chart": "Van Daily Sales Trend"
+  },
+  {
+   "chart": "Van Sales by Warehouse"
+  },
+  {
+   "chart": "Van Collection by Mode"
+  }
+ ],
+ "dashboard_name": "Van Sales",
+ "doctype": "Dashboard",
+ "is_standard": 1,
+ "name": "Van Sales"
+}

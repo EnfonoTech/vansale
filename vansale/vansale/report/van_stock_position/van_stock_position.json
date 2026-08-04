@@ -1,0 +1,57 @@
+{
+ "creation": "2026-08-04 00:00:00.000000",
+ "docstatus": 0,
+ "idx": 0,
+ "modified": "2026-08-04 00:00:00.000000",
+ "modified_by": "Administrator",
+ "owner": "Administrator",
+ "module": "Vansale",
+ "add_total_row": 1,
+ "columns": [],
+ "disabled": 0,
+ "doctype": "Report",
+ "filters": [
+  {
+   "fieldname": "van",
+   "label": "Van",
+   "fieldtype": "Link",
+   "options": "Vansale Configuration"
+  },
+  {
+   "fieldname": "warehouse",
+   "label": "Warehouse",
+   "fieldtype": "Link",
+   "options": "Warehouse"
+  },
+  {
+   "fieldname": "item_group",
+   "label": "Item Group",
+   "fieldtype": "Link",
+   "options": "Item Group"
+  },
+  {
+   "fieldname": "include_zero_balance",
+   "label": "Include Zero Balance",
+   "fieldtype": "Check",
+   "default": "0"
+  }
+ ],
+ "is_standard": "Yes",
+ "letterhead": null,
+ "name": "Van Stock Position",
+ "prepared_report": 0,
+ "ref_doctype": "Bin",
+ "report_name": "Van Stock Position",
+ "report_type": "Script Report",
+ "roles": [
+  {
+   "role": "Van Manager"
+  },
+  {
+   "role": "System Manager"
+  },
+  {
+   "role": "Van User"
+  }
+ ]
+}

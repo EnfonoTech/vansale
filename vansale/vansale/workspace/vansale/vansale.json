@@ -1,6 +1,19 @@
 {
- "charts": [],
- "content": "[{\"id\": \"header-setup\", \"type\": \"header\", \"data\": {\"text\": \"<span class=\\\"h4\\\"><b>Setup</b></span>\", \"col\": 12}}, {\"id\": \"shortcut-open-app\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Open Van Sale App\", \"col\": 4}}, {\"id\": \"shortcut-config\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Vansale Configuration\", \"col\": 4}}, {\"id\": \"shortcut-outbox\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Vansale Outbox\", \"col\": 4}}, {\"id\": \"shortcut-pin\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Vansale Pin\", \"col\": 4}}, {\"id\": \"shortcut-settings\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Vansale Settings\", \"col\": 4}}, {\"id\": \"spacer-1\", \"type\": \"spacer\", \"data\": {\"col\": 12}}, {\"id\": \"header-route\", \"type\": \"header\", \"data\": {\"text\": \"<span class=\\\"h4\\\"><b>Customer Routing</b></span>\", \"col\": 12}}, {\"id\": \"shortcut-assign\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Van Customer Assignment\", \"col\": 4}}, {\"id\": \"shortcut-visit-log\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Van Visit Log\", \"col\": 4}}, {\"id\": \"shortcut-daily-visit\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Van Daily Visit\", \"col\": 4}}, {\"id\": \"shortcut-roster\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Van Driver Roster\", \"col\": 4}}, {\"id\": \"spacer-2\", \"type\": \"spacer\", \"data\": {\"col\": 12}}, {\"id\": \"header-sales\", \"type\": \"header\", \"data\": {\"text\": \"<span class=\\\"h4\\\"><b>Transactions</b></span>\", \"col\": 12}}, {\"id\": \"shortcut-si\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Sales Invoice\", \"col\": 4}}, {\"id\": \"shortcut-pe\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Payment Entry\", \"col\": 4}}, {\"id\": \"shortcut-dn\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Delivery Note\", \"col\": 4}}, {\"id\": \"shortcut-customer\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Customer\", \"col\": 4}}, {\"id\": \"spacer-3\", \"type\": \"spacer\", \"data\": {\"col\": 12}}, {\"id\": \"header-stock\", \"type\": \"header\", \"data\": {\"text\": \"<span class=\\\"h4\\\"><b>Stock</b></span>\", \"col\": 12}}, {\"id\": \"shortcut-se\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Stock Entry\", \"col\": 4}}, {\"id\": \"shortcut-item\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Item\", \"col\": 4}}, {\"id\": \"shortcut-warehouse\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Warehouse\", \"col\": 4}}, {\"id\": \"shortcut-itemprice\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Item Price\", \"col\": 4}}, {\"id\": \"shortcut-stockrecon\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Stock Reconciliation\", \"col\": 4}}, {\"id\": \"shortcut-sl\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Stock Ledger Entry\", \"col\": 4}}]",
+ "charts": [
+  {
+   "chart_name": "Van Daily Sales Trend",
+   "label": "Van Daily Sales Trend"
+  },
+  {
+   "chart_name": "Van Sales by Warehouse",
+   "label": "Van Sales by Warehouse"
+  },
+  {
+   "chart_name": "Van Collection by Mode",
+   "label": "Van Collection by Mode"
+  }
+ ],
+ "content": "[{\"id\": \"header-today\", \"type\": \"header\", \"data\": {\"text\": \"<span class=\\\"h4\\\"><b>Today</b></span>\", \"col\": 12}}, {\"id\": \"card-0\", \"type\": \"number_card\", \"data\": {\"number_card_name\": \"Van Sales Today\", \"col\": 3}}, {\"id\": \"card-1\", \"type\": \"number_card\", \"data\": {\"number_card_name\": \"Van Invoices Today\", \"col\": 3}}, {\"id\": \"card-2\", \"type\": \"number_card\", \"data\": {\"number_card_name\": \"Van Collection Today\", \"col\": 3}}, {\"id\": \"card-3\", \"type\": \"number_card\", \"data\": {\"number_card_name\": \"Van Outstanding\", \"col\": 3}}, {\"id\": \"spacer-cards\", \"type\": \"spacer\", \"data\": {\"col\": 12}}, {\"id\": \"header-charts\", \"type\": \"header\", \"data\": {\"text\": \"<span class=\\\"h4\\\"><b>Performance</b></span>\", \"col\": 12}}, {\"id\": \"chart-trend\", \"type\": \"chart\", \"data\": {\"chart_name\": \"Van Daily Sales Trend\", \"col\": 12}}, {\"id\": \"chart-1\", \"type\": \"chart\", \"data\": {\"chart_name\": \"Van Sales by Warehouse\", \"col\": 6}}, {\"id\": \"chart-2\", \"type\": \"chart\", \"data\": {\"chart_name\": \"Van Collection by Mode\", \"col\": 6}}, {\"id\": \"spacer-charts\", \"type\": \"spacer\", \"data\": {\"col\": 12}}, {\"id\": \"header-setup\", \"type\": \"header\", \"data\": {\"text\": \"<span class=\\\"h4\\\"><b>Setup</b></span>\", \"col\": 12}}, {\"id\": \"shortcut-open-app\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Open Van Sale App\", \"col\": 4}}, {\"id\": \"shortcut-config\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Vansale Configuration\", \"col\": 4}}, {\"id\": \"shortcut-outbox\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Vansale Outbox\", \"col\": 4}}, {\"id\": \"shortcut-pin\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Vansale Pin\", \"col\": 4}}, {\"id\": \"shortcut-settings\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Vansale Settings\", \"col\": 4}}, {\"id\": \"spacer-1\", \"type\": \"spacer\", \"data\": {\"col\": 12}}, {\"id\": \"header-route\", \"type\": \"header\", \"data\": {\"text\": \"<span class=\\\"h4\\\"><b>Customer Routing</b></span>\", \"col\": 12}}, {\"id\": \"shortcut-assign\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Van Customer Assignment\", \"col\": 4}}, {\"id\": \"shortcut-visit-log\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Van Visit Log\", \"col\": 4}}, {\"id\": \"shortcut-daily-visit\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Van Daily Visit\", \"col\": 4}}, {\"id\": \"shortcut-roster\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Van Driver Roster\", \"col\": 4}}, {\"id\": \"spacer-2\", \"type\": \"spacer\", \"data\": {\"col\": 12}}, {\"id\": \"header-sales\", \"type\": \"header\", \"data\": {\"text\": \"<span class=\\\"h4\\\"><b>Transactions</b></span>\", \"col\": 12}}, {\"id\": \"shortcut-si\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Sales Invoice\", \"col\": 4}}, {\"id\": \"shortcut-pe\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Payment Entry\", \"col\": 4}}, {\"id\": \"shortcut-dn\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Delivery Note\", \"col\": 4}}, {\"id\": \"shortcut-customer\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Customer\", \"col\": 4}}, {\"id\": \"spacer-3\", \"type\": \"spacer\", \"data\": {\"col\": 12}}, {\"id\": \"header-stock\", \"type\": \"header\", \"data\": {\"text\": \"<span class=\\\"h4\\\"><b>Stock</b></span>\", \"col\": 12}}, {\"id\": \"shortcut-se\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Stock Entry\", \"col\": 4}}, {\"id\": \"shortcut-item\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Item\", \"col\": 4}}, {\"id\": \"shortcut-warehouse\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Warehouse\", \"col\": 4}}, {\"id\": \"shortcut-itemprice\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Item Price\", \"col\": 4}}, {\"id\": \"shortcut-stockrecon\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Stock Reconciliation\", \"col\": 4}}, {\"id\": \"shortcut-sl\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Stock Ledger Entry\", \"col\": 4}}, {\"id\": \"spacer-reports\", \"type\": \"spacer\", \"data\": {\"col\": 12}}, {\"id\": \"header-reports\", \"type\": \"header\", \"data\": {\"text\": \"<span class=\\\"h4\\\"><b>Reports</b></span>\", \"col\": 12}}, {\"id\": \"shortcut-report-0\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Van Daily Settlement\", \"col\": 4}}, {\"id\": \"shortcut-report-1\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Van Collection Summary\", \"col\": 4}}, {\"id\": \"shortcut-report-2\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Van Stock Position\", \"col\": 4}}, {\"id\": \"shortcut-report-3\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Van Visit Compliance\", \"col\": 4}}]",
  "creation": "2026-04-20 00:00:00",
  "custom_blocks": [],
  "docstatus": 0,
@@ -250,13 +263,82 @@
    "link_type": "DocType",
    "onboard": 0,
    "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Reports",
+   "link_count": 0,
+   "onboard": 0,
+   "type": "Card Break"
+  },
+  {
+   "dependencies": "Sales Invoice",
+   "hidden": 0,
+   "is_query_report": 1,
+   "label": "Van Daily Settlement",
+   "link_count": 0,
+   "link_to": "Van Daily Settlement",
+   "link_type": "Report",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "dependencies": "Payment Entry",
+   "hidden": 0,
+   "is_query_report": 1,
+   "label": "Van Collection Summary",
+   "link_count": 0,
+   "link_to": "Van Collection Summary",
+   "link_type": "Report",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "dependencies": "Bin",
+   "hidden": 0,
+   "is_query_report": 1,
+   "label": "Van Stock Position",
+   "link_count": 0,
+   "link_to": "Van Stock Position",
+   "link_type": "Report",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "dependencies": "Van Daily Visit",
+   "hidden": 0,
+   "is_query_report": 1,
+   "label": "Van Visit Compliance",
+   "link_count": 0,
+   "link_to": "Van Visit Compliance",
+   "link_type": "Report",
+   "onboard": 0,
+   "type": "Link"
   }
  ],
  "modified": "2026-04-22 12:00:00",
  "modified_by": "Administrator",
  "module": "Vansale",
  "name": "Vansale",
- "number_cards": [],
+ "number_cards": [
+  {
+   "number_card_name": "Van Sales Today",
+   "label": "Van Sales Today"
+  },
+  {
+   "number_card_name": "Van Invoices Today",
+   "label": "Van Invoices Today"
+  },
+  {
+   "number_card_name": "Van Collection Today",
+   "label": "Van Collection Today"
+  },
+  {
+   "number_card_name": "Van Outstanding",
+   "label": "Van Outstanding"
+  }
+ ],
  "owner": "Administrator",
  "parent_page": "",
  "public": 1,
@@ -399,6 +481,38 @@
    "label": "Stock Ledger Entry",
    "link_to": "Stock Ledger Entry",
    "type": "DocType"
+  },
+  {
+   "color": "Cyan",
+   "doc_view": "Report",
+   "label": "Van Daily Settlement",
+   "link_to": "Van Daily Settlement",
+   "report_ref_doctype": "Sales Invoice",
+   "type": "Report"
+  },
+  {
+   "color": "Cyan",
+   "doc_view": "Report",
+   "label": "Van Collection Summary",
+   "link_to": "Van Collection Summary",
+   "report_ref_doctype": "Payment Entry",
+   "type": "Report"
+  },
+  {
+   "color": "Cyan",
+   "doc_view": "Report",
+   "label": "Van Stock Position",
+   "link_to": "Van Stock Position",
+   "report_ref_doctype": "Bin",
+   "type": "Report"
+  },
+  {
+   "color": "Cyan",
+   "doc_view": "Report",
+   "label": "Van Visit Compliance",
+   "link_to": "Van Visit Compliance",
+   "report_ref_doctype": "Van Daily Visit",
+   "type": "Report"
   }
  ],
  "title": "Vansale"

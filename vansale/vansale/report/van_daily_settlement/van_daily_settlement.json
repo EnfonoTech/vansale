@@ -1,0 +1,65 @@
+{
+ "creation": "2026-08-04 00:00:00.000000",
+ "docstatus": 0,
+ "idx": 0,
+ "modified": "2026-08-04 00:00:00.000000",
+ "modified_by": "Administrator",
+ "owner": "Administrator",
+ "module": "Vansale",
+ "add_total_row": 1,
+ "columns": [],
+ "disabled": 0,
+ "doctype": "Report",
+ "filters": [
+  {
+   "fieldname": "from_date",
+   "label": "From Date",
+   "fieldtype": "Date",
+   "reqd": 1,
+   "default": "Today"
+  },
+  {
+   "fieldname": "to_date",
+   "label": "To Date",
+   "fieldtype": "Date",
+   "reqd": 1,
+   "default": "Today"
+  },
+  {
+   "fieldname": "van",
+   "label": "Van",
+   "fieldtype": "Link",
+   "options": "Vansale Configuration"
+  },
+  {
+   "fieldname": "user",
+   "label": "Driver",
+   "fieldtype": "Link",
+   "options": "User"
+  },
+  {
+   "fieldname": "company",
+   "label": "Company",
+   "fieldtype": "Link",
+   "options": "Company"
+  }
+ ],
+ "is_standard": "Yes",
+ "letterhead": null,
+ "name": "Van Daily Settlement",
+ "prepared_report": 0,
+ "ref_doctype": "Sales Invoice",
+ "report_name": "Van Daily Settlement",
+ "report_type": "Script Report",
+ "roles": [
+  {
+   "role": "Van Manager"
+  },
+  {
+   "role": "System Manager"
+  },
+  {
+   "role": "Van User"
+  }
+ ]
+}
