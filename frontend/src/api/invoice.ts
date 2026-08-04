@@ -186,6 +186,33 @@ export async function updateDraft(payload: UpdateDraftPayload): Promise<SavedInv
   return { ...res, clientId: "" };
 }
 
+export interface TaxInfo {
+  template: string | null;
+  /** Sum of "On Net Total" rows, as a percentage. 0 when zero-rated/exempt. */
+  rate: number;
+  /** True when the price list rate ALREADY contains the tax. */
+  inclusive: boolean;
+  /** False for compound templates that cannot collapse to one percentage. */
+  simple: boolean;
+  taxes: Array<{
+    description: string | null;
+    charge_type: string | null;
+    rate: number;
+    included_in_print_rate: number;
+  }>;
+}
+
+/**
+ * Tax template + headline rate for the live totals. Resolved server-side
+ * through the customer's Tax Category / Tax Rule, so a zero-rated customer
+ * shows 0% instead of the old hardcoded 15%.
+ */
+export async function taxInfo(customer?: string): Promise<TaxInfo> {
+  const qs = new URLSearchParams();
+  if (customer) qs.set("customer", customer);
+  return apiCall<TaxInfo>("GET", `vansale.api.invoice.tax_info?${qs.toString()}`);
+}
+
 export interface ReturnLine {
   item_code: string;
   qty: number;                 // positive — server negates

@@ -24,10 +24,11 @@ import {
   type ItemRow,
   type ItemUom,
 } from "@/api/item";
-import { save, detail, updateDraft, type InvoiceItem } from "@/api/invoice";
+import { save, detail, updateDraft, taxInfo, type InvoiceItem, type TaxInfo } from "@/api/invoice";
 import { ApiError } from "@/app/frappe";
 import { useSessionStore } from "@/stores/session";
 import { useToastStore } from "@/stores/toasts";
+import { computeTaxTotals } from "@/features/van/tax";
 import Icon from "@/components/Icon.vue";
 import SarSymbol from "@/components/SarSymbol.vue";
 import SearchSelect from "@/components/SearchSelect.vue";
@@ -69,7 +70,27 @@ const savingDraft = ref(false);
 // UOM cache — item_code → uoms list, so re-adding same item doesn't refetch.
 const uomCache = reactive<Record<string, ItemUom[]>>({});
 
-const TAX_RATE = 0.15;
+/**
+ * Tax comes from the server, never a constant.
+ *
+ * The form used to hardcode 15%, which was wrong for any non-KSA company and
+ * for every zero-rated / exempt customer — and it silently assumed
+ * tax-exclusive pricing. `tax_info` resolves the template through the
+ * customer's Tax Category / Tax Rule and reports whether the rate is
+ * `included_in_print_rate`.
+ *
+ * Starts at 0 rather than 15: showing no tax until the server answers is
+ * honest, showing a made-up 15% is not.
+ */
+const tax = ref<TaxInfo>({ template: null, rate: 0, inclusive: false, simple: true, taxes: [] });
+
+async function loadTaxInfo() {
+  try {
+    tax.value = await taxInfo(customer.value || undefined);
+  } catch {
+    /* offline — keep the last known template; the server recomputes on save */
+  }
+}
 
 // The catalog only lists items with stock in this van (see `loadAll`), so
 // distinguish "your search matched nothing" from "this van is empty" —
@@ -102,8 +123,20 @@ async function onCustomerSearch(termText: string) {
 }
 
 const netTotal = computed(() => lines.value.reduce((s, l) => s + l.amount, 0));
-const taxTotal = computed(() => (netTotal.value - (discountAmount.value || 0)) * TAX_RATE);
-const grandTotal = computed(() => netTotal.value - (discountAmount.value || 0) + taxTotal.value);
+
+// Arithmetic lives in `features/van/tax.ts` so it can be unit-tested — this is
+// the only code that decides what a customer is charged.
+const totals = computed(() =>
+  computeTaxTotals({
+    net: netTotal.value,
+    discount: discountAmount.value,
+    ratePercent: tax.value.rate,
+    inclusive: tax.value.inclusive,
+  }),
+);
+const taxTotal = computed(() => totals.value.tax);
+const grandTotal = computed(() => totals.value.grand);
+const netOfTax = computed(() => totals.value.netOfTax);
 
 /**
  * Itemwise split preview — shows how the invoice-level discount is spread
@@ -152,6 +185,8 @@ const selectedCustomer = computed(() =>
 // Re-price all lines when customer changes (different price list).
 watch(customer, async (newCustomer) => {
   if (!newCustomer) return;
+  // Tax Category is per-customer, so the rate can change with the customer.
+  void loadTaxInfo();
   for (const l of lines.value) {
     try {
       const p = await priceFor(l.item_code, newCustomer, l.uom);
@@ -167,6 +202,7 @@ watch(customer, async (newCustomer) => {
 });
 
 async function loadAll() {
+  void loadTaxInfo();
   customers.value = await listCustomers(undefined, 200);
   // `onlyInStock` — a van can only sell what it carries, and an item with
   // no incoming stock has no valuation rate, which ERPNext rejects at
@@ -604,14 +640,25 @@ onMounted(loadAll);
         </ul>
       </div>
       <div class="tot-row muted">
-        <span>VAT ({{ (TAX_RATE * 100).toFixed(0) }}%)</span>
+        <span>
+          {{ tax.taxes[0]?.description || "VAT" }} ({{ tax.rate.toFixed(tax.rate % 1 ? 2 : 0) }}%)
+          <em v-if="tax.inclusive" class="incl">incl.</em>
+        </span>
         <span class="tabular"><SarSymbol :code="session.currency" />{{ taxTotal.toFixed(2) }}</span>
       </div>
       <div class="tot-row grand">
         <span>Grand total</span>
         <span class="tabular"><SarSymbol :code="session.currency" />{{ grandTotal.toFixed(2) }}</span>
       </div>
-      <p class="muted xsmall">Final tax breakup computed by server on save.</p>
+      <div v-if="tax.inclusive" class="tot-row muted small">
+        <span>Net of tax</span>
+        <span class="tabular"><SarSymbol :code="session.currency" />{{ netOfTax.toFixed(2) }}</span>
+      </div>
+      <p v-if="!tax.simple" class="muted xsmall">
+        This tax template has compound rows — the preview is approximate. The
+        server computes the exact breakup on save.
+      </p>
+      <p v-else class="muted xsmall">Final tax breakup computed by server on save.</p>
     </section>
 
     <label class="field">
@@ -728,4 +775,15 @@ onMounted(loadAll);
 .btn-ghost:disabled { opacity: 0.5; cursor: not-allowed; }
 .submit { min-height: 3.25rem; font-size: var(--text-base); }
 .icon-only.small { min-height: 1.8rem; width: 1.8rem; padding: 0.3rem; }
+/* Flags a tax-inclusive template so the driver knows the typed rate is gross. */
+.incl {
+  font-style: normal;
+  font-size: var(--text-xs);
+  font-weight: 600;
+  color: var(--primary);
+  background: var(--primary-soft);
+  border-radius: var(--radius-pill);
+  padding: 0.05rem 0.35rem;
+  margin-inline-start: 0.25rem;
+}
 </style>

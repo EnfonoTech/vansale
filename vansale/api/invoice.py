@@ -12,7 +12,7 @@ from typing import Any, Optional
 
 import frappe
 from frappe import _
-from frappe.utils import cint, flt
+from frappe.utils import cint, flt, getdate, nowdate
 
 from vansale.api.datetime_util import naive_site_to_utc_iso, parse_client_ts
 from vansale.api.sales_return import resolve_return_reason
@@ -62,6 +62,99 @@ def _default_tax_template(company: str) -> Optional[str]:
         "name",
         order_by="modified desc",
     )
+
+
+def _resolve_tax_template(customer: Optional[str], company: str, posting_date) -> Optional[str]:
+    """Resolve the Sales Taxes and Charges Template the way ERPNext does.
+
+    Chain: Customer.tax_category (or the address's, per Accounts Settings
+    `determine_address_tax_category_from`) → Tax Rule → template. That is
+    `erpnext.accounts.party.set_taxes`, which is what the desk form calls, so a
+    zero-rated / export / exempt customer gets the same treatment in the van as
+    at the counter.
+
+    Falls back to the company default. Previously `save` used the company
+    default unconditionally, which silently charged standard VAT to
+    zero-rated customers.
+    """
+    if customer:
+        try:
+            from erpnext.accounts.party import set_taxes
+
+            cust = frappe.db.get_value(
+                "Customer", customer, ["tax_category", "customer_group"], as_dict=True
+            ) or {}
+            template = set_taxes(
+                party=customer,
+                party_type="Customer",
+                posting_date=posting_date,
+                company=company,
+                customer_group=cust.get("customer_group"),
+                tax_category=cust.get("tax_category"),
+            )
+            if template:
+                return template
+        except Exception:
+            # A Tax Rule misconfiguration must not block a sale in the field.
+            frappe.log_error(frappe.get_traceback(), "vansale: tax template resolution failed")
+    return _default_tax_template(company)
+
+
+@frappe.whitelist(methods=["GET"])
+def tax_info(customer: Optional[str] = None, posting_date: Optional[str] = None) -> dict:
+    """Tax template + headline rate for the invoice form's live totals.
+
+    The app used to hardcode 15% client-side. That is wrong for any non-KSA
+    company, for zero-rated and exempt customers, and it hid the
+    inclusive-vs-exclusive question entirely.
+
+    `inclusive` reflects `included_in_print_rate` on the template rows: when
+    true the price list rate ALREADY contains the tax, so the client must
+    back it out rather than add on top. It is a property of the tax template,
+    not a van setting — whoever configures the template decides.
+
+    `rate` sums only `On Net Total` rows, which is the shape of a VAT line.
+    Compound and "On Previous Row" templates cannot be collapsed to a single
+    percentage, so `simple` comes back false and the client shows the
+    server-computed figure after save instead of guessing.
+    """
+    company = _user_company()
+    if not company:
+        frappe.throw(_("No company configured for this user"))
+    date = getdate(posting_date) if posting_date else nowdate()
+
+    template = _resolve_tax_template(customer, company, date)
+    rows: list[dict] = []
+    rate = 0.0
+    inclusive = False
+    simple = True
+
+    if template:
+        from erpnext.controllers.accounts_controller import get_taxes_and_charges
+
+        for r in get_taxes_and_charges("Sales Taxes and Charges Template", template) or []:
+            charge_type = r.get("charge_type")
+            row_rate = flt(r.get("rate"))
+            rows.append({
+                "description": r.get("description"),
+                "charge_type": charge_type,
+                "rate": row_rate,
+                "included_in_print_rate": cint(r.get("included_in_print_rate")),
+            })
+            if cint(r.get("included_in_print_rate")):
+                inclusive = True
+            if charge_type == "On Net Total":
+                rate += row_rate
+            else:
+                simple = False
+
+    return {
+        "template": template,
+        "rate": rate,
+        "inclusive": inclusive,
+        "simple": simple,
+        "taxes": rows,
+    }
 
 
 def _existing_by_client_id(client_id: str) -> Optional[str]:
@@ -148,9 +241,11 @@ def save(
         doc.is_pos = 1
         # payments row filled after insert so grand_total is known.
 
-    # Tax template — auto-apply if the site enforces mandatory taxes
-    # and the caller didn't supply one.
-    tax_template = _default_tax_template(company)
+    # Tax template — resolved through the customer's Tax Category / Tax Rule
+    # so a zero-rated or exempt customer is not charged standard VAT. Falls
+    # back to the company default. Must match what `tax_info` told the client,
+    # or the preview and the posted document disagree.
+    tax_template = _resolve_tax_template(customer, company, doc.posting_date)
     if tax_template:
         doc.taxes_and_charges = tax_template
 
