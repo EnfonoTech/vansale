@@ -62,7 +62,23 @@ def after_migrate() -> None:
     _reapply_user_permissions()
     _ensure_custom_fields()
     _ensure_dashboard()
+    _ensure_van_series()
     frappe.db.commit()
+
+
+def _ensure_van_series() -> None:
+    """Regenerate per-van document series + their naming_series options.
+
+    Idempotent and diff-aware (see `van_series.sync_van_series`). Non-fatal:
+    numbering is a convenience, and a migration must not die because one van
+    has a malformed prefix.
+    """
+    try:
+        from vansale.van_series import sync_van_series
+
+        sync_van_series()
+    except Exception:
+        frappe.log_error(frappe.get_traceback(), "vansale: van series sync failed")
 
 
 def _ensure_dashboard() -> None:

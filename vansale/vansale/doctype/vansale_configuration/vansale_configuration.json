@@ -21,6 +21,9 @@
   "selling_price_list",
   "section_break_visits",
   "require_location",
+  "section_break_series",
+  "doc_prefix",
+  "naming_series_table",
   "section_break_resources",
   "warehouse",
   "cost_center",
@@ -117,6 +120,25 @@
    "label": "Capture location on visit end",
    "default": "0",
    "description": "If enabled, the app asks for GPS permission and tags end-visit with lat/lng. Off by default."
+  },
+  {
+   "fieldname": "section_break_series",
+   "fieldtype": "Section Break",
+   "label": "Document Numbering"
+  },
+  {
+   "fieldname": "doc_prefix",
+   "fieldtype": "Data",
+   "label": "Document Prefix",
+   "description": "Per-van number prefix, e.g. VAN1- (trailing dash added if you omit it). Leaving it blank means this van uses the site's normal series. Saving generates one series per document type below."
+  },
+  {
+   "fieldname": "naming_series_table",
+   "fieldtype": "Table",
+   "label": "Naming Series",
+   "options": "Vansale Naming Series",
+   "read_only": 1,
+   "description": "Generated from the prefix on save. Read-only: each row must keep its per-doctype abbreviation or Frappe shares one counter between document types."
   },
   {
    "fieldname": "section_break_resources",

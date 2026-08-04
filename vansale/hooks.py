@@ -58,12 +58,16 @@ doc_events = {
         "on_trash": "vansale.customer_hooks.clear_module_active_cache",
     },
     "Sales Invoice": {
+        # before_insert, not before_validate: naming_series is consumed when the
+        # name is generated at insert, so a later hook would be too late.
+        "before_insert": "vansale.van_series.set_naming_series_from_van",
         "before_validate": [
             "vansale.van_defaults.override_cost_center_from_van",
             "vansale.van_defaults.override_warehouse_from_van",
         ],
     },
     "Payment Entry": {
+        "before_insert": "vansale.van_series.set_naming_series_from_van",
         "before_validate": "vansale.van_defaults.override_cost_center_from_van",
     },
     "Delivery Note": {
@@ -73,6 +77,7 @@ doc_events = {
         ],
     },
     "Stock Entry": {
+        "before_insert": "vansale.van_series.set_naming_series_from_van",
         "before_validate": "vansale.van_defaults.override_cost_center_from_van",
     },
 }

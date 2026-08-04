@@ -25,6 +25,7 @@ VAN_USER_ROLE = "Van User"
 class VansaleConfiguration(Document):
     def validate(self):
         """Warehouses + cost centers must belong to the selected company."""
+        self._sync_series_rows()
         if not self.company:
             return
 
@@ -98,6 +99,62 @@ class VansaleConfiguration(Document):
     def on_update(self):
         self._create_permissions()
         self._backfill_sales_team()
+        self._register_series_options()
+
+    def _sync_series_rows(self) -> None:
+        """Rebuild the per-doctype series rows from `doc_prefix`.
+
+        Done in `validate` rather than `on_update` so the rows are part of the
+        same write — regenerating them in `on_update` would need a second
+        `save()` and recurse.
+
+        Each template embeds a per-doctype abbreviation on purpose: Frappe keys
+        the `tabSeries` counter on the resolved prefix, so a shared template
+        would give Sales Invoice and Payment Entry one shared counter. See
+        `vansale.van_series`.
+        """
+        from vansale.van_series import SERIES_TARGETS, normalise_prefix, template_for
+
+        self.doc_prefix = normalise_prefix(self.get("doc_prefix"))
+        self.set("naming_series_table", [])
+        if not self.doc_prefix:
+            # No prefix = this van uses the site's normal series.
+            return
+        for doctype, abbrev, ret_abbrev in SERIES_TARGETS:
+            self.append("naming_series_table", {
+                "parent_doctype": doctype,
+                "naming_series": template_for(self.doc_prefix, abbrev),
+                "use_for_return": 0,
+            })
+            if ret_abbrev:
+                self.append("naming_series_table", {
+                    "parent_doctype": doctype,
+                    "naming_series": template_for(self.doc_prefix, ret_abbrev),
+                    "use_for_return": 1,
+                })
+
+    def _register_series_options(self) -> None:
+        """Expose this van's templates in each doctype's `naming_series` options.
+
+        Frappe validates a saved document's series against that list, so a
+        series we stamp but never register is rejected at insert.
+        """
+        if not self.get("doc_prefix"):
+            return
+        from vansale.van_series import extend_series_options
+
+        by_doctype: dict[str, set[str]] = {}
+        for row in self.get("naming_series_table") or []:
+            if row.parent_doctype and row.naming_series:
+                by_doctype.setdefault(row.parent_doctype, set()).add(row.naming_series)
+        for doctype, templates in by_doctype.items():
+            try:
+                extend_series_options(doctype, templates)
+            except Exception:
+                frappe.log_error(
+                    frappe.get_traceback(),
+                    f"vansale: naming_series options update failed for {doctype}",
+                )
 
     def _backfill_sales_team(self) -> None:
         """Tag customers owned by each configured user with their sales_person.
