@@ -27,30 +27,49 @@ const busy = ref(false);
 
 const PROBE_TIMEOUT_MS = 12000;
 
-async function probe(origin: string): Promise<void> {
+function withTimeout(url: string): Promise<Response> {
   // AbortController rather than relying on the platform timeout: a wrong
   // host behind a firewall can hang for minutes, and the driver just sees
   // a dead spinner.
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), PROBE_TIMEOUT_MS);
-  try {
-    const res = await fetch(`${origin}/api/method/vansale.api.auth.site_info`, {
-      method: "GET",
-      headers: { Accept: "application/json" },
-      signal: ctrl.signal,
-    });
-    if (res.status === 404) {
-      throw new Error("Reached the server, but Van Sale is not installed on it.");
-    }
-    if (!res.ok) {
-      throw new Error(`Server answered ${res.status}. Check the address with your admin.`);
-    }
-    const body = (await res.json()) as { message?: { ok?: boolean; app?: string } };
+  return fetch(url, {
+    method: "GET",
+    headers: { Accept: "application/json" },
+    signal: ctrl.signal,
+  }).finally(() => clearTimeout(timer));
+}
+
+/**
+ * Confirm the address is reachable and is a Frappe site.
+ *
+ * `vansale.api.auth.site_info` only exists from v1.0.26, so a failure there
+ * does NOT mean "wrong address" — during a rollout the app is newer than the
+ * server it points at. Measured against a v1.0.17 site, the missing method
+ * answers **417**, not 404, so any non-OK status has to fall through rather
+ * than a specific code. `frappe.ping` exists in every Frappe release, so it
+ * is the real reachability test; features needing the new endpoints fail
+ * later with their own messages, which beats an unpassable setup screen.
+ */
+async function probe(origin: string): Promise<void> {
+  const res = await withTimeout(`${origin}/api/method/vansale.api.auth.site_info`);
+  if (res.ok) {
+    const body = (await res.json()) as { message?: { app?: string } };
     if (body?.message?.app !== "vansale") {
       throw new Error("That address is not a Van Sale server.");
     }
-  } finally {
-    clearTimeout(timer);
+    return;
+  }
+
+  const ping = await withTimeout(`${origin}/api/method/frappe.ping`);
+  if (!ping.ok) {
+    throw new Error("Reached that address, but it is not a Van Sale server.");
+  }
+  // Frappe answers {"message":"pong"} — anything else is some other service
+  // that happens to return 200 on that path.
+  const pingBody = (await ping.json().catch(() => null)) as { message?: string } | null;
+  if (pingBody?.message !== "pong") {
+    throw new Error("Reached that address, but it is not a Van Sale server.");
   }
 }
 
