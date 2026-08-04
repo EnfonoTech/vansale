@@ -178,8 +178,11 @@ router.beforeEach((to) => {
   if (needsSiteSetup() && to.name !== "setup") {
     return { name: "setup", replace: true };
   }
-  if (to.name === "setup" && !needsSiteSetup() && session.isAuthenticated) {
-    return { name: "dashboard", replace: true };
+  // A server is configured, so never sit on the setup screen — send the user
+  // wherever they actually belong. Gating this on `isAuthenticated` used to
+  // leave a configured-but-signed-out app stranded on /setup.
+  if (to.name === "setup" && !needsSiteSetup()) {
+    return { name: session.isAuthenticated ? "dashboard" : "login", replace: true };
   }
   if (to.meta.requiresAuth && !session.isAuthenticated) {
     return { name: "login", replace: true };

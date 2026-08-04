@@ -36,14 +36,34 @@ export function isNative(): boolean {
 const SITE_URL_KEY = "vansale.siteUrl";
 
 /**
- * Runtime site URL, entered once on the setup screen and kept in
- * Preferences until uninstall (or an explicit site change).
+ * Runtime site URL, entered once on the setup screen and kept until
+ * uninstall (or an explicit site change).
  *
- * Held in a module variable because `apiBase()` is called synchronously
- * from dozens of places. `loadSiteUrl()` hydrates it from storage BEFORE
- * the app mounts — see `main.ts`.
+ * Held in a module variable because `apiBase()` is called synchronously from
+ * dozens of places.
+ *
+ * Stored in localStorage **and** Preferences, and seeded synchronously at
+ * import time. That redundancy is load-bearing, not belt-and-braces:
+ * `loadSiteUrl()` runs before `app.mount()`, and at that point the Capacitor
+ * bridge may not have injected `window.Capacitor` yet — so `isNative()`
+ * answers false and a Preferences-only value is invisible. The first router
+ * guard then saw "no server configured" and bounced an already-configured
+ * app to /setup on every cold start (the field looked pre-filled because the
+ * async Preferences read landed after the view rendered).
+ *
+ * localStorage is readable synchronously and survives app restarts in the
+ * Capacitor WebView — the session store already depends on that. Preferences
+ * stays as the durable mirror.
  */
-let runtimeSiteUrl: string | null = null;
+function readStoredSiteUrl(): string | null {
+  try {
+    return window.localStorage.getItem(SITE_URL_KEY) || null;
+  } catch {
+    return null;
+  }
+}
+
+let runtimeSiteUrl: string | null = readStoredSiteUrl();
 
 /**
  * Normalise a user-typed host into an origin.
@@ -71,36 +91,60 @@ export function normalizeSiteUrl(raw: string): string {
   return url.origin;
 }
 
-/** Hydrate the cached site URL from storage. Call once, before mount. */
+/**
+ * Hydrate the cached site URL. Call once, before mount.
+ *
+ * The synchronous localStorage seed above already covers the normal case;
+ * this only has to recover a value that exists in Preferences but not in
+ * localStorage — i.e. an APK upgraded from a build that wrote Preferences
+ * only. When that happens the value is mirrored back so later cold starts
+ * take the fast synchronous path.
+ */
 export async function loadSiteUrl(): Promise<void> {
+  if (runtimeSiteUrl) return;
   try {
-    if (isNative()) {
-      const { value } = await Preferences.get({ key: SITE_URL_KEY });
-      runtimeSiteUrl = value || null;
-    } else {
-      runtimeSiteUrl = window.localStorage.getItem(SITE_URL_KEY);
+    const { value } = await Preferences.get({ key: SITE_URL_KEY });
+    if (value) {
+      runtimeSiteUrl = value;
+      try {
+        window.localStorage.setItem(SITE_URL_KEY, value);
+      } catch {
+        /* private mode / quota — Preferences alone still works */
+      }
     }
   } catch {
-    runtimeSiteUrl = null;
+    /* plugin absent (web build) — the localStorage seed is authoritative */
   }
 }
 
 export async function setSiteUrl(url: string): Promise<void> {
   const origin = normalizeSiteUrl(url);
   runtimeSiteUrl = origin;
-  if (isNative()) {
-    await Preferences.set({ key: SITE_URL_KEY, value: origin });
-  } else {
+  // localStorage first and unconditionally: it is what the next cold start
+  // reads synchronously, before the native bridge exists.
+  try {
     window.localStorage.setItem(SITE_URL_KEY, origin);
+  } catch {
+    /* ignore */
+  }
+  try {
+    await Preferences.set({ key: SITE_URL_KEY, value: origin });
+  } catch {
+    /* web build — localStorage is enough */
   }
 }
 
 export async function clearSiteUrl(): Promise<void> {
   runtimeSiteUrl = null;
-  if (isNative()) {
-    await Preferences.remove({ key: SITE_URL_KEY });
-  } else {
+  try {
     window.localStorage.removeItem(SITE_URL_KEY);
+  } catch {
+    /* ignore */
+  }
+  try {
+    await Preferences.remove({ key: SITE_URL_KEY });
+  } catch {
+    /* ignore */
   }
 }
 

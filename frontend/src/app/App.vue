@@ -29,9 +29,14 @@ watch(online, (isNow, wasNow) => {
   }
 });
 
+// Pre-auth screens carry no app chrome. `setup` belongs here too: the top bar
+// and bottom nav were rendering around the server-address form, offering tabs
+// that cannot work before a server is even configured.
+const CHROMELESS_ROUTES = ["setup", "login", "pin"];
+
 const isChrome = computed(() => {
   const name = String(route.name ?? "");
-  return !["login", "pin"].includes(name);
+  return !CHROMELESS_ROUTES.includes(name);
 });
 
 const showVisitPill = computed(() => {
