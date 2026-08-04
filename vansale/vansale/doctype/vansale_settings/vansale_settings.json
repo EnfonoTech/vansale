@@ -8,6 +8,8 @@
   "enable_route",
   "column_break_modules",
   "require_pin",
+  "section_break_invoicing",
+  "allow_uom_change",
   "section_break_help",
   "help_html"
  ],
@@ -34,6 +36,18 @@
    "label": "Require PIN unlock",
    "default": "1",
    "description": "Master switch. On, drivers set a 4-digit PIN and re-enter it after 2 hours idle. Off, the app goes straight to Home after login. Individual vans and users can override this."
+  },
+  {
+   "fieldname": "section_break_invoicing",
+   "fieldtype": "Section Break",
+   "label": "Invoicing"
+  },
+  {
+   "fieldname": "allow_uom_change",
+   "fieldtype": "Check",
+   "label": "Allow UOM change on invoice lines",
+   "default": "1",
+   "description": "Master switch. On, the driver can switch a line between the item's own UOMs (Pcs / Box / Carton) and the rate re-fetches. Off, every line sells in the item's stock UOM. Individual vans can override this."
   },
   {
    "fieldname": "section_break_help",

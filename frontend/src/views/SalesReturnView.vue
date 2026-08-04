@@ -35,6 +35,21 @@ const toasts = useToastStore();
 
 const orig = ref<InvoiceDetail | null>(null);
 const rows = reactive<Record<number, ReturnRowState>>({});
+/**
+ * Structured reason, mandatory. Kept as a fixed list rather than free text so
+ * returns can be reported on by cause — "why are returns up this month" is the
+ * first question the office asks, and a textarea cannot answer it.
+ * Must match RETURN_REASONS in vansale/api/sales_return.py.
+ */
+const RETURN_REASONS = [
+  "Damaged",
+  "Expired",
+  "Wrong Item",
+  "Customer Refused",
+  "Short Delivery",
+  "Other",
+] as const;
+const reason = ref<string>("");
 const remarks = ref("");
 const busy = ref(false);
 const err = ref("");
@@ -103,6 +118,10 @@ async function submit() {
     toasts.warn("Select at least one line");
     return;
   }
+  if (!reason.value) {
+    toasts.warn("Choose a return reason");
+    return;
+  }
   busy.value = true;
   try {
     const res = await returnAgainst({
@@ -114,7 +133,8 @@ async function submit() {
         uom: it.uom ?? undefined,
         warehouse: it.warehouse ?? undefined,
       })),
-      remarks: remarks.value || undefined,
+      reason: reason.value,
+      note: remarks.value || undefined,
       submit: 1,
     });
     toasts.success(`Credit Note ${res.name} · ${session.currency} ${Math.abs(res.grand_total).toFixed(2)}`);
@@ -199,7 +219,21 @@ async function submit() {
 
       <label class="field">
         <span class="label">Notes (optional)</span>
-        <textarea v-model="remarks" rows="2" placeholder="Reason for return" />
+        <div class="reasons">
+          <button
+            v-for="r in RETURN_REASONS"
+            :key="r"
+            type="button"
+            class="reason-chip"
+            :class="{ 'is-on': reason === r }"
+            @click="reason = r"
+          >{{ r }}</button>
+        </div>
+        <textarea
+          v-model="remarks"
+          rows="2"
+          :placeholder="reason === 'Other' ? 'Describe the reason (required for Other)' : 'Extra detail (optional)'"
+        />
       </label>
 
       <section v-if="selectedCount > 0" class="card stack totals">
@@ -214,7 +248,7 @@ async function submit() {
         <p class="muted xsmall">Final VAT breakup computed on save.</p>
       </section>
 
-      <button class="submit danger" :disabled="busy || selectedCount === 0" @click="submit">
+      <button class="submit danger" :disabled="busy || selectedCount === 0 || !reason" @click="submit">
         <Icon name="receipt" :size="18" />
         {{ busy ? "Processing…" : "Submit Credit Note" }}
       </button>
@@ -258,4 +292,24 @@ async function submit() {
 .submit { min-height: 3.25rem; font-size: var(--text-base); }
 .submit.danger { background: var(--danger); color: white; }
 .submit.danger:disabled { opacity: 0.5; }
+
+.reasons { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-bottom: 0.5rem; }
+.reason-chip {
+  all: unset;
+  cursor: pointer;
+  padding: 0.4rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--text-muted);
+  min-height: 2.25rem;
+  display: inline-flex;
+  align-items: center;
+}
+.reason-chip.is-on {
+  background: var(--primary-soft);
+  border-color: var(--primary);
+  color: var(--primary);
+}
 </style>

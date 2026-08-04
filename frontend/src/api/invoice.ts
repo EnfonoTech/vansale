@@ -198,7 +198,10 @@ export interface ReturnLine {
 export interface ReturnPayload {
   original_name: string;
   items: ReturnLine[];
-  remarks?: string;
+  /** One of RETURN_REASONS — mandatory server-side. */
+  reason: string;
+  /** Optional free-text detail, appended to the credit note's remarks. */
+  note?: string;
   submit?: 0 | 1;
 }
 

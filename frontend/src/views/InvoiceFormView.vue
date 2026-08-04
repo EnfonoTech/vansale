@@ -30,6 +30,7 @@ import { useSessionStore } from "@/stores/session";
 import { useToastStore } from "@/stores/toasts";
 import Icon from "@/components/Icon.vue";
 import SarSymbol from "@/components/SarSymbol.vue";
+import SearchSelect from "@/components/SearchSelect.vue";
 
 const router = useRouter();
 const route = useRoute();
@@ -79,6 +80,26 @@ const emptyCatalogHint = computed(() => {
     ? `No stock in ${warehouse.value}. Ask the office to transfer stock into the van.`
     : "No van warehouse assigned to your user. Ask the office to set one.";
 });
+
+/**
+ * Customer picker options. The preloaded page is the offline set; typing hits
+ * the server so a driver is never limited to whatever happened to be cached,
+ * and results are merged rather than replaced so the current selection cannot
+ * vanish from the list mid-edit.
+ */
+const customerOptions = computed(() =>
+  customers.value.map((c) => ({ value: c.name, label: c.customer_name, sub: c.name })),
+);
+
+async function onCustomerSearch(termText: string) {
+  try {
+    const found = await listCustomers(termText || undefined, 50);
+    const seen = new Set(customers.value.map((c) => c.name));
+    for (const c of found) if (!seen.has(c.name)) customers.value.push(c);
+  } catch {
+    /* offline — local filtering over the cached page still works */
+  }
+}
 
 const netTotal = computed(() => lines.value.reduce((s, l) => s + l.amount, 0));
 const taxTotal = computed(() => (netTotal.value - (discountAmount.value || 0)) * TAX_RATE);
@@ -410,12 +431,13 @@ onMounted(loadAll);
           <Icon name="plus" :size="14" /> New
         </button>
       </div>
-      <select v-model="customer">
-        <option value="" disabled>Select customer…</option>
-        <option v-for="c in customers" :key="c.name" :value="c.name">
-          {{ c.customer_name }}
-        </option>
-      </select>
+      <SearchSelect
+        v-model="customer"
+        :options="customerOptions"
+        placeholder="Search customer by name or code"
+        remote
+        @search="onCustomerSearch"
+      />
       <div v-if="selectedCustomer" class="selected-hint">
         <Icon name="customer" :size="14" /> {{ selectedCustomer.customer_name }}
       </div>
@@ -487,7 +509,11 @@ onMounted(loadAll);
             </label>
             <label>
               <span class="tiny">UOM</span>
-              <select v-if="l.uoms && l.uoms.length > 1" v-model="l.uom" @change="onUomChange(l)">
+              <select
+                v-if="session.uomChangeAllowed && l.uoms && l.uoms.length > 1"
+                v-model="l.uom"
+                @change="onUomChange(l)"
+              >
                 <option v-for="u in l.uoms" :key="u.uom" :value="u.uom">{{ u.uom }}</option>
               </select>
               <input v-else type="text" :value="l.uom" disabled />

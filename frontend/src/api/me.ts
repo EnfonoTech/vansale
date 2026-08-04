@@ -24,6 +24,8 @@ export interface ConfigDefaults {
   enable_route?: boolean;
   /** Effective PIN requirement: user row -> van -> global master switch. */
   require_pin?: boolean;
+  /** Effective UOM-change permission on invoice lines: van -> global. */
+  allow_uom_change?: boolean;
 }
 
 export function configDefaults() {

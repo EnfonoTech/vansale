@@ -15,6 +15,7 @@ from frappe import _
 from frappe.utils import cint, flt
 
 from vansale.api.datetime_util import naive_site_to_utc_iso, parse_client_ts
+from vansale.api.sales_return import resolve_return_reason
 from vansale.api.me import current_user_sales_person
 
 
@@ -429,6 +430,8 @@ def return_against(
     items: list[dict[str, Any]],
     posting_ts: Optional[str] = None,
     remarks: Optional[str] = None,
+    reason: Optional[str] = None,
+    note: Optional[str] = None,
     submit: int = 1,
 ) -> dict:
     """Create a Sales Return (Credit Note) against an existing submitted invoice.
@@ -443,6 +446,14 @@ def return_against(
         frappe.throw(_("original_name is required"))
     if not items:
         frappe.throw(_("At least one return line is required"))
+
+    # A stated cause is mandatory — a credit note nobody can explain is
+    # unauditable, and "why are returns up this month" is the first question
+    # the office asks. Resolved BEFORE the idempotency check so a replay
+    # cannot smuggle a reason-less return through on the second attempt.
+    # `remarks` is the legacy single free-text field older APKs send; it is
+    # accepted as the reason source so returns keep working mid-rollout.
+    reason_option, reason_text = resolve_return_reason(reason or remarks)
 
     existing = _existing_by_client_id(client_id)
     if existing:
@@ -483,7 +494,10 @@ def return_against(
     doc.posting_date = posting.date()
     doc.posting_time = posting.strftime("%H:%M:%S")
     doc.taxes_and_charges = original.taxes_and_charges
-    doc.remarks = remarks or _("Return against {0}").format(original.name)
+    extra = (note or "").strip()
+    doc.remarks = f"{reason_text} — {extra}" if extra and extra != reason_text else reason_text
+    if frappe.get_meta("Sales Invoice").has_field("custom_return_reason"):
+        doc.custom_return_reason = reason_option
     doc.custom_client_id = client_id
 
     for item in items:

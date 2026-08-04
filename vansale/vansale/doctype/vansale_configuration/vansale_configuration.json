@@ -16,6 +16,7 @@
   "route_mode",
   "column_break_modules",
   "pin_mode",
+  "uom_change_mode",
   "section_break_pricing",
   "selling_price_list",
   "section_break_visits",
@@ -84,6 +85,14 @@
    "options": "Follow Global\nEnabled\nDisabled",
    "default": "Follow Global",
    "description": "Applies to every user on this van unless their Assigned Users row overrides it."
+  },
+  {
+   "fieldname": "uom_change_mode",
+   "fieldtype": "Select",
+   "label": "UOM change on invoice",
+   "options": "Follow Global\nEnabled\nDisabled",
+   "default": "Follow Global",
+   "description": "Enabled: driver may switch a line to another of the item's UOMs. Disabled: lines sell in the item's stock UOM only."
   },
   {
    "fieldname": "section_break_pricing",

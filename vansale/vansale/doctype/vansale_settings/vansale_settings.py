@@ -23,7 +23,7 @@ class VansaleSettings(Document):
 
 
 def global_flags() -> dict:
-    """Cached {enable_route, require_pin}. Defaults to on when unset.
+    """Cached {enable_route, require_pin, allow_uom_change}. Defaults to on when unset.
 
     A site that has not migrated yet has no Singles row at all — treat that
     as "both on" so upgrading never silently removes a module.
@@ -31,13 +31,15 @@ def global_flags() -> dict:
     cached = frappe.cache().get_value(CACHE_KEY)
     if cached:
         return cached
-    flags = {"enable_route": True, "require_pin": True}
+    flags = {"enable_route": True, "require_pin": True, "allow_uom_change": True}
     try:
         row = frappe.db.get_singles_dict("Vansale Settings") or {}
         if "enable_route" in row:
             flags["enable_route"] = bool(int(row.get("enable_route") or 0))
         if "require_pin" in row:
             flags["require_pin"] = bool(int(row.get("require_pin") or 0))
+        if "allow_uom_change" in row:
+            flags["allow_uom_change"] = bool(int(row.get("allow_uom_change") or 0))
     except Exception:
         # Pre-migration site or missing table — keep the safe defaults.
         return flags

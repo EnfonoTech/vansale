@@ -13,6 +13,36 @@ from frappe import _
 
 from vansale.api.datetime_util import naive_site_to_utc_iso, parse_client_ts
 
+# Structured return reasons. Mirrors the `custom_return_reason` Select options
+# shipped in `fixtures/custom_field.json` — keep the two in step.
+RETURN_REASONS = (
+    "Damaged",
+    "Expired",
+    "Wrong Item",
+    "Customer Refused",
+    "Short Delivery",
+    "Other",
+)
+
+
+def resolve_return_reason(reason: Optional[str]) -> tuple[str, str]:
+    """Split the client's `reason` into (structured option, remarks text).
+
+    A reason is mandatory: a credit note with no stated cause is unauditable,
+    and "why are returns up this month" is the first question the office asks.
+
+    Older APKs send free text here rather than one of the options. Those are
+    filed as "Other" with the text preserved in remarks instead of being
+    rejected — refusing them would break returns on every phone that has not
+    updated yet, mid-rollout.
+    """
+    text = (reason or "").strip()
+    if not text:
+        frappe.throw(_("A return reason is required"))
+    if text in RETURN_REASONS:
+        return text, text
+    return "Other", text
+
 
 def _existing(client_id: str) -> Optional[str]:
     if not client_id:
@@ -48,6 +78,7 @@ def save(
     original_invoice: str,
     items: list[dict[str, Any]],
     reason: Optional[str] = None,
+    note: Optional[str] = None,
     posting_ts: Optional[str] = None,
     submit: int = 1,
 ) -> dict:
@@ -57,6 +88,10 @@ def save(
         frappe.throw(_("Original invoice required"))
     if not items:
         frappe.throw(_("At least one line is required"))
+
+    # Validated before the idempotency check so a replay cannot smuggle a
+    # reason-less return through on the second attempt.
+    reason_option, reason_text = resolve_return_reason(reason)
 
     existing = _existing(client_id)
     if existing:
@@ -85,7 +120,12 @@ def save(
     doc.return_against = original_invoice
     doc.update_stock = original.update_stock
     doc.set_warehouse = original.set_warehouse
-    doc.remarks = reason
+    extra = (note or "").strip()
+    doc.remarks = f"{reason_text} — {extra}" if extra and extra != reason_text else reason_text
+    # Guarded: a site that has not migrated the fixture yet still takes returns,
+    # it just loses the structured breakdown until the next migrate.
+    if frappe.get_meta("Sales Invoice").has_field("custom_return_reason"):
+        doc.custom_return_reason = reason_option
     doc.custom_client_id = client_id
 
     for line in items:
@@ -113,6 +153,7 @@ def save(
         "original_invoice": original_invoice,
         "items": items,
         "reason": reason,
+        "note": note,
     })
     frappe.db.commit()
 

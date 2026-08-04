@@ -79,6 +79,12 @@ export const useSessionStore = defineStore("session", {
      * Route tab never flickers away on an app that does use routes.
      */
     routeEnabled: (s) => s.defaults?.enable_route !== false,
+    /**
+     * Whether the driver may switch an invoice line to another of the item's
+     * UOMs. Defaults to true while `defaults` is null so the selector does not
+     * flicker away on first paint of a van that does allow it.
+     */
+    uomChangeAllowed: (s) => s.defaults?.allow_uom_change !== false,
     vanPriceList: (s) => s.defaults?.selling_price_list ?? null,
   },
   actions: {

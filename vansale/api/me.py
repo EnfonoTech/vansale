@@ -103,6 +103,7 @@ def config_defaults() -> dict:
     selling_price_list: str | None = None
     van_route_mode: str | None = None
     van_pin_mode: str | None = None
+    van_uom_mode: str | None = None
     if van_code:
         # require_location is new (v1.0.12); guard with has_field so old sites don't crash
         try:
@@ -125,15 +126,18 @@ def config_defaults() -> dict:
         # global defaults (both on), i.e. the old always-on behaviour.
         try:
             meta = frappe.get_meta("Vansale Configuration")
-            wanted = [f for f in ("route_mode", "pin_mode") if meta.has_field(f)]
+            wanted = [
+                f for f in ("route_mode", "pin_mode", "uom_change_mode") if meta.has_field(f)
+            ]
             if wanted:
                 row = frappe.db.get_value(
                     "Vansale Configuration", van_code, wanted, as_dict=True
                 ) or {}
                 van_route_mode = row.get("route_mode")
                 van_pin_mode = row.get("pin_mode")
+                van_uom_mode = row.get("uom_change_mode")
         except Exception:
-            van_route_mode = van_pin_mode = None
+            van_route_mode = van_pin_mode = van_uom_mode = None
 
     # Most specific wins: user row → van → global master switch.
     flags = global_flags()
@@ -143,6 +147,7 @@ def config_defaults() -> dict:
         van_pin_mode,
         default=flags["require_pin"],
     )
+    allow_uom_change = _resolve_mode(van_uom_mode, default=flags["allow_uom_change"])
 
     sales_person_name = None
     if sales_person:
@@ -174,6 +179,7 @@ def config_defaults() -> dict:
         "selling_price_list": selling_price_list,
         "enable_route": enable_route,
         "require_pin": require_pin,
+        "allow_uom_change": allow_uom_change,
     }
 
 

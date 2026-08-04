@@ -26,5 +26,20 @@
   "read_only": 1,
   "description": "Van Sale idempotency key",
   "unique": 0
+ },
+ {
+  "doctype": "Custom Field",
+  "dt": "Sales Invoice",
+  "fieldname": "custom_return_reason",
+  "fieldtype": "Select",
+  "label": "Return Reason",
+  "module": "Vansale",
+  "name": "Sales Invoice-custom_return_reason",
+  "insert_after": "return_against",
+  "depends_on": "eval:doc.is_return",
+  "options": "\nDamaged\nExpired\nWrong Item\nCustomer Refused\nShort Delivery\nOther",
+  "no_copy": 1,
+  "description": "Why the goods came back. Structured so returns can be reported on by reason — the free-text detail goes in Remarks. Mandatory for app returns (enforced in vansale.api.sales_return.save) rather than via reqd, so desk users amending historical credit notes are not blocked.",
+  "unique": 0
  }
 ]
