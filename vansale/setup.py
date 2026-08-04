@@ -61,7 +61,37 @@ def after_migrate() -> None:
     _apply_role_permissions(VAN_MANAGER_ROLE, VAN_MANAGER_PERMISSIONS)
     _reapply_user_permissions()
     _ensure_custom_fields()
+    _ensure_dashboard()
     frappe.db.commit()
+
+
+def _ensure_dashboard() -> None:
+    """Import the `Van Sales` Dashboard from the app's JSON.
+
+    `bench migrate` syncs `report/`, `number_card/` and `dashboard_chart/`
+    folders on its own but NOT `dashboard/` — verified on a live v15 site,
+    where the charts and cards appeared and the Dashboard silently did not.
+    Without this hook every new site would end up with the cards and charts
+    but no dashboard tying them together.
+
+    Idempotent: skipped once the doc exists, so a Dashboard an admin has
+    rearranged in the UI is never clobbered on the next migrate.
+    """
+    if frappe.db.exists("Dashboard", "Van Sales"):
+        return
+    from frappe.modules.import_file import import_file_by_path
+
+    path = frappe.get_app_path(
+        "vansale", "vansale", "dashboard", "van_sales", "van_sales.json"
+    )
+    try:
+        import_file_by_path(path, force=True)
+    except Exception:
+        # A missing dashboard must never fail a migration — the reports and
+        # cards are independently useful.
+        frappe.log_error(
+            frappe.get_traceback(), "vansale: Van Sales dashboard import failed"
+        )
 
 
 # Van Manager = ops admin. Read-only on reference data + full write on
