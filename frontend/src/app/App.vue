@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, watch } from "vue";
+import { computed, onMounted, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import TopAppBar from "@/components/TopAppBar.vue";
 import BottomNav from "@/components/BottomNav.vue";
@@ -20,14 +20,60 @@ const session = useSessionStore();
 // Offline→online transition: opportunistically warm the item + customer
 // caches so the next screen the driver opens has fresh data. The warm
 // helper internally rate-limits to once per 10 min so this never spams.
+// Also re-read config: a van that was offline while the office changed a
+// module toggle should pick it up the moment it has signal again.
 watch(online, (isNow, wasNow) => {
   if (isNow && !wasNow && session.isAuthenticated) {
+    void session.refreshDefaults();
     void warmCaches({
       warehouse: session.defaultWarehouse ?? undefined,
       force: true,
     }).catch(() => {});
   }
 });
+
+/**
+ * Keep module toggles current without forcing a re-login.
+ *
+ * `defaults` is persisted and used to be written only at login and PIN
+ * unlock. With login lasting until uninstall, an admin turning route planning
+ * off in ERPNext would not reach a running app — the Route tab stayed visible
+ * indefinitely. Refresh on start and whenever Android brings the app back to
+ * the foreground, which is when a driver would notice a change anyway.
+ */
+onMounted(() => {
+  if (session.isAuthenticated) void session.refreshDefaults();
+
+  void (async () => {
+    try {
+      const { App: CapApp } = await import("@capacitor/app");
+      await CapApp.addListener("appStateChange", ({ isActive }) => {
+        if (isActive && session.isAuthenticated) void session.refreshDefaults();
+      });
+    } catch {
+      /* web build — @capacitor/app not bundled */
+    }
+  })();
+
+  // Web PWA: the tab coming back into view is the same signal.
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible" && session.isAuthenticated) {
+      void session.refreshDefaults();
+    }
+  });
+});
+
+// If route planning is switched off while the driver is standing on the Route
+// screen, the tab disappears from under them but the view stays mounted. Move
+// them to Home rather than leaving a screen with no way back to it.
+watch(
+  () => session.routeEnabled,
+  (enabled) => {
+    if (!enabled && route.name === "route-today") {
+      void router.replace({ name: "dashboard" });
+    }
+  },
+);
 
 // Pre-auth screens carry no app chrome. `setup` belongs here too: the top bar
 // and bottom nav were rendering around the server-address form, offering tabs

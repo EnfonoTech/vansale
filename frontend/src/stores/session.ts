@@ -101,6 +101,30 @@ export const useSessionStore = defineStore("session", {
       this.requirePin = required;
       persist(this.$state);
     },
+    /**
+     * Re-read the server's config for this user (module toggles, warehouse,
+     * price list, currency).
+     *
+     * Needed because `defaults` used to be fetched only at login and PIN
+     * unlock. Once login started persisting until uninstall, an admin
+     * switching route planning or PIN off in ERPNext could take hours to
+     * reach a running app — or never, if the driver's PIN window kept
+     * renewing. Called on app start and on resume from background.
+     *
+     * Silent on failure: offline is the normal case in a van, and the
+     * persisted copy stays authoritative until the next successful call.
+     */
+    async refreshDefaults(): Promise<void> {
+      if (!this.user) return;
+      const { isOnline } = await import("@/app/online");
+      if (!isOnline()) return;
+      try {
+        const { configDefaults } = await import("@/api/me");
+        this.setDefaults(await configDefaults());
+      } catch {
+        /* keep the persisted defaults */
+      }
+    },
     setDefaults(defaults: ConfigDefaults) {
       this.defaults = defaults;
       if (typeof defaults.require_pin === "boolean") this.requirePin = defaults.require_pin;
