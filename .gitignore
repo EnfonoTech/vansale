@@ -90,3 +90,6 @@ yarn-debug.log*
 
 # Study workspace (cloned reference repos, not part of this project)
 van-sales-study/
+
+# Generated docs site (rebuild with scripts/build-docs-site.py)
+dist/docs-site/
