@@ -351,6 +351,26 @@
   @media (prefers-reduced-motion: reduce) {
     * { animation: none !important; transition: none !important; }
   }
+
+/* Screenshots. Phone shots sit in a device frame at their natural width; desk
+   shots go full measure. `multi` pairs two related states side by side. */
+.figshot { margin: 1.5rem 0; }
+.figshot-imgs { display: flex; gap: 1rem; flex-wrap: wrap; align-items: flex-start; }
+.figshot img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+}
+.figshot.phone img { width: 268px; }
+.figshot.desk img { width: 100%; }
+.figshot.desk.multi img { width: calc(50% - 0.5rem); min-width: 320px; }
+@media (max-width: 640px) {
+  .figshot.phone img { width: 100%; max-width: 320px; }
+  .figshot.desk.multi img { width: 100%; }
+}
 </style>
 
 <header class="masthead">
@@ -462,13 +482,7 @@
           that does not run this app; you have the wrong address, not a broken phone.
         </p>
       </div>
-      <div class="shot">
-        <div class="slot">SHOT<br>01</div>
-        <div class="what">
-          <p>Real screenshot of the server-address screen, filled in.</p>
-          <p class="path">Fresh install → first screen</p>
-        </div>
-      </div>
+      <div class="shot"><div class="slot">NATIVE<br>ONLY</div><div class="what"><p>The server-address screen only exists in the APK — the web build is always served by its own site, so there is nothing to configure. The wireframe above is drawn from the real screen.</p></div></div>
     </section>
 
     <section id="a2">
@@ -490,13 +504,7 @@
           (Part B11). Your queued offline work survives a PIN reset.
         </p>
       </div>
-      <div class="shot">
-        <div class="slot">SHOT<br>02</div>
-        <div class="what">
-          <p>Login screen, and the PIN keypad beside it.</p>
-          <p class="path">After connecting → Login → Set a PIN</p>
-        </div>
-      </div>
+      <figure class="figshot phone multi"><div class="figshot-imgs"><img src="img/shot-02.png" alt="Login screen" loading="lazy"><img src="img/shot-18.png" alt="PIN unlock keypad" loading="lazy"></div><figcaption><b>Figure A2</b> — signing in, and the PIN keypad on a later launch. Password is asked once per install; the PIN is a quick unlock.</figcaption></figure>
     </section>
 
     <section id="a3">
@@ -508,13 +516,7 @@
         will be attributed there.
       </p>
       <p>The bottom bar is fixed at five: <strong>Home · Sales · Customers · Route or Stock · More</strong>.</p>
-      <div class="shot">
-        <div class="slot">SHOT<br>03</div>
-        <div class="what">
-          <p>Home with the day's figures and the van chip visible.</p>
-          <p class="path">Bottom bar → Home</p>
-        </div>
-      </div>
+      <figure class="figshot phone"><div class="figshot-imgs"><img src="img/shot-03.png" alt="Home screen with the day's figures" loading="lazy"></div><figcaption><b>Figure A3</b> — Home. The chip under the greeting is the van and warehouse you are working as. This van has route planning off, so the fourth tab reads <b>Stock</b>.</figcaption></figure>
     </section>
 
     <section id="a4">
@@ -572,13 +574,7 @@
         </p>
       </div>
 
-      <div class="shot">
-        <div class="slot">SHOT<br>04</div>
-        <div class="what">
-          <p>Invoice form with two lines, the customer search sheet open, and the totals block showing the tax line.</p>
-          <p class="path">Home → New invoice</p>
-        </div>
-      </div>
+      <figure class="figshot phone multi"><div class="figshot-imgs"><img src="img/shot-15.png" alt="Customer search sheet" loading="lazy"><img src="img/shot-04.png" alt="Invoice totals with the tax line" loading="lazy"></div><figcaption><b>Figure A4</b> — the customer search sheet, and the totals after two lines. The tax line names the template that was actually resolved for this customer (<code>VAT 15%</code>) — not a fixed 15%.</figcaption></figure>
     </section>
 
     <section id="a5">
@@ -595,13 +591,7 @@
           If you are ever asked to log in to print, you are on an old build.
         </p>
       </div>
-      <div class="shot">
-        <div class="slot">SHOT<br>05</div>
-        <div class="what">
-          <p>Invoice detail with the Print button, and the Android print sheet.</p>
-          <p class="path">Sales → open a submitted invoice → Print</p>
-        </div>
-      </div>
+      <figure class="figshot phone"><div class="figshot-imgs"><img src="img/shot-05.png" alt="Submitted invoice detail with the Print button" loading="lazy"></div><figcaption><b>Figure A5</b> — a submitted invoice. <b>Print</b> hands the document to Android's own print dialog; no browser, no ERPNext login.</figcaption></figure>
     </section>
 
     <section id="a6">
@@ -617,13 +607,7 @@
         report, because it is the usual reason a customer's statement disagrees with
         what the driver says they collected.
       </p>
-      <div class="shot">
-        <div class="slot">SHOT<br>06</div>
-        <div class="what">
-          <p>Payment form with outstanding shown, plus the receipt after saving.</p>
-          <p class="path">Home → Collect payment</p>
-        </div>
-      </div>
+      <figure class="figshot phone"><div class="figshot-imgs"><img src="img/shot-06.png" alt="Payment collection form" loading="lazy"></div><figcaption><b>Figure A6</b> — collecting payment. Outstanding is shown before you enter an amount.</figcaption></figure>
     </section>
 
     <section id="a7">
@@ -644,13 +628,7 @@
         This is not paperwork for its own sake: the office reports returns by reason,
         which is how a bad batch or a mis-picked route gets spotted.
       </p>
-      <div class="shot">
-        <div class="slot">SHOT<br>07</div>
-        <div class="what">
-          <p>Return screen with lines ticked and a reason chip selected.</p>
-          <p class="path">Sales → open invoice → Return</p>
-        </div>
-      </div>
+      <figure class="figshot phone"><div class="figshot-imgs"><img src="img/shot-07.png" alt="Return screen with a reason chip selected" loading="lazy"></div><figcaption><b>Figure A7</b> — a return. Submit stays disabled until a reason is chosen; the note box is for detail.</figcaption></figure>
     </section>
 
     <section id="a8">
@@ -674,13 +652,7 @@
         </table>
       </div>
       <p>With Route on, Van Stock is still reachable from <strong>More</strong>.</p>
-      <div class="shot">
-        <div class="slot">SHOT<br>08</div>
-        <div class="what">
-          <p>Two shots: the Route day list, and the bottom bar showing <em>Stock</em> on a van with route planning off.</p>
-          <p class="path">Bottom bar → Route / Stock</p>
-        </div>
-      </div>
+      <figure class="figshot phone multi"><div class="figshot-imgs"><img src="img/shot-08.png" alt="Van stock list" loading="lazy"><img src="img/shot-19.png" alt="Today's route stop list" loading="lazy"></div><figcaption><b>Figure A8</b> — the fourth tab is one or the other. Left: <b>Stock</b>, what is on board. Right: <b>Route</b>, today's stops, on a van with route planning enabled.</figcaption></figure>
     </section>
 
     <section id="a9">
@@ -726,13 +698,7 @@
           the sync badge is clear first.
         </p>
       </div>
-      <div class="shot">
-        <div class="slot">SHOT<br>09</div>
-        <div class="what">
-          <p>Sync errors screen showing at least one queued item with its chip and message.</p>
-          <p class="path">More → Sync errors</p>
-        </div>
-      </div>
+      <figure class="figshot phone"><div class="figshot-imgs"><img src="img/shot-09.png" alt="Sync queue screen" loading="lazy"></div><figcaption><b>Figure A9</b> — the sync queue. Chips say whose problem an entry is: <b>Needs edit</b> is yours, <b>Needs admin</b> is the office's.</figcaption></figure>
     </section>
 
     <section id="a10">
@@ -743,13 +709,7 @@
         <dt>Server</dt><dd>Shows the connected server. <strong>Change server</strong> signs you out and asks for a new address — blocked while anything is still queued.</dd>
         <dt>Log out</dt><dd>Returns to the login screen. The server address is kept.</dd>
       </dl>
-      <div class="shot">
-        <div class="slot">SHOT<br>10</div>
-        <div class="what">
-          <p>More screen, scrolled to show the App section with Version, Server and Change PIN.</p>
-          <p class="path">Bottom bar → More</p>
-        </div>
-      </div>
+      <figure class="figshot phone"><div class="figshot-imgs"><img src="img/shot-10.png" alt="More menu" loading="lazy"></div><figcaption><b>Figure A10</b> — More. Change PIN, the connected server, and Log out.</figcaption></figure>
     </section>
 
     <hr class="rule">
@@ -816,13 +776,7 @@
         </div>
         <figcaption><b>Figure B1</b> — the Vansale workspace. Number cards and charts first, then the setup links, then reports.</figcaption>
       </figure>
-      <div class="shot">
-        <div class="slot">SHOT<br>11</div>
-        <div class="what">
-          <p>The real workspace page, full width, scrolled to show cards, charts and all card sections.</p>
-          <p class="path">/app/vansale</p>
-        </div>
-      </div>
+      <figure class="figshot desk multi"><div class="figshot-imgs"><img src="img/shot-11.png" alt="Vansale workspace" loading="lazy"><img src="img/shot-17.png" alt="Van Sales dashboard" loading="lazy"></div><figcaption><b>Figure B1</b> — the Vansale workspace, and the Van Sales dashboard.</figcaption></figure>
     </section>
 
     <section id="b2">
@@ -864,13 +818,7 @@
           v1.0.29 the driver must log out and back in.
         </p>
       </div>
-      <div class="shot">
-        <div class="slot">SHOT<br>12</div>
-        <div class="what">
-          <p>Vansale Settings with the Modules and Invoicing sections visible.</p>
-          <p class="path">/app/vansale-settings</p>
-        </div>
-      </div>
+      <figure class="figshot desk"><div class="figshot-imgs"><img src="img/shot-12.png" alt="Vansale Settings" loading="lazy"></div><figcaption><b>Figure B2</b> — the three global switches. Each can be overridden per van; PIN can also be overridden per user.</figcaption></figure>
     </section>
 
     <section id="b3">
@@ -898,13 +846,7 @@
           </tbody>
         </table>
       </div>
-      <div class="shot">
-        <div class="slot">SHOT<br>13</div>
-        <div class="what">
-          <p>Two shots of one van record: top half (identity + Modules + Pricing), and lower half (Document Numbering with the generated series rows + Warehouses + Assigned Users).</p>
-          <p class="path">/app/vansale-configuration/VAB-AB-001</p>
-        </div>
-      </div>
+      <figure class="figshot desk"><div class="figshot-imgs"><img src="img/shot-13.png" alt="Vansale Configuration record" loading="lazy"></div><figcaption><b>Figure B3</b> — one van. Modules, pricing, document numbering, warehouses and assigned users.</figcaption></figure>
     </section>
 
     <section id="b4">
@@ -1108,13 +1050,7 @@
           office loads the van.
         </p>
       </div>
-      <div class="shot">
-        <div class="slot">SHOT<br>14</div>
-        <div class="what">
-          <p>Van Daily Settlement with a few days of rows, and the Van Stock Position report.</p>
-          <p class="path">Vansale workspace → Reports</p>
-        </div>
-      </div>
+      <figure class="figshot desk multi"><div class="figshot-imgs"><img src="img/shot-14.png" alt="Van Daily Settlement report" loading="lazy"><img src="img/shot-16.png" alt="Van Stock Position report" loading="lazy"></div><figcaption><b>Figure B10</b> — Van Daily Settlement over a date range, and Van Stock Position. The <b>No Valuation</b> column on the right-hand report is what to check when a driver reports a “Needs admin” sync error.</figcaption></figure>
     </section>
 
     <section id="b11">
@@ -1197,42 +1133,24 @@
     </section>
 
     <section id="shots">
-      <h4><span class="step">§</span>Screenshots still to be dropped in</h4>
+      <h4><span class="step">§</span>About the screenshots</h4>
       <p>
-        The wireframes above are drawn from the real screens; the fourteen numbered
-        slots need actual captures. Save each as
-        <code>docs/userguide/img/shot-NN.png</code> and it slots into the matching
-        placeholder.
+        Every screenshot in this guide is a real capture from the demo site
+        (<code>trading-demo.enfonoerp.com</code>), taken at a phone viewport for the
+        app screens and a desktop viewport for the desk screens. The app screens come
+        from the web build, which is the same Vue source as the APK.
       </p>
-      <div class="tw">
-        <table>
-          <thead><tr><th class="num-col">#</th><th>Capture</th><th>Where</th></tr></thead>
-          <tbody>
-            <tr><td class="num-col">01</td><td>Server address screen, filled in</td><td>Fresh install, first screen</td></tr>
-            <tr><td class="num-col">02</td><td>Login screen + PIN keypad</td><td>After connecting</td></tr>
-            <tr><td class="num-col">03</td><td>Home with day figures and van chip</td><td>Home tab</td></tr>
-            <tr><td class="num-col">04</td><td>Invoice form: 2 lines, customer sheet open, totals with tax line</td><td>Home → New invoice</td></tr>
-            <tr><td class="num-col">05</td><td>Invoice detail + Android print sheet</td><td>Sales → submitted invoice → Print</td></tr>
-            <tr><td class="num-col">06</td><td>Payment form with outstanding, and the saved receipt</td><td>Home → Collect payment</td></tr>
-            <tr><td class="num-col">07</td><td>Return screen, lines ticked, reason chip selected</td><td>Invoice → Return</td></tr>
-            <tr><td class="num-col">08</td><td>Route day list; plus bottom bar showing <em>Stock</em> with route off</td><td>Route / Stock tab</td></tr>
-            <tr><td class="num-col">09</td><td>Sync errors with a queued item and its chip</td><td>More → Sync errors</td></tr>
-            <tr><td class="num-col">10</td><td>More screen, App section visible</td><td>More tab</td></tr>
-            <tr><td class="num-col">11</td><td>Vansale workspace, full width</td><td><code>/app/vansale</code></td></tr>
-            <tr><td class="num-col">12</td><td>Vansale Settings, Modules + Invoicing</td><td><code>/app/vansale-settings</code></td></tr>
-            <tr><td class="num-col">13</td><td>Van record, top half and lower half (series rows visible)</td><td><code>/app/vansale-configuration/…</code></td></tr>
-            <tr><td class="num-col">14</td><td>Van Daily Settlement, and Van Stock Position</td><td>Workspace → Reports</td></tr>
-          </tbody>
-        </table>
-      </div>
-      <div class="note">
-        <span class="tag">A note on the phone captures</span>
-        <p>
-          Take 01–10 on a real device rather than an emulator — the Android print sheet
-          and the GPS permission prompt are the two things reviewers always question,
-          and an emulator renders both differently.
-        </p>
-      </div>
+      <p>
+        Two things here are drawn rather than captured, because they are native
+        Android surfaces that only exist inside the APK: the
+        <strong>server-address screen</strong> and the <strong>system print
+        sheet</strong>. The wireframes are drawn from the real screens.
+      </p>
+      <p class="muted small">
+        Regenerate the captures with
+        <code>scripts/capture-screenshots.py</code>. Sessions are minted server-side,
+        so no password is stored in the script or the repo.
+      </p>
     </section>
   </main>
 </div>
