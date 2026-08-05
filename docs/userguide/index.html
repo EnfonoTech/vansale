@@ -1,0 +1,1238 @@
+<title>Van Sale — User Guide</title>
+
+<style>
+  :root {
+    --accent: #2563eb;
+    --accent-deep: #1b3fa8;
+    --accent-soft: #e8eeff;
+    --ink: #131a24;
+    --ink-2: #3d4a5a;
+    --muted: #5a6673;
+    --line: #dde3ea;
+    --line-soft: #eaeef4;
+    --paper: #f6f8fb;
+    --surface: #ffffff;
+    --ok: #0f7a52;
+    --warn: #a85c00;
+    --warn-soft: #fdf3e3;
+    --crit: #b3261e;
+    --crit-soft: #fdeceb;
+
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+
+    --measure: 68ch;
+    --r: 8px;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --accent: #6d9bff;
+      --accent-deep: #a8c2ff;
+      --accent-soft: #17233a;
+      --ink: #e6ebf2;
+      --ink-2: #bcc7d6;
+      --muted: #8e9cad;
+      --line: #263243;
+      --line-soft: #1d2734;
+      --paper: #0e141b;
+      --surface: #161e28;
+      --ok: #4cc38a;
+      --warn: #e0a252;
+      --warn-soft: #2a2013;
+      --crit: #f2837b;
+      --crit-soft: #2c1615;
+    }
+  }
+  :root[data-theme="dark"] {
+    --accent: #6d9bff;
+    --accent-deep: #a8c2ff;
+    --accent-soft: #17233a;
+    --ink: #e6ebf2;
+    --ink-2: #bcc7d6;
+    --muted: #8e9cad;
+    --line: #263243;
+    --line-soft: #1d2734;
+    --paper: #0e141b;
+    --surface: #161e28;
+    --ok: #4cc38a;
+    --warn: #e0a252;
+    --warn-soft: #2a2013;
+    --crit: #f2837b;
+    --crit-soft: #2c1615;
+  }
+  :root[data-theme="light"] {
+    --accent: #2563eb;
+    --accent-deep: #1b3fa8;
+    --accent-soft: #e8eeff;
+    --ink: #131a24;
+    --ink-2: #3d4a5a;
+    --muted: #5a6673;
+    --line: #dde3ea;
+    --line-soft: #eaeef4;
+    --paper: #f6f8fb;
+    --surface: #ffffff;
+    --ok: #0f7a52;
+    --warn: #a85c00;
+    --warn-soft: #fdf3e3;
+    --crit: #b3261e;
+    --crit-soft: #fdeceb;
+  }
+
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap {
+    max-width: 1180px;
+    margin: 0 auto;
+    padding: 0 1.25rem 6rem;
+    display: grid;
+    grid-template-columns: 232px minmax(0, 1fr);
+    gap: 3rem;
+    align-items: start;
+  }
+  @media (max-width: 900px) {
+    .wrap { grid-template-columns: minmax(0, 1fr); gap: 0; }
+    .toc { position: static; border-inline-end: 0; border-block-end: 1px solid var(--line); margin-bottom: 2rem; }
+  }
+
+  /* ---------- masthead ---------- */
+  .masthead {
+    border-bottom: 1px solid var(--line);
+    background: var(--surface);
+    margin-bottom: 2.5rem;
+  }
+  .masthead-in {
+    max-width: 1180px;
+    margin: 0 auto;
+    padding: 2.75rem 1.25rem 2rem;
+  }
+  .eyebrow {
+    font-size: 0.7rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--muted);
+    font-weight: 650;
+    margin: 0 0 0.6rem;
+  }
+  h1 {
+    font-size: clamp(2rem, 5vw, 3rem);
+    line-height: 1.05;
+    letter-spacing: -0.03em;
+    font-weight: 700;
+    margin: 0 0 0.75rem;
+    text-wrap: balance;
+  }
+  .standfirst {
+    font-size: 1.075rem;
+    color: var(--ink-2);
+    max-width: var(--measure);
+    margin: 0 0 1.5rem;
+  }
+  .meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem 0.5rem;
+    font-family: var(--mono);
+    font-size: 0.75rem;
+  }
+  .meta span {
+    border: 1px solid var(--line);
+    border-radius: var(--r);
+    padding: 0.2rem 0.5rem;
+    color: var(--muted);
+    background: var(--paper);
+  }
+
+  /* ---------- toc ---------- */
+  .toc {
+    position: sticky;
+    top: 1.5rem;
+    font-size: 0.875rem;
+    padding-inline-end: 1rem;
+    border-inline-end: 1px solid var(--line-soft);
+  }
+  .toc h2 {
+    font-size: 0.68rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin: 0 0 0.6rem;
+  }
+  .toc ol { list-style: none; margin: 0 0 1.5rem; padding: 0; display: flex; flex-direction: column; gap: 0.15rem; }
+  .toc a {
+    color: var(--ink-2);
+    text-decoration: none;
+    display: block;
+    padding: 0.2rem 0;
+    border-radius: 4px;
+  }
+  .toc a:hover, .toc a:focus-visible { color: var(--accent); text-decoration: underline; }
+  .toc .num { font-family: var(--mono); font-size: 0.75rem; color: var(--muted); margin-inline-end: 0.4rem; }
+
+  /* ---------- content ---------- */
+  main { min-width: 0; }
+  section { margin-bottom: 3.5rem; scroll-margin-top: 1.5rem; }
+
+  h2.part {
+    font-size: 0.7rem;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--accent);
+    font-weight: 700;
+    margin: 0 0 0.5rem;
+    padding-top: 1.5rem;
+    border-top: 2px solid var(--accent);
+  }
+  h3 {
+    font-size: clamp(1.3rem, 2.6vw, 1.65rem);
+    letter-spacing: -0.02em;
+    line-height: 1.2;
+    margin: 0 0 0.75rem;
+    text-wrap: balance;
+  }
+  h4 {
+    font-size: 1.02rem;
+    margin: 2rem 0 0.5rem;
+    letter-spacing: -0.01em;
+  }
+  h4 .step {
+    font-family: var(--mono);
+    font-size: 0.8rem;
+    color: var(--accent);
+    margin-inline-end: 0.45rem;
+  }
+  p, ul, ol { max-width: var(--measure); }
+  p { margin: 0 0 0.9rem; }
+  ul, ol { margin: 0 0 0.9rem; padding-inline-start: 1.25rem; }
+  li { margin-bottom: 0.35rem; }
+  strong { font-weight: 650; }
+  a { color: var(--accent); }
+
+  code, .f {
+    font-family: var(--mono);
+    font-size: 0.855em;
+    background: var(--accent-soft);
+    color: var(--accent-deep);
+    padding: 0.1em 0.35em;
+    border-radius: 4px;
+    word-break: break-word;
+  }
+
+  /* ---------- tables ---------- */
+  .tw { overflow-x: auto; margin: 0 0 1.25rem; border: 1px solid var(--line); border-radius: var(--r); background: var(--surface); }
+  table { border-collapse: collapse; width: 100%; font-size: 0.9rem; }
+  th, td { text-align: start; padding: 0.65rem 0.8rem; border-bottom: 1px solid var(--line-soft); vertical-align: top; }
+  th {
+    font-size: 0.68rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--muted);
+    background: var(--paper);
+    white-space: nowrap;
+    font-weight: 650;
+  }
+  tbody tr:last-child td { border-bottom: 0; }
+  td.f-cell { font-family: var(--mono); font-size: 0.8rem; white-space: nowrap; color: var(--accent-deep); }
+  .num-col { font-variant-numeric: tabular-nums; }
+
+  .chip {
+    display: inline-block;
+    font-family: var(--mono);
+    font-size: 0.7rem;
+    padding: 0.1rem 0.4rem;
+    border-radius: 4px;
+    border: 1px solid var(--line);
+    color: var(--muted);
+    white-space: nowrap;
+  }
+  .chip.on { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 40%, transparent); }
+  .chip.off { color: var(--muted); }
+
+  /* ---------- callouts ---------- */
+  .note {
+    border: 1px solid var(--line);
+    border-inline-start: 3px solid var(--accent);
+    background: var(--surface);
+    border-radius: var(--r);
+    padding: 0.9rem 1.1rem;
+    margin: 0 0 1.25rem;
+    max-width: var(--measure);
+  }
+  .note.warn { border-inline-start-color: var(--warn); background: var(--warn-soft); }
+  .note.crit { border-inline-start-color: var(--crit); background: var(--crit-soft); }
+  .note p:last-child { margin-bottom: 0; }
+  .note .tag {
+    display: block;
+    font-size: 0.68rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    font-weight: 700;
+    margin-bottom: 0.35rem;
+    color: var(--accent);
+  }
+  .note.warn .tag { color: var(--warn); }
+  .note.crit .tag { color: var(--crit); }
+
+  /* ---------- figures ---------- */
+  figure { margin: 1.5rem 0; }
+  figcaption {
+    font-size: 0.8rem;
+    color: var(--muted);
+    margin-top: 0.5rem;
+    max-width: var(--measure);
+  }
+  figcaption b { color: var(--ink-2); font-family: var(--mono); font-size: 0.75rem; font-weight: 600; }
+
+  .shot {
+    border: 1px dashed color-mix(in srgb, var(--accent) 45%, var(--line));
+    border-radius: var(--r);
+    background: var(--surface);
+    padding: 1rem;
+    display: flex;
+    gap: 1rem;
+    align-items: flex-start;
+  }
+  .shot .slot {
+    flex: none;
+    width: 4.5rem;
+    height: 4.5rem;
+    border-radius: var(--r);
+    background: var(--accent-soft);
+    color: var(--accent-deep);
+    display: grid;
+    place-items: center;
+    font-family: var(--mono);
+    font-size: 0.7rem;
+    font-weight: 700;
+    text-align: center;
+    line-height: 1.3;
+  }
+  .shot .what { min-width: 0; font-size: 0.875rem; }
+  .shot .what p { margin: 0 0 0.3rem; }
+  .shot .path { font-family: var(--mono); font-size: 0.78rem; color: var(--muted); }
+
+  .frame {
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    background: var(--surface);
+    padding: 0.5rem;
+    max-width: 320px;
+    box-shadow: 0 1px 3px rgb(0 0 0 / 6%);
+  }
+  .frame.wide { max-width: 100%; }
+  .frame svg { display: block; width: 100%; height: auto; border-radius: 9px; }
+
+  /* ---------- chain ---------- */
+  .chain { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; margin: 0 0 1.25rem; }
+  .chain .lnk {
+    border: 1px solid var(--line);
+    background: var(--surface);
+    border-radius: var(--r);
+    padding: 0.5rem 0.7rem;
+    font-size: 0.85rem;
+  }
+  .chain .lnk b { display: block; font-family: var(--mono); font-size: 0.72rem; color: var(--accent-deep); font-weight: 600; }
+  .chain .arrow { color: var(--muted); font-size: 1.1rem; }
+
+  .kv { display: grid; grid-template-columns: auto 1fr; gap: 0.3rem 0.9rem; font-size: 0.9rem; max-width: var(--measure); margin: 0 0 1.25rem; }
+  .kv dt { font-family: var(--mono); font-size: 0.8rem; color: var(--accent-deep); }
+  .kv dd { margin: 0; }
+
+  hr.rule { border: 0; border-top: 1px solid var(--line); margin: 2.5rem 0; }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { animation: none !important; transition: none !important; }
+  }
+</style>
+
+<header class="masthead">
+  <div class="masthead-in">
+    <p class="eyebrow">Enfono Technologies · Field operations</p>
+    <h1>Van Sale — User Guide</h1>
+    <p class="standfirst">
+      Everything the driver does on the phone, and everything the office sets up in
+      ERPNext to control it. Written against app v1.0.30.
+    </p>
+    <div class="meta">
+      <span>app v1.0.30</span>
+      <span>ERPNext v15</span>
+      <span>Part A · driver</span>
+      <span>Part B · office</span>
+    </div>
+  </div>
+</header>
+
+<div class="wrap">
+  <nav class="toc" aria-label="Contents">
+    <h2>Part A · Driver app</h2>
+    <ol>
+      <li><a href="#a1"><span class="num">A1</span>First run</a></li>
+      <li><a href="#a2"><span class="num">A2</span>Sign in &amp; PIN</a></li>
+      <li><a href="#a3"><span class="num">A3</span>Home</a></li>
+      <li><a href="#a4"><span class="num">A4</span>Making a sale</a></li>
+      <li><a href="#a5"><span class="num">A5</span>Printing</a></li>
+      <li><a href="#a6"><span class="num">A6</span>Collecting payment</a></li>
+      <li><a href="#a7"><span class="num">A7</span>Returns</a></li>
+      <li><a href="#a8"><span class="num">A8</span>Route or Stock</a></li>
+      <li><a href="#a9"><span class="num">A9</span>Working offline</a></li>
+      <li><a href="#a10"><span class="num">A10</span>More menu</a></li>
+    </ol>
+    <h2>Part B · ERPNext</h2>
+    <ol>
+      <li><a href="#b1"><span class="num">B1</span>Where things live</a></li>
+      <li><a href="#b2"><span class="num">B2</span>Vansale Settings</a></li>
+      <li><a href="#b3"><span class="num">B3</span>Vansale Configuration</a></li>
+      <li><a href="#b4"><span class="num">B4</span>Assigned users</a></li>
+      <li><a href="#b5"><span class="num">B5</span>Warehouse &amp; cost centre</a></li>
+      <li><a href="#b6"><span class="num">B6</span>Pricing</a></li>
+      <li><a href="#b7"><span class="num">B7</span>Tax</a></li>
+      <li><a href="#b8"><span class="num">B8</span>Document numbering</a></li>
+      <li><a href="#b9"><span class="num">B9</span>Precedence</a></li>
+      <li><a href="#b10"><span class="num">B10</span>Reports</a></li>
+      <li><a href="#b11"><span class="num">B11</span>Admin tasks</a></li>
+      <li><a href="#b12"><span class="num">B12</span>Troubleshooting</a></li>
+      <li><a href="#b13"><span class="num">B13</span>New van checklist</a></li>
+      <li><a href="#shots"><span class="num">§</span>Screenshot list</a></li>
+    </ol>
+  </nav>
+
+  <main>
+    <!-- =============================== PART A =============================== -->
+    <section id="partA">
+      <h2 class="part">Part A — The driver app</h2>
+      <h3>What the app is for</h3>
+      <p>
+        One Android app for selling off a van: invoice a customer at their shop, take
+        the cash, print the receipt, handle returns, and keep going when there is no
+        signal. Everything the driver books lands in ERPNext as a real Sales Invoice,
+        Payment Entry or Stock Entry — there is no separate ledger to reconcile.
+      </p>
+      <p>
+        Two things about the app are worth knowing before you start. It is
+        <strong>offline-first</strong>: work booked without signal is queued and sent
+        later, so a dead zone never stops a sale. And it is
+        <strong>scoped to one van</strong>: the driver only sees their own customers,
+        their own van's stock and their own documents.
+      </p>
+    </section>
+
+    <section id="a1">
+      <h4><span class="step">A1</span>First run — the server address</h4>
+      <p>
+        The first screen asks for your company's server address. This is entered
+        <strong>once per install</strong> and kept until the app is uninstalled.
+      </p>
+      <figure>
+        <div class="frame">
+          <svg viewBox="0 0 300 520" role="img" aria-label="Setup screen wireframe: logo, title, server address field, Connect button">
+            <rect width="300" height="520" fill="var(--paper)"/>
+            <rect x="122" y="120" width="56" height="56" rx="13" fill="var(--accent)"/>
+            <text x="150" y="154" font-family="var(--sans)" font-size="11" font-weight="700" fill="#fff" text-anchor="middle">LOGO</text>
+            <text x="150" y="205" font-family="var(--sans)" font-size="16" font-weight="700" fill="var(--ink)" text-anchor="middle">Fateh Van Sales</text>
+            <text x="150" y="228" font-family="var(--sans)" font-size="10" fill="var(--muted)" text-anchor="middle">Connect to your company server</text>
+            <text x="30" y="272" font-family="var(--sans)" font-size="9" font-weight="700" fill="var(--muted)">SERVER ADDRESS</text>
+            <rect x="28" y="282" width="244" height="40" rx="8" fill="var(--surface)" stroke="var(--line)"/>
+            <text x="42" y="307" font-family="var(--mono)" font-size="10" fill="var(--ink-2)">van.company.com</text>
+            <text x="30" y="342" font-family="var(--sans)" font-size="9" fill="var(--muted)">Ask your office for this address.</text>
+            <rect x="28" y="360" width="244" height="42" rx="8" fill="var(--accent)"/>
+            <text x="150" y="386" font-family="var(--sans)" font-size="13" font-weight="700" fill="#fff" text-anchor="middle">Connect</text>
+            <text x="150" y="424" font-family="var(--mono)" font-size="9" fill="var(--muted)" text-anchor="middle">v1.0.30</text>
+          </svg>
+        </div>
+        <figcaption><b>Figure A1</b> — the setup screen. No app chrome yet: there is nothing to navigate to until a server is set.</figcaption>
+      </figure>
+      <ul>
+        <li>Type the host only — <code>van.company.com</code>. <code>https://</code> is added for you.</li>
+        <li>If you paste a full browser URL, everything after the host is ignored.</li>
+        <li>The address is <strong>tested before it is saved</strong>, so a typo is caught here rather than failing silently on every screen afterwards.</li>
+      </ul>
+      <div class="note">
+        <span class="tag">If it will not connect</span>
+        <p>
+          <em>"Could not reach that address"</em> means the spelling or the signal —
+          check both. <em>"Not a Van Sale server"</em> means you reached a real server
+          that does not run this app; you have the wrong address, not a broken phone.
+        </p>
+      </div>
+      <div class="shot">
+        <div class="slot">SHOT<br>01</div>
+        <div class="what">
+          <p>Real screenshot of the server-address screen, filled in.</p>
+          <p class="path">Fresh install → first screen</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="a2">
+      <h4><span class="step">A2</span>Signing in, and the PIN</h4>
+      <p>
+        Sign in once with the ERPNext email and password the office gave you. After
+        that the app stays signed in <strong>until it is uninstalled</strong> — the
+        password is not asked for again.
+      </p>
+      <p>
+        If PIN unlock is switched on for you, you choose a 4-digit PIN on first sign-in
+        and re-enter it after 2 hours idle. That is a quick unlock, not a new login.
+        Change it any time from <strong>More → Change PIN</strong>.
+      </p>
+      <div class="note">
+        <span class="tag">Forgot the PIN</span>
+        <p>
+          Nobody can read it back to you — call the office and ask them to reset it
+          (Part B11). Your queued offline work survives a PIN reset.
+        </p>
+      </div>
+      <div class="shot">
+        <div class="slot">SHOT<br>02</div>
+        <div class="what">
+          <p>Login screen, and the PIN keypad beside it.</p>
+          <p class="path">After connecting → Login → Set a PIN</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="a3">
+      <h4><span class="step">A3</span>Home</h4>
+      <p>
+        Today's sales and collections at the top, four shortcuts under it, then recent
+        activity. The chip under the greeting shows which van and warehouse you are
+        working as — if that is wrong, stop and call the office; everything you book
+        will be attributed there.
+      </p>
+      <p>The bottom bar is fixed at five: <strong>Home · Sales · Customers · Route or Stock · More</strong>.</p>
+      <div class="shot">
+        <div class="slot">SHOT<br>03</div>
+        <div class="what">
+          <p>Home with the day's figures and the van chip visible.</p>
+          <p class="path">Bottom bar → Home</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="a4">
+      <h4><span class="step">A4</span>Making a sale</h4>
+      <p><strong>Home → New invoice</strong>, or <strong>Sales → +</strong>.</p>
+
+      <div class="tw">
+        <table>
+          <thead>
+            <tr><th>On the form</th><th>What to know</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>Customer</strong></td>
+              <td>Tap to open a search sheet and type any part of the name or code. Only your own customers are listed. <strong>New</strong> creates one on the spot.</td>
+            </tr>
+            <tr>
+              <td><strong>Catalog</strong></td>
+              <td>Only items <em>with stock in your van</em> appear. An empty catalog means the van is empty, not that the app is broken — the message tells you which warehouse to ask about.</td>
+            </tr>
+            <tr>
+              <td><strong>Qty / Rate</strong></td>
+              <td>Rate is pre-filled from the price list for this customer. You may override it if the office allows.</td>
+            </tr>
+            <tr>
+              <td><strong>UOM</strong></td>
+              <td>If enabled, switch a line between that item's own units (Pcs / Box / Carton) and the rate re-fetches for the new unit. Only that item's units are offered — never the whole UOM list.</td>
+            </tr>
+            <tr>
+              <td><strong>Discount</strong></td>
+              <td>Per line, or one invoice-level amount. The invoice-level amount is split across lines proportionally and the split is previewed before you save.</td>
+            </tr>
+            <tr>
+              <td><strong>Cash / Credit</strong></td>
+              <td>Cash records the payment with the invoice. Credit leaves it outstanding for collection later.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p>
+        <strong>Save as draft</strong> keeps it editable and posts nothing.
+        <strong>Submit</strong> is final: stock leaves the van and the ledger is
+        written. A submitted invoice cannot be edited — correct it with a return.
+      </p>
+
+      <div class="note">
+        <span class="tag">About the tax figure</span>
+        <p>
+          The tax shown while you type is a live preview using this customer's real
+          tax rate — a zero-rated customer shows no tax at all. If your price list is
+          tax-inclusive, the line rate you type already contains the tax and the
+          totals show <span class="chip">incl.</span> next to the tax line. The final
+          breakup is always recomputed by the server on save.
+        </p>
+      </div>
+
+      <div class="shot">
+        <div class="slot">SHOT<br>04</div>
+        <div class="what">
+          <p>Invoice form with two lines, the customer search sheet open, and the totals block showing the tax line.</p>
+          <p class="path">Home → New invoice</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="a5">
+      <h4><span class="step">A5</span>Printing</h4>
+      <p>
+        Open a submitted invoice and tap <strong>Print</strong>. The app fetches the
+        document and hands it to Android's own print dialog, so you can pick any
+        printer you have paired, or save a PDF.
+      </p>
+      <div class="note">
+        <span class="tag">No browser login needed</span>
+        <p>
+          Printing does not open a browser and does not ask you to sign in to ERPNext.
+          If you are ever asked to log in to print, you are on an old build.
+        </p>
+      </div>
+      <div class="shot">
+        <div class="slot">SHOT<br>05</div>
+        <div class="what">
+          <p>Invoice detail with the Print button, and the Android print sheet.</p>
+          <p class="path">Sales → open a submitted invoice → Print</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="a6">
+      <h4><span class="step">A6</span>Collecting payment</h4>
+      <p>
+        <strong>Home → Collect payment</strong>. Pick the customer, enter the amount,
+        choose the mode of payment. The app shows what they owe and applies the money
+        against the oldest invoices first.
+      </p>
+      <p>
+        Taking money without applying it to an invoice leaves it
+        <em>unapplied</em> — the office sees that separately in the Collection Summary
+        report, because it is the usual reason a customer's statement disagrees with
+        what the driver says they collected.
+      </p>
+      <div class="shot">
+        <div class="slot">SHOT<br>06</div>
+        <div class="what">
+          <p>Payment form with outstanding shown, plus the receipt after saving.</p>
+          <p class="path">Home → Collect payment</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="a7">
+      <h4><span class="step">A7</span>Returns</h4>
+      <p>
+        Open the original invoice → <strong>Return</strong>. Tick the lines coming
+        back and set the quantity; you cannot return more than was sold.
+      </p>
+      <p>
+        <strong>A reason is required.</strong> Pick one of
+        <span class="chip">Damaged</span> <span class="chip">Expired</span>
+        <span class="chip">Wrong Item</span> <span class="chip">Customer Refused</span>
+        <span class="chip">Short Delivery</span> <span class="chip">Other</span>
+        and add detail in the note box. Submit stays disabled until a reason is
+        chosen.
+      </p>
+      <p>
+        This is not paperwork for its own sake: the office reports returns by reason,
+        which is how a bad batch or a mis-picked route gets spotted.
+      </p>
+      <div class="shot">
+        <div class="slot">SHOT<br>07</div>
+        <div class="what">
+          <p>Return screen with lines ticked and a reason chip selected.</p>
+          <p class="path">Sales → open invoice → Return</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="a8">
+      <h4><span class="step">A8</span>Route, or Stock</h4>
+      <p>
+        The fourth tab is one or the other, never both — the office decides per van.
+      </p>
+      <div class="tw">
+        <table>
+          <thead><tr><th>Tab</th><th>What it does</th></tr></thead>
+          <tbody>
+            <tr>
+              <td><strong>Route</strong></td>
+              <td>Today's planned stops in order. Start a visit, sell or collect, then complete it. If the van is set to capture location, the app asks for GPS permission and tags the end of the visit. Signature capture lives here.</td>
+            </tr>
+            <tr>
+              <td><strong>Stock</strong></td>
+              <td>What is currently on board, by item. Use it to check before promising a customer.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p>With Route on, Van Stock is still reachable from <strong>More</strong>.</p>
+      <div class="shot">
+        <div class="slot">SHOT<br>08</div>
+        <div class="what">
+          <p>Two shots: the Route day list, and the bottom bar showing <em>Stock</em> on a van with route planning off.</p>
+          <p class="path">Bottom bar → Route / Stock</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="a9">
+      <h4><span class="step">A9</span>Working offline</h4>
+      <p>
+        Keep selling. Invoices, payments, returns, customers and stock moves are
+        queued on the phone and sent when signal returns. The sync badge in the header
+        shows how many items are waiting.
+      </p>
+      <p>Some queued items cannot be sent, and the app is explicit about whose problem it is:</p>
+      <div class="tw">
+        <table>
+          <thead><tr><th>Chip</th><th>Meaning</th><th>What you do</th></tr></thead>
+          <tbody>
+            <tr>
+              <td><span class="chip">Retrying</span></td>
+              <td>No signal yet.</td>
+              <td>Nothing. It goes on its own.</td>
+            </tr>
+            <tr>
+              <td><span class="chip">Needs edit</span></td>
+              <td>Something in what you entered is wrong or missing.</td>
+              <td>Tap <strong>Edit</strong>, fix it, retry.</td>
+            </tr>
+            <tr>
+              <td><span class="chip">Needs admin</span></td>
+              <td>A data problem in ERPNext — typically an item with no valuation, or no stock in the van. Editing cannot fix it.</td>
+              <td>Call the office. Once they fix it, tap <strong>Retry</strong>.</td>
+            </tr>
+            <tr>
+              <td><span class="chip">Not permitted</span></td>
+              <td>Your user lacks a permission.</td>
+              <td>Call the office.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="note warn">
+        <span class="tag">Never uninstall with items pending</span>
+        <p>
+          Queued work lives on the phone. Uninstalling, clearing app data, or
+          switching the app to another server discards anything not yet sent. Check
+          the sync badge is clear first.
+        </p>
+      </div>
+      <div class="shot">
+        <div class="slot">SHOT<br>09</div>
+        <div class="what">
+          <p>Sync errors screen showing at least one queued item with its chip and message.</p>
+          <p class="path">More → Sync errors</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="a10">
+      <h4><span class="step">A10</span>The More menu</h4>
+      <dl class="kv">
+        <dt>Shortcuts</dt><dd>New invoice, all invoices, payments, returns, customers, van stock, route, sync errors.</dd>
+        <dt>Change PIN</dt><dd>Current PIN, then the new one twice.</dd>
+        <dt>Server</dt><dd>Shows the connected server. <strong>Change server</strong> signs you out and asks for a new address — blocked while anything is still queued.</dd>
+        <dt>Log out</dt><dd>Returns to the login screen. The server address is kept.</dd>
+      </dl>
+      <div class="shot">
+        <div class="slot">SHOT<br>10</div>
+        <div class="what">
+          <p>More screen, scrolled to show the App section with Version, Server and Change PIN.</p>
+          <p class="path">Bottom bar → More</p>
+        </div>
+      </div>
+    </section>
+
+    <hr class="rule">
+
+    <!-- =============================== PART B =============================== -->
+    <section id="partB">
+      <h2 class="part">Part B — The ERPNext side</h2>
+      <h3>Who this part is for</h3>
+      <p>
+        The office. Everything the driver can and cannot do is decided here. You need
+        the <span class="chip">Van Manager</span> or
+        <span class="chip">System Manager</span> role.
+      </p>
+    </section>
+
+    <section id="b1">
+      <h4><span class="step">B1</span>Where everything lives</h4>
+      <p>
+        One workspace: <strong>Vansale</strong> in the desk sidebar, or go straight to
+        <code>/app/vansale</code>.
+      </p>
+      <figure>
+        <div class="frame wide">
+          <svg viewBox="0 0 720 300" role="img" aria-label="Vansale workspace layout: cards for Today, Performance, Setup, Customer Routing, Transactions, Stock, Reports">
+            <rect width="720" height="300" fill="var(--paper)"/>
+            <text x="24" y="30" font-family="var(--sans)" font-size="13" font-weight="700" fill="var(--ink)">Vansale</text>
+
+            <text x="24" y="58" font-family="var(--sans)" font-size="9" font-weight="700" fill="var(--muted)">TODAY</text>
+            <g font-family="var(--sans)" font-size="9" fill="var(--ink-2)">
+              <rect x="24" y="66" width="156" height="40" rx="6" fill="var(--surface)" stroke="var(--line)"/><text x="34" y="90">Sales Today</text>
+              <rect x="190" y="66" width="156" height="40" rx="6" fill="var(--surface)" stroke="var(--line)"/><text x="200" y="90">Invoices Today</text>
+              <rect x="356" y="66" width="156" height="40" rx="6" fill="var(--surface)" stroke="var(--line)"/><text x="366" y="90">Collection Today</text>
+              <rect x="522" y="66" width="174" height="40" rx="6" fill="var(--surface)" stroke="var(--line)"/><text x="532" y="90">Outstanding</text>
+            </g>
+
+            <text x="24" y="132" font-family="var(--sans)" font-size="9" font-weight="700" fill="var(--muted)">PERFORMANCE</text>
+            <rect x="24" y="140" width="330" height="52" rx="6" fill="var(--surface)" stroke="var(--line)"/>
+            <polyline points="40,180 80,168 120,174 160,152 200,160 240,142 280,150 330,136" fill="none" stroke="var(--accent)" stroke-width="2"/>
+            <rect x="364" y="140" width="160" height="52" rx="6" fill="var(--surface)" stroke="var(--line)"/>
+            <g fill="var(--accent)"><rect x="378" y="168" width="14" height="18"/><rect x="400" y="158" width="14" height="28"/><rect x="422" y="164" width="14" height="22"/><rect x="444" y="150" width="14" height="36"/></g>
+            <rect x="534" y="140" width="162" height="52" rx="6" fill="var(--surface)" stroke="var(--line)"/>
+            <circle cx="580" cy="166" r="17" fill="none" stroke="var(--accent)" stroke-width="6"/>
+            <text x="606" y="170" font-family="var(--sans)" font-size="9" fill="var(--ink-2)">by mode</text>
+
+            <g font-family="var(--sans)" font-size="9">
+              <text x="24" y="220" font-size="9" font-weight="700" fill="var(--muted)">SETUP</text>
+              <text x="24" y="236" fill="var(--accent)">Open Van Sale App</text>
+              <text x="24" y="250" fill="var(--ink-2)">Vansale Configuration</text>
+              <text x="24" y="264" fill="var(--ink-2)">Vansale Settings</text>
+              <text x="24" y="278" fill="var(--ink-2)">Vansale Pin · Outbox</text>
+
+              <text x="250" y="220" font-size="9" font-weight="700" fill="var(--muted)">ROUTING</text>
+              <text x="250" y="236" fill="var(--ink-2)">Van Customer Assignment</text>
+              <text x="250" y="250" fill="var(--ink-2)">Van Driver Roster</text>
+              <text x="250" y="264" fill="var(--ink-2)">Van Daily Visit · Visit Log</text>
+
+              <text x="486" y="220" font-size="9" font-weight="700" fill="var(--muted)">REPORTS</text>
+              <text x="486" y="236" fill="var(--ink-2)">Van Daily Settlement</text>
+              <text x="486" y="250" fill="var(--ink-2)">Van Collection Summary</text>
+              <text x="486" y="264" fill="var(--ink-2)">Van Stock Position</text>
+              <text x="486" y="278" fill="var(--ink-2)">Van Visit Compliance</text>
+            </g>
+          </svg>
+        </div>
+        <figcaption><b>Figure B1</b> — the Vansale workspace. Number cards and charts first, then the setup links, then reports.</figcaption>
+      </figure>
+      <div class="shot">
+        <div class="slot">SHOT<br>11</div>
+        <div class="what">
+          <p>The real workspace page, full width, scrolled to show cards, charts and all card sections.</p>
+          <p class="path">/app/vansale</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="b2">
+      <h4><span class="step">B2</span>Vansale Settings — the global switches</h4>
+      <p>
+        <code>/app/vansale-settings</code>. Three master switches for the whole site.
+        Every one can be overridden per van, and PIN can be overridden per user.
+      </p>
+      <div class="tw">
+        <table>
+          <thead><tr><th>Setting</th><th class="f-cell">Field</th><th>Default</th><th>Effect when off</th></tr></thead>
+          <tbody>
+            <tr>
+              <td><strong>Enable route planning</strong></td>
+              <td class="f-cell">enable_route</td>
+              <td><span class="chip on">on</span></td>
+              <td>Route disappears from the app. The fourth tab and the fourth home card become <strong>Van Stock</strong>. Route screens are unreachable even by deep link.</td>
+            </tr>
+            <tr>
+              <td><strong>Require PIN unlock</strong></td>
+              <td class="f-cell">require_pin</td>
+              <td><span class="chip on">on</span></td>
+              <td>No PIN is set or asked for. Drivers go straight to Home after login, and Change PIN is hidden.</td>
+            </tr>
+            <tr>
+              <td><strong>Allow UOM change on invoice lines</strong></td>
+              <td class="f-cell">allow_uom_change</td>
+              <td><span class="chip on">on</span></td>
+              <td>Every line sells in the item's stock UOM. The unit selector is hidden.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="note">
+        <span class="tag">When changes reach the phone</span>
+        <p>
+          On the driver's next app start, or when they switch back to the app from the
+          background, or when signal returns. No re-login needed. On builds older than
+          v1.0.29 the driver must log out and back in.
+        </p>
+      </div>
+      <div class="shot">
+        <div class="slot">SHOT<br>12</div>
+        <div class="what">
+          <p>Vansale Settings with the Modules and Invoicing sections visible.</p>
+          <p class="path">/app/vansale-settings</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="b3">
+      <h4><span class="step">B3</span>Vansale Configuration — one record per van</h4>
+      <p>
+        <code>/app/vansale-configuration</code>. This is the van. It defines who drives
+        it, which warehouse it draws from, how its documents are numbered, and which
+        modules its drivers see.
+      </p>
+      <div class="tw">
+        <table>
+          <thead><tr><th>Field</th><th class="f-cell">Name</th><th>Notes</th></tr></thead>
+          <tbody>
+            <tr><td><strong>Van Code</strong></td><td class="f-cell">van_code</td><td>Required. The record's identity, e.g. <code>VAB-AB-001</code>. Appears in the app header and every report.</td></tr>
+            <tr><td><strong>Van Name</strong></td><td class="f-cell">van_name</td><td>Friendly label, e.g. <em>Dammam Van</em>.</td></tr>
+            <tr><td><strong>Company</strong></td><td class="f-cell">company</td><td>Required. Warehouses and cost centres must belong to it — the form refuses mismatches.</td></tr>
+            <tr><td><strong>Branch</strong></td><td class="f-cell">branch</td><td>Optional. Grants the driver a Branch user permission.</td></tr>
+            <tr><td><strong>Route planning</strong></td><td class="f-cell">route_mode</td><td><code>Follow Global</code> · <code>Enabled</code> · <code>Disabled</code>.</td></tr>
+            <tr><td><strong>PIN unlock</strong></td><td class="f-cell">pin_mode</td><td>Same three options. Applies to every driver on the van unless their own row overrides it.</td></tr>
+            <tr><td><strong>UOM change on invoice</strong></td><td class="f-cell">uom_change_mode</td><td>Same three options.</td></tr>
+            <tr><td><strong>Selling Price List</strong></td><td class="f-cell">selling_price_list</td><td>Van-level pricing tier. See B6.</td></tr>
+            <tr><td><strong>Capture location on visit end</strong></td><td class="f-cell">require_location</td><td>Off by default. On, the app requests GPS permission and tags visit completion with coordinates.</td></tr>
+            <tr><td><strong>Document Prefix</strong></td><td class="f-cell">doc_prefix</td><td>Per-van numbering. See B8.</td></tr>
+            <tr><td><strong>Naming Series</strong></td><td class="f-cell">naming_series_table</td><td>Read-only. Generated from the prefix on save.</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="shot">
+        <div class="slot">SHOT<br>13</div>
+        <div class="what">
+          <p>Two shots of one van record: top half (identity + Modules + Pricing), and lower half (Document Numbering with the generated series rows + Warehouses + Assigned Users).</p>
+          <p class="path">/app/vansale-configuration/VAB-AB-001</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="b4">
+      <h4><span class="step">B4</span>Assigned Users — who drives this van</h4>
+      <p>
+        The <strong>Assigned Users</strong> table is what connects a person to a van.
+        Adding a row here does the work for you on save: it creates the Company,
+        Branch, Warehouse and Cost Center user permissions and grants the role.
+        Removing a row takes them away again.
+      </p>
+      <div class="tw">
+        <table>
+          <thead><tr><th>Column</th><th class="f-cell">Name</th><th>Notes</th></tr></thead>
+          <tbody>
+            <tr><td><strong>User</strong></td><td class="f-cell">user</td><td>The ERPNext user who signs in on the phone.</td></tr>
+            <tr><td><strong>Role</strong></td><td class="f-cell">role</td><td><code>Van User</code> for a driver, <code>Van Manager</code> for a supervisor. Granted automatically.</td></tr>
+            <tr><td><strong>Sales Person</strong></td><td class="f-cell">sales_person</td><td>Tagged onto every invoice for commission, and it is how the driver's customer list is scoped.</td></tr>
+            <tr><td><strong>PIN unlock</strong></td><td class="f-cell">pin_mode</td><td>Per-driver override. The most specific setting in the whole system.</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="note warn">
+        <span class="tag">One van per user</span>
+        <p>
+          A user belongs to one van. Listing the same person on two vans makes their
+          van attribution ambiguous — reports resolve the van from the person who
+          created the document, so a second row makes the numbers unreliable.
+        </p>
+      </div>
+    </section>
+
+    <section id="b5">
+      <h4><span class="step">B5</span>Warehouse and cost centre</h4>
+      <p>
+        <strong>The first row is the default.</strong> The first warehouse becomes the
+        driver's van warehouse — the one their catalog is filtered by and stock is
+        sold out of. Add more rows only if the van genuinely draws from more than one.
+        Same rule for cost centres.
+      </p>
+      <div class="note">
+        <span class="tag">This is the single most common setup mistake</span>
+        <p>
+          Rows in the wrong order means the driver sells from the main store instead of
+          the van, and van stock reports show nothing. Check the order, not just the
+          contents.
+        </p>
+      </div>
+    </section>
+
+    <section id="b6">
+      <h4><span class="step">B6</span>Pricing — which price list wins</h4>
+      <p>First match wins, top to bottom:</p>
+      <div class="chain">
+        <div class="lnk">Customer<b>default_price_list</b></div>
+        <span class="arrow" aria-hidden="true">→</span>
+        <div class="lnk">Van<b>selling_price_list</b></div>
+        <span class="arrow" aria-hidden="true">→</span>
+        <div class="lnk">Customer Group<b>default_price_list</b></div>
+        <span class="arrow" aria-hidden="true">→</span>
+        <div class="lnk">Selling Settings<b>site default</b></div>
+      </div>
+      <p>
+        The van sits <em>above</em> Customer Group on purpose: a van running a
+        discounted route should not fall back to the group's sticker price when it
+        reaches a customer nobody has classified.
+      </p>
+      <p>
+        Rates are fetched per <em>item and unit</em>, so a Box price and a Pcs price
+        are both honoured. With no Item Price for the chosen unit, the stock-unit price
+        is multiplied by the conversion factor.
+      </p>
+    </section>
+
+    <section id="b7">
+      <h4><span class="step">B7</span>Tax</h4>
+      <p>
+        The rate is resolved the same way the desk form does it — the customer's
+        <strong>Tax Category</strong>, through <strong>Tax Rule</strong>, to a
+        <strong>Sales Taxes and Charges Template</strong>, falling back to the
+        company default. Nothing about tax is configured in Van Sale itself.
+      </p>
+      <div class="chain">
+        <div class="lnk">Customer<b>tax_category</b></div>
+        <span class="arrow" aria-hidden="true">→</span>
+        <div class="lnk">Tax Rule<b>match</b></div>
+        <span class="arrow" aria-hidden="true">→</span>
+        <div class="lnk">Template<b>rate + inclusive</b></div>
+        <span class="arrow" aria-hidden="true">→</span>
+        <div class="lnk">fallback<b>company default</b></div>
+      </div>
+      <p>
+        So a zero-rated or export customer is taxed correctly in the van, with no van
+        setting involved: give the customer the right Tax Category and the app follows.
+      </p>
+      <h4>Inclusive price lists</h4>
+      <p>
+        If a template's rows are marked <span class="chip">Included in Print Rate</span>,
+        the price already contains the tax. The app then <em>backs the tax out</em> of
+        the rate the driver typed instead of adding it on top, and the totals show
+        <span class="chip">incl.</span> with a <em>Net of tax</em> line.
+      </p>
+      <div class="note crit">
+        <span class="tag">Check this before going live</span>
+        <p>
+          Inclusive versus exclusive changes what the customer is charged. Post one
+          test invoice for a normal customer and one for a zero-rated customer, and
+          compare the app's totals against the saved document, before any real
+          selling. A wrong template overcharges by the full tax on every line.
+        </p>
+      </div>
+      <p>
+        Compound templates — anything using <em>On Previous Row</em> — cannot be
+        collapsed into one percentage. The app says the preview is approximate and
+        shows the server's exact figure after save.
+      </p>
+    </section>
+
+    <section id="b8">
+      <h4><span class="step">B8</span>Document numbering per van</h4>
+      <p>
+        Set <strong>Document Prefix</strong> on the van, e.g. <code>VAN1-</code>, and
+        save. The app then numbers that van's documents independently:
+      </p>
+      <div class="tw">
+        <table>
+          <thead><tr><th>Document</th><th class="f-cell">Series</th><th>Used for</th></tr></thead>
+          <tbody>
+            <tr><td>Sales Invoice</td><td class="f-cell">VAN1-INV-.YYYY.-.####</td><td>Normal sales</td></tr>
+            <tr><td>Sales Invoice</td><td class="f-cell">VAN1-CN-.YYYY.-.####</td><td>Credit notes / returns</td></tr>
+            <tr><td>Payment Entry</td><td class="f-cell">VAN1-PE-.YYYY.-.####</td><td>Collections</td></tr>
+            <tr><td>Stock Entry</td><td class="f-cell">VAN1-SE-.YYYY.-.####</td><td>Van loading and transfers</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>
+        The prefix is upper-cased and given a single trailing dash automatically —
+        <code>van1</code> becomes <code>VAN1-</code>. Leave it blank and the van uses
+        the site's normal series.
+      </p>
+      <div class="note warn">
+        <span class="tag">Do not hand-edit the series rows</span>
+        <p>
+          Each series carries a per-document abbreviation — <code>INV</code>,
+          <code>CN</code>, <code>PE</code>, <code>SE</code> — and that is what keeps
+          the counters separate. Frappe counts by the resolved prefix, so if two
+          document types ever shared one template they would share one counter:
+          invoice 41 followed by receipt 42. The table is read-only for that reason.
+        </p>
+      </div>
+      <p>
+        Returns get their own abbreviation so credit notes never consume invoice
+        numbers. A supervisor with System, Accounts or Stock Manager can still pick a
+        series by hand on the desk; the app does not override that.
+      </p>
+    </section>
+
+    <section id="b9">
+      <h4><span class="step">B9</span>Which setting wins</h4>
+      <p>Most specific first. The first level that says Enabled or Disabled decides.</p>
+      <div class="chain">
+        <div class="lnk">Assigned User row<b>pin_mode</b></div>
+        <span class="arrow" aria-hidden="true">→</span>
+        <div class="lnk">Vansale Configuration<b>route · pin · uom</b></div>
+        <span class="arrow" aria-hidden="true">→</span>
+        <div class="lnk">Vansale Settings<b>global</b></div>
+      </div>
+      <p>
+        <code>Follow Global</code> means "don't decide here, ask the next level up".
+        A van set to <code>Enabled</code> keeps its module even when the global switch
+        is off — that is how you run route planning on one van and not the rest.
+      </p>
+      <p>Only PIN has the per-user level. Route and UOM resolve van, then global.</p>
+    </section>
+
+    <section id="b10">
+      <h4><span class="step">B10</span>Reports and the dashboard</h4>
+      <div class="tw">
+        <table>
+          <thead><tr><th>Report</th><th>Answers</th></tr></thead>
+          <tbody>
+            <tr><td><strong>Van Daily Settlement</strong></td><td>The evening cash check. Per van per day: invoices, returns, gross → net sales, cash taken at the point of sale, what went on credit, outstanding.</td></tr>
+            <tr><td><strong>Van Collection Summary</strong></td><td>Receipts by van and mode of payment, splitting applied from unapplied.</td></tr>
+            <tr><td><strong>Van Stock Position</strong></td><td>What is on board each van now, flagging items that have stock but no valuation rate.</td></tr>
+            <tr><td><strong>Van Visit Compliance</strong></td><td>Planned vs visited vs skipped, coverage %, and how many stops produced an invoice.</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>
+        The <strong>Van Sales</strong> dashboard carries four number cards — sales,
+        invoices, collection, outstanding — and three charts: daily sales trend, sales
+        by warehouse, collection by mode.
+      </p>
+      <div class="note">
+        <span class="tag">How a document is attributed to a van</span>
+        <p>
+          By <em>who created it</em>, matched to the Assigned Users table. Payment
+          Entries carry no warehouse or sales person, so the creator is the only link
+          that works across invoices, payments and visits. A document the office
+          creates on a driver's behalf therefore shows a blank Van. Van Stock Position
+          is the exception — it attributes by warehouse, so it stays correct when the
+          office loads the van.
+        </p>
+      </div>
+      <div class="shot">
+        <div class="slot">SHOT<br>14</div>
+        <div class="what">
+          <p>Van Daily Settlement with a few days of rows, and the Van Stock Position report.</p>
+          <p class="path">Vansale workspace → Reports</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="b11">
+      <h4><span class="step">B11</span>Everyday admin tasks</h4>
+
+      <h4>Reset a driver's PIN</h4>
+      <p>
+        Open the van → <strong>Actions → Reset Driver PIN</strong> → pick the driver.
+        Their next login asks them to set a new one. Queued offline work is untouched.
+        A driver cannot reset their own this way — they use Change PIN, which requires
+        the current one.
+      </p>
+
+      <h4>Clear a “Needs admin” sync error</h4>
+      <p>
+        Almost always an item with stock but no valuation rate, or no stock in the van.
+        Run <strong>Van Stock Position</strong> and look at the
+        <strong>No Valuation</strong> column. Fix it by posting the stock into the van
+        warehouse properly, or by setting a valuation rate on the item. Then tell the
+        driver to hit <strong>Retry</strong>.
+      </p>
+      <div class="note">
+        <span class="tag">Do not reach for Allow Zero Valuation Rate</span>
+        <p>
+          It makes the error disappear by booking zero cost of goods, which quietly
+          destroys margin reporting. Post the stock instead.
+        </p>
+      </div>
+
+      <h4>Load a van</h4>
+      <p>
+        A Material Transfer Stock Entry from the main store to the van warehouse.
+        Until stock is in that warehouse the driver's catalog is empty by design —
+        the app will not let them sell what the van does not carry.
+      </p>
+
+      <h4>Take a van out of service</h4>
+      <p>
+        Remove the driver's row from Assigned Users; their permissions and role are
+        withdrawn on save. Keep the van record for history.
+      </p>
+    </section>
+
+    <section id="b12">
+      <h4><span class="step">B12</span>Troubleshooting</h4>
+      <div class="tw">
+        <table>
+          <thead><tr><th>Symptom</th><th>Cause</th><th>Fix</th></tr></thead>
+          <tbody>
+            <tr><td>Driver's catalog is empty</td><td>No stock in the van warehouse, or warehouse rows in the wrong order</td><td>Post stock; check the first warehouse row (B5)</td></tr>
+            <tr><td>Route tab still showing after switching it off</td><td>App has not refreshed its config, or is older than v1.0.29</td><td>Background and reopen the app; on old builds, log out and in</td></tr>
+            <tr><td>Wrong tax on an invoice</td><td>Customer has no Tax Category, so the company default applied</td><td>Set the customer's Tax Category (B7)</td></tr>
+            <tr><td>Invoice numbers not using the van prefix</td><td>Prefix blank, or a manager picked a series by hand</td><td>Set Document Prefix and save (B8)</td></tr>
+            <tr><td>Two document types sharing a number sequence</td><td>A series template was hand-edited to drop its abbreviation</td><td>Clear and re-save the prefix to regenerate the rows</td></tr>
+            <tr><td>Driver sees the wrong van in the header</td><td>Listed on more than one Vansale Configuration</td><td>Remove the extra Assigned Users row (B4)</td></tr>
+            <tr><td>Customer missing from the driver's list</td><td>Not tagged with the driver's Sales Person, and not created by them</td><td>Add the Sales Person to the customer's Sales Team</td></tr>
+            <tr><td>App cannot connect after a server move</td><td>Stored address points at the old host</td><td>More → Change server, once the sync queue is clear</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="b13">
+      <h4><span class="step">B13</span>Setting up a new van — checklist</h4>
+      <ol>
+        <li>Create the <strong>Warehouse</strong> for the van, and a <strong>Cost Center</strong> if you track per van.</li>
+        <li>Create the ERPNext <strong>User</strong> for the driver.</li>
+        <li>Create a <strong>Sales Person</strong> for the driver.</li>
+        <li>Create the <strong>Vansale Configuration</strong>: van code, company, first warehouse row, first cost centre row.</li>
+        <li>Add the driver to <strong>Assigned Users</strong> with role <code>Van User</code> and their Sales Person. Save — permissions and role are applied for you.</li>
+        <li>Set module overrides if this van differs from the global switches.</li>
+        <li>Set <strong>Document Prefix</strong> if the van needs its own numbering, and save.</li>
+        <li>Set <strong>Selling Price List</strong> if the van has its own pricing tier.</li>
+        <li>Confirm the driver's customers carry their <strong>Sales Person</strong> in Sales Team.</li>
+        <li>Confirm customers have a <strong>Tax Category</strong> where it matters.</li>
+        <li><strong>Load the van</strong> with a Material Transfer Stock Entry.</li>
+        <li>Install the APK, enter the server address, sign in, set a PIN.</li>
+        <li>Post one test invoice and one test return end-to-end, then check <strong>Van Daily Settlement</strong>.</li>
+      </ol>
+    </section>
+
+    <section id="shots">
+      <h4><span class="step">§</span>Screenshots still to be dropped in</h4>
+      <p>
+        The wireframes above are drawn from the real screens; the fourteen numbered
+        slots need actual captures. Save each as
+        <code>docs/userguide/img/shot-NN.png</code> and it slots into the matching
+        placeholder.
+      </p>
+      <div class="tw">
+        <table>
+          <thead><tr><th class="num-col">#</th><th>Capture</th><th>Where</th></tr></thead>
+          <tbody>
+            <tr><td class="num-col">01</td><td>Server address screen, filled in</td><td>Fresh install, first screen</td></tr>
+            <tr><td class="num-col">02</td><td>Login screen + PIN keypad</td><td>After connecting</td></tr>
+            <tr><td class="num-col">03</td><td>Home with day figures and van chip</td><td>Home tab</td></tr>
+            <tr><td class="num-col">04</td><td>Invoice form: 2 lines, customer sheet open, totals with tax line</td><td>Home → New invoice</td></tr>
+            <tr><td class="num-col">05</td><td>Invoice detail + Android print sheet</td><td>Sales → submitted invoice → Print</td></tr>
+            <tr><td class="num-col">06</td><td>Payment form with outstanding, and the saved receipt</td><td>Home → Collect payment</td></tr>
+            <tr><td class="num-col">07</td><td>Return screen, lines ticked, reason chip selected</td><td>Invoice → Return</td></tr>
+            <tr><td class="num-col">08</td><td>Route day list; plus bottom bar showing <em>Stock</em> with route off</td><td>Route / Stock tab</td></tr>
+            <tr><td class="num-col">09</td><td>Sync errors with a queued item and its chip</td><td>More → Sync errors</td></tr>
+            <tr><td class="num-col">10</td><td>More screen, App section visible</td><td>More tab</td></tr>
+            <tr><td class="num-col">11</td><td>Vansale workspace, full width</td><td><code>/app/vansale</code></td></tr>
+            <tr><td class="num-col">12</td><td>Vansale Settings, Modules + Invoicing</td><td><code>/app/vansale-settings</code></td></tr>
+            <tr><td class="num-col">13</td><td>Van record, top half and lower half (series rows visible)</td><td><code>/app/vansale-configuration/…</code></td></tr>
+            <tr><td class="num-col">14</td><td>Van Daily Settlement, and Van Stock Position</td><td>Workspace → Reports</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="note">
+        <span class="tag">A note on the phone captures</span>
+        <p>
+          Take 01–10 on a real device rather than an emulator — the Android print sheet
+          and the GPS permission prompt are the two things reviewers always question,
+          and an emulator renders both differently.
+        </p>
+      </div>
+    </section>
+  </main>
+</div>
