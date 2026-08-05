@@ -2,7 +2,24 @@
 
 Van sales PWA for field teams on top of Frappe v15 + ERPNext. Vue 3 SPA ships as a web PWA and a signed Capacitor Android APK from a single source tree. Offline-first queue with strict drain ordering.
 
-**Source of truth for architecture:** `~/.claude/skills/frappe-vue-pwa/SKILL.md`.
+## Documentation
+
+| | |
+|---|---|
+| [`docs/`](docs/README.md) | Documentation index |
+| [`docs/userguide/`](docs/userguide/index.html) | End-user guide — drivers and office |
+| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | How it fits together, and why |
+| [`docs/OPERATIONS.md`](docs/OPERATIONS.md) | Install, upgrade, release, roll back |
+| [`docs/SECURITY.md`](docs/SECURITY.md) | Roles, public surface, secrets |
+| [`docs/reference/`](docs/reference/) | Generated: endpoints, DocTypes, hooks |
+
+Regenerate the reference section after touching an endpoint, a DocType or `hooks.py`:
+
+```bash
+python3 scripts/gen-docs.py
+```
+
+**Architecture pattern:** `~/.claude/skills/frappe-vue-pwa/SKILL.md`.
 **Deploy + infra reference:** `~/.claude/skills/enfono-servers/SKILL.md`.
 **Project handoff:** [`docs/AGENT_HANDOFF.md`](docs/AGENT_HANDOFF.md).
 **Lessons diary:** [`docs/LESSONS_LEARNED.md`](docs/LESSONS_LEARNED.md).
