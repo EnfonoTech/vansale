@@ -1,5 +1,5 @@
 import { apiCall } from "./client";
-import { setCredentials, clearCredentials } from "@/app/frappe";
+import { setCredentials, clearCredentials, resetCsrfToken } from "@/app/frappe";
 
 export interface LoginResult {
   user: string;
@@ -23,6 +23,8 @@ export interface PinUnlockResult {
 
 export async function login(usr: string, pwd: string): Promise<LoginResult> {
   const res = await apiCall<LoginResult>("POST", "vansale.api.auth.login", { usr, pwd });
+  // Logging in replaces the session, and the CSRF token is per session.
+  resetCsrfToken();
   // Stash token immediately so native setup_pin/ping/etc. can use
   // Authorization: token header. On web this is harmless (cookie +
   // CSRF path still authenticates).
@@ -63,5 +65,6 @@ export async function logout(): Promise<void> {
     await apiCall("POST", "vansale.api.auth.logout");
   } finally {
     await clearCredentials();
+    resetCsrfToken();
   }
 }

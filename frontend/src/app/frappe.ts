@@ -86,11 +86,60 @@ export class NetworkError extends Error {
   }
 }
 
-function getCsrfToken(): string | null {
+/**
+ * Synchronous CSRF sources, both of which are absent for the web SPA.
+ *
+ * Frappe v15 keeps `csrf_token` in server-side session data, not in a cookie,
+ * and only injects `window.csrf_token` into desk/website pages it renders. Our
+ * SPA is a STATIC asset under /assets/, so neither source exists — which is why
+ * this needs the async fetch below rather than only reading these.
+ */
+function getCsrfTokenSync(): string | null {
   const m = document.cookie.match(/csrf_token=([^;]+)/);
   if (m) return decodeURIComponent(m[1]);
   const w = window as unknown as { csrf_token?: string };
   return w.csrf_token ?? null;
+}
+
+let csrfCache: string | null = null;
+
+/**
+ * CSRF token for the web build, fetched once and cached.
+ *
+ * Without this, web login failed with **400 "Invalid Request"** in any browser
+ * that already held a Frappe session (a desk tab open in another tab is enough).
+ * `auth.validate_csrf_token` skips the check when the session has no saved
+ * token — so an incognito window worked — but throws `CSRFTokenError` as soon as
+ * one exists and the request header does not match. A static page has no way to
+ * read that token, so it must ask the server for it.
+ *
+ * `util.get_csrf_token` is `allow_guest`, and the request carries cookies, so
+ * the token returned belongs to the same session that will be validated.
+ */
+async function ensureCsrfToken(): Promise<string | null> {
+  const local = getCsrfTokenSync();
+  if (local) return local;
+  if (csrfCache) return csrfCache;
+  try {
+    const res = await fetch(`${apiBase()}/api/method/vansale.api.util.get_csrf_token`, {
+      method: "GET",
+      credentials: "include",
+      headers: { Accept: "application/json" },
+    });
+    if (!res.ok) return null;
+    const body = (await res.json()) as { message?: string };
+    csrfCache = body?.message || null;
+    return csrfCache;
+  } catch {
+    // Offline, or the endpoint is missing on an older server. Send the request
+    // without the header; Frappe only rejects it when a saved token exists.
+    return null;
+  }
+}
+
+/** Discard the cached token — the session, and therefore the token, changed. */
+export function resetCsrfToken(): void {
+  csrfCache = null;
 }
 
 async function authHeaders(): Promise<Record<string, string>> {
@@ -98,7 +147,7 @@ async function authHeaders(): Promise<Record<string, string>> {
     const creds = await getCredentials();
     return creds ? { Authorization: `token ${creds.apiKey}:${creds.apiSecret}` } : {};
   }
-  const csrf = getCsrfToken();
+  const csrf = await ensureCsrfToken();
   return csrf ? { "X-Frappe-CSRF-Token": csrf } : {};
 }
 
