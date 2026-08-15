@@ -20,7 +20,7 @@
  "doctype": "Workspace",
  "for_user": "",
  "hide_custom": 0,
- "icon": "truck",
+ "icon": "map",
  "idx": 0,
  "is_hidden": 0,
  "label": "Vansale",
@@ -32,16 +32,6 @@
    "link_count": 0,
    "onboard": 0,
    "type": "Card Break"
-  },
-  {
-   "hidden": 0,
-   "is_query_report": 0,
-   "label": "Open Van Sale App",
-   "link_count": 0,
-   "link_type": "Page",
-   "link_to": "vansale",
-   "onboard": 1,
-   "type": "Link"
   },
   {
    "dependencies": "",
@@ -317,26 +307,26 @@
    "type": "Link"
   }
  ],
- "modified": "2026-04-22 12:00:00",
+ "modified": "2026-08-15 15:30:00",
  "modified_by": "Administrator",
  "module": "Vansale",
  "name": "Vansale",
  "number_cards": [
   {
-   "number_card_name": "Van Sales Today",
-   "label": "Van Sales Today"
+   "label": "Van Sales Today",
+   "number_card_name": "Van Sales Today"
   },
   {
-   "number_card_name": "Van Invoices Today",
-   "label": "Van Invoices Today"
+   "label": "Van Invoices Today",
+   "number_card_name": "Van Invoices Today"
   },
   {
-   "number_card_name": "Van Collection Today",
-   "label": "Van Collection Today"
+   "label": "Van Collection Today",
+   "number_card_name": "Van Collection Today"
   },
   {
-   "number_card_name": "Van Outstanding",
-   "label": "Van Outstanding"
+   "label": "Van Outstanding",
+   "number_card_name": "Van Outstanding"
   }
  ],
  "owner": "Administrator",
@@ -484,7 +474,7 @@
   },
   {
    "color": "Cyan",
-   "doc_view": "Report",
+   "doc_view": "",
    "label": "Van Daily Settlement",
    "link_to": "Van Daily Settlement",
    "report_ref_doctype": "Sales Invoice",
@@ -492,7 +482,7 @@
   },
   {
    "color": "Cyan",
-   "doc_view": "Report",
+   "doc_view": "",
    "label": "Van Collection Summary",
    "link_to": "Van Collection Summary",
    "report_ref_doctype": "Payment Entry",
@@ -500,7 +490,7 @@
   },
   {
    "color": "Cyan",
-   "doc_view": "Report",
+   "doc_view": "",
    "label": "Van Stock Position",
    "link_to": "Van Stock Position",
    "report_ref_doctype": "Bin",
@@ -508,7 +498,7 @@
   },
   {
    "color": "Cyan",
-   "doc_view": "Report",
+   "doc_view": "",
    "label": "Van Visit Compliance",
    "link_to": "Van Visit Compliance",
    "report_ref_doctype": "Van Daily Visit",
