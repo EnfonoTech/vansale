@@ -93,3 +93,5 @@ van-sales-study/
 
 # Generated docs site (rebuild with scripts/build-docs-site.py)
 dist/docs-site/
+.agentsync/
+graphify-out/
