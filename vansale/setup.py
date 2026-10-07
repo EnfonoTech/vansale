@@ -62,8 +62,25 @@ def after_migrate() -> None:
     _reapply_user_permissions()
     _ensure_custom_fields()
     _ensure_dashboard()
+    _ensure_print_format()
     _ensure_van_series()
     frappe.db.commit()
+
+
+def _ensure_print_format() -> None:
+    """Upsert the `Vansale Tax Invoice` print format from its HTML file.
+
+    The v1_0 patch alone is not enough: `install-app` marks every patch as
+    done without running it, so a fresh install never got the format and
+    printing failed. The upsert is idempotent, so running it on every
+    migrate also keeps the DB copy in sync with the file.
+    """
+    try:
+        from vansale.patches.v1_0.install_vansale_tax_invoice import execute
+
+        execute()
+    except Exception:
+        frappe.log_error(frappe.get_traceback(), "vansale: print format install failed")
 
 
 def _ensure_van_series() -> None:
@@ -174,8 +191,34 @@ def _ensure_role(role: str, desk_access: int = 1) -> None:
     doc.insert(ignore_permissions=True)
 
 
+def _ensure_standard_perms(doctype: str) -> None:
+    """Keep the doctype's standard permissions before adding ours.
+
+    Once a doctype has any Custom DocPerm row, Frappe uses only the Custom
+    DocPerm rows (`Meta.set_custom_permissions`). Inserting a Van User row
+    into a doctype with no custom perms therefore removed access for every
+    other role (Stock User, Item Manager, ...). Copy the standard DocPerm rows
+    first, as `frappe.permissions.add_permission` does. This also repairs
+    sites where an earlier migrate already left only our roles.
+    """
+    custom_roles = set(
+        frappe.get_all("Custom DocPerm", filters={"parent": doctype}, pluck="role")
+    )
+    if custom_roles - {VAN_USER_ROLE, VAN_MANAGER_ROLE}:
+        return  # permissions already customised on this site — leave them
+
+    for perm in frappe.get_all("DocPerm", fields="*", filters={"parent": doctype}):
+        if perm.role in custom_roles:
+            continue
+        doc = frappe.new_doc("Custom DocPerm")
+        doc.update(perm)
+        doc.name = None
+        doc.insert(ignore_permissions=True)
+
+
 def _apply_role_permissions(role: str, perms: list[dict]) -> None:
     for perm in perms:
+        _ensure_standard_perms(perm["parent"])
         filters = {"parent": perm["parent"], "role": role, "permlevel": 0}
         existing = frappe.db.get_value("Custom DocPerm", filters, "name")
         if existing:

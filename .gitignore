@@ -95,3 +95,9 @@ van-sales-study/
 dist/docs-site/
 .agentsync/
 graphify-out/
+
+# Written by Frappe in developer mode when the print format is upserted from
+# vansale_tax_invoice.html (the source of truth) on migrate.
+vansale/vansale/print_format/**/*.json
+vansale/vansale/print_format/**/__init__.py
+vansale/vansale/print_format/__init__.py

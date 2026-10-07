@@ -292,6 +292,17 @@ def _assign_role(user: str, role: str) -> None:
     user_doc.flags.ignore_permissions = True
     user_doc.save(ignore_permissions=True)
 
+    # A Role Profile rewrites the user's roles on every save, so the role we
+    # just appended is dropped again. Tell the admin instead of failing silently.
+    if user_doc.role_profile_name and role not in [r.role for r in user_doc.roles]:
+        frappe.msgprint(
+            _("Role {0} could not be given to {1} because the user follows Role Profile {2}. Add {0} to that Role Profile.").format(
+                frappe.bold(role), frappe.bold(user), frappe.bold(user_doc.role_profile_name)
+            ),
+            indicator="orange",
+            alert=True,
+        )
+
 
 def _maybe_remove_role(user: str, role: str, exclude_config: str) -> None:
     """Remove the role only if the user isn't assigned to any OTHER Vansale Configuration."""
