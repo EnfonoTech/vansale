@@ -18,8 +18,21 @@
 import { apiCall } from "./client";
 import { apiBase } from "@/app/platform";
 import { getCredentials, NetworkError, saveBlobToDevice } from "@/app/frappe";
+import { hasNativePrint, printPdfNative } from "@/app/native-print";
+import type { Router } from "vue-router";
 
 export const DEFAULT_SI_PRINT_FORMAT = "Vansale Tax Invoice";
+export const DEFAULT_PE_PRINT_FORMAT = "Vansale Payment Receipt";
+
+/** Print format for a doctype: the one chosen in Vansale Settings / the van
+ *  (thermal or A4), else the app's own. */
+export function defaultPrintFormat(
+  doctype: string,
+  configured?: { invoice: string; receipt: string } | null,
+): string {
+  if (doctype === "Payment Entry") return configured?.receipt || DEFAULT_PE_PRINT_FORMAT;
+  return configured?.invoice || DEFAULT_SI_PRINT_FORMAT;
+}
 
 interface PrintResponse {
   html: string | null;
@@ -31,6 +44,7 @@ export async function fetchPrintHtml(
   name: string,
   printFormat = DEFAULT_SI_PRINT_FORMAT,
   noLetterhead = false,
+  copies = 1,
 ): Promise<string> {
   const qs = new URLSearchParams({
     doc: doctype,
@@ -45,7 +59,7 @@ export async function fetchPrintHtml(
   if (!res.html) {
     throw new Error(`Print format "${printFormat}" not found`);
   }
-  return buildStandalone(res.html, res.style ?? "", apiBase());
+  return buildStandalone(res.html, res.style ?? "", apiBase(), copies);
 }
 
 /**
@@ -66,6 +80,7 @@ export async function fetchPrintPdfBlob(
   name: string,
   printFormat = DEFAULT_SI_PRINT_FORMAT,
   noLetterhead = false,
+  copies = 1,
 ): Promise<Blob> {
   const qs = new URLSearchParams({
     doctype,
@@ -73,7 +88,10 @@ export async function fetchPrintPdfBlob(
     format: printFormat,
     no_letterhead: noLetterhead ? "1" : "0",
   });
-  const url = `${apiBase()}/api/method/frappe.utils.print_format.download_pdf?${qs.toString()}`;
+  // More than one copy: the app's endpoint repeats the pages in one PDF.
+  if (copies > 1) qs.set("copies", String(copies));
+  const method = copies > 1 ? "vansale.api.printing.pdf" : "frappe.utils.print_format.download_pdf";
+  const url = `${apiBase()}/api/method/${method}?${qs.toString()}`;
   const headers: Record<string, string> = { Accept: "application/pdf" };
   const creds = await getCredentials();
   if (creds) headers.Authorization = `token ${creds.apiKey}:${creds.apiSecret}`;
@@ -152,7 +170,7 @@ function normalisePrintHtml(raw: string): { html: string; inlineStyle: string } 
   return { html, inlineStyle };
 }
 
-function buildStandalone(html: string, style: string, base: string): string {
+function buildStandalone(html: string, style: string, base: string, copies = 1): string {
   const absBase = base ? (base.endsWith("/") ? base : `${base}/`) : "/";
   const baseTag = `<base href="${absBase}">`;
   const { html: cleanHtml, inlineStyle } = normalisePrintHtml(html);
@@ -174,6 +192,79 @@ ${inlineStyle}
   @media print { body { background: #fff; padding: 0; } }
 </style>
 </head>
-<body>${cleanHtml}</body>
+<body>${Array.from({ length: Math.max(1, copies) }, () => cleanHtml).join(
+    '<div style="page-break-after: always; break-after: page;"></div>',
+  )}</body>
 </html>`;
+}
+
+/**
+ * Print a document straight away, `copies` times in one job.
+ * Native: server PDF → Android print dialog (the WebView ignores print()).
+ * Web: the print HTML in a hidden frame → the browser print dialog. The
+ * browser renders it, like desk printing, so images and page breaks match.
+ */
+export async function printDocument(
+  doctype: string,
+  name: string,
+  printFormat: string,
+  copies = 1,
+): Promise<void> {
+  if (hasNativePrint()) {
+    const blob = await fetchPrintPdfBlob(doctype, name, printFormat, false, copies);
+    await printPdfNative(blob, `${doctype}-${name}`);
+    return;
+  }
+  const html = await fetchPrintHtml(doctype, name, printFormat, false, copies);
+  await printHtmlInHiddenFrame(html);
+}
+
+function printHtmlInHiddenFrame(html: string): Promise<void> {
+  return new Promise((resolve) => {
+    const frame = document.createElement("iframe");
+    frame.setAttribute("aria-hidden", "true");
+    frame.style.cssText = "position:fixed;right:0;bottom:0;width:0;height:0;border:0;visibility:hidden;";
+    const cleanup = () => window.setTimeout(() => frame.remove(), 1000);
+    frame.onload = () => {
+      const win = frame.contentWindow;
+      if (!win) {
+        cleanup();
+        resolve();
+        return;
+      }
+      win.addEventListener("afterprint", cleanup, { once: true });
+      // Let images (logo, QR) finish before the dialog snapshots the page.
+      window.setTimeout(() => {
+        win.focus();
+        win.print();
+        resolve();
+      }, 300);
+    };
+    frame.srcdoc = html;
+    document.body.appendChild(frame);
+  });
+}
+
+export interface PrintBehaviour {
+  direct: boolean;
+  after_submit: boolean;
+  copies: number;
+}
+
+/**
+ * The app's Print action: print at once when "Print directly" is on,
+ * otherwise open the preview screen.
+ */
+export async function openPrint(
+  router: Router,
+  doctype: string,
+  name: string,
+  formats: { invoice: string; receipt: string } | null,
+  behaviour: PrintBehaviour | null,
+): Promise<void> {
+  if (behaviour?.direct) {
+    await printDocument(doctype, name, defaultPrintFormat(doctype, formats), behaviour.copies || 1);
+    return;
+  }
+  await router.push({ name: "print-view", params: { doctype, name } });
 }

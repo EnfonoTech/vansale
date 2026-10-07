@@ -366,65 +366,69 @@ def _build_statement_html(name: str, from_date: str | None, to_date: str | None)
     to_date = to_date or str(frappe.utils.today())
     from_date = from_date or frappe.utils.add_days(to_date, -90)
 
-    # Opening balance — sum of GL entries before from_date.
+    # Built from GL Entry, the ledger the books use, so opening and closing
+    # match Accounts Receivable. Listing Sales Invoices as debits and Payment
+    # Entries as credits showed every cash (POS) sale as unpaid, since its
+    # payment sits inside the invoice, and left out Journal Entries.
+    from vansale.api.invoice import _user_company
+
+    company = _user_company() or ""
     opening = frappe.db.sql(
         """
         SELECT COALESCE(SUM(debit - credit), 0) AS bal
         FROM `tabGL Entry`
-        WHERE party_type = 'Customer' AND party = %s
+        WHERE party_type = 'Customer' AND party = %s AND company = %s
           AND posting_date < %s AND is_cancelled = 0
         """,
-        (name, from_date),
+        (name, company, from_date),
         as_dict=True,
     )
     opening_balance = float(opening[0]["bal"]) if opening else 0.0
 
-    # Invoices in period.
-    invoices = frappe.get_all(
-        "Sales Invoice",
-        filters={
-            "customer": name,
-            "docstatus": 1,
-            "posting_date": ["between", [from_date, to_date]],
-        },
-        fields=["name", "posting_date", "grand_total", "outstanding_amount", "status", "remarks"],
-        order_by="posting_date asc, creation asc",
-    )
-
-    # Payments in period.
-    payments = frappe.db.sql(
+    entries = frappe.db.sql(
         """
-        SELECT pe.name, pe.posting_date, pe.paid_amount,
-               pe.mode_of_payment, pe.reference_no
-        FROM `tabPayment Entry` pe
-        WHERE pe.party_type = 'Customer' AND pe.party = %s
-          AND pe.docstatus = 1
-          AND pe.posting_date BETWEEN %s AND %s
-        ORDER BY pe.posting_date ASC, pe.creation ASC
+        SELECT posting_date, voucher_type, voucher_no,
+               SUM(debit) AS debit, SUM(credit) AS credit, MIN(creation) AS created
+        FROM `tabGL Entry`
+        WHERE party_type = 'Customer' AND party = %s AND company = %s
+          AND posting_date BETWEEN %s AND %s AND is_cancelled = 0
+        GROUP BY posting_date, voucher_type, voucher_no
+        ORDER BY posting_date ASC, created ASC
         """,
-        (name, from_date, to_date),
+        (name, company, from_date, to_date),
         as_dict=True,
     )
+    modes = dict(
+        frappe.get_all(
+            "Payment Entry",
+            filters={"name": ["in", [e.voucher_no for e in entries if e.voucher_type == "Payment Entry"] or [""]]},
+            fields=["name", "mode_of_payment"],
+            as_list=True,
+        )
+    )
+    returns = set(
+        frappe.get_all(
+            "Sales Invoice",
+            filters={"name": ["in", [e.voucher_no for e in entries if e.voucher_type == "Sales Invoice"] or [""]], "is_return": 1},
+            pluck="name",
+        )
+    )
 
-    # Merge into unified ledger sorted by date.
     rows: list[dict] = []
-    for inv in invoices:
+    for e in entries:
+        if e.voucher_type == "Payment Entry":
+            desc = f"Payment — {modes.get(e.voucher_no) or ''}".strip(" —")
+        elif e.voucher_no in returns:
+            desc = "Credit Note"
+        else:
+            desc = e.voucher_type
         rows.append({
-            "date": inv.posting_date,
-            "ref": inv.name,
-            "desc": "Sales Invoice",
-            "debit": float(inv.grand_total or 0),
-            "credit": 0.0,
+            "date": e.posting_date,
+            "ref": e.voucher_no,
+            "desc": desc,
+            "debit": float(e.debit or 0),
+            "credit": float(e.credit or 0),
         })
-    for p in payments:
-        rows.append({
-            "date": p["posting_date"],
-            "ref": p["name"],
-            "desc": f"Payment — {p.get('mode_of_payment') or ''}".strip(" —"),
-            "debit": 0.0,
-            "credit": float(p["paid_amount"] or 0),
-        })
-    rows.sort(key=lambda r: (r["date"], r["ref"]))
 
     # Running balance.
     running = opening_balance
@@ -433,14 +437,14 @@ def _build_statement_html(name: str, from_date: str | None, to_date: str | None)
         r["balance"] = running
     closing = running
 
-    company = frappe.db.get_single_value("Global Defaults", "default_company") or ""
-    currency = cust.default_currency or frappe.db.get_value("Company", company, "default_currency") or ""
+    currency = frappe.db.get_value("Company", company, "default_currency") or cust.default_currency or ""
+    esc = frappe.utils.escape_html
 
     def fmt(x: float) -> str:
         return f"{x:,.2f}"
 
     inv_rows_html = "".join(
-        f"<tr><td>{r['date']}</td><td>{r['ref']}</td><td>{r['desc']}</td>"
+        f"<tr><td>{r['date']}</td><td>{esc(r['ref'])}</td><td>{esc(r['desc'])}</td>"
         f"<td style='text-align:right'>{fmt(r['debit']) if r['debit'] else ''}</td>"
         f"<td style='text-align:right'>{fmt(r['credit']) if r['credit'] else ''}</td>"
         f"<td style='text-align:right'>{fmt(r['balance'])}</td></tr>"
@@ -450,7 +454,7 @@ def _build_statement_html(name: str, from_date: str | None, to_date: str | None)
         inv_rows_html = "<tr><td colspan='6' style='text-align:center;color:#888;padding:1rem'>No transactions in this period.</td></tr>"
 
     html = f"""<!doctype html>
-<html><head><meta charset="utf-8"><title>Statement — {cust.customer_name}</title>
+<html><head><meta charset="utf-8"><title>Statement — {esc(cust.customer_name)}</title>
 <style>
   body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif; padding: 2rem; color: #111; }}
   h1 {{ font-size: 1.3rem; margin: 0 0 0.2rem; }}
@@ -466,12 +470,12 @@ def _build_statement_html(name: str, from_date: str | None, to_date: str | None)
 </style></head>
 <body>
   <div class="no-print"><button onclick="window.print()">Print</button></div>
-  <h1>{cust.customer_name} — Statement</h1>
+  <h1>{esc(cust.customer_name)} — Statement</h1>
   <div class="meta">
     Period: <strong>{from_date}</strong> to <strong>{to_date}</strong><br/>
-    Company: {company} · Currency: {currency}<br/>
-    {f'Tax ID: {cust.tax_id}<br/>' if cust.tax_id else ''}
-    {f'Mobile: {cust.mobile_no}<br/>' if cust.mobile_no else ''}
+    Company: {esc(company)} · Currency: {esc(currency)}<br/>
+    {f'Tax ID: {esc(cust.tax_id)}<br/>' if cust.tax_id else ''}
+    {f'Mobile: {esc(cust.mobile_no)}<br/>' if cust.mobile_no else ''}
   </div>
   <table>
     <thead>

@@ -25,7 +25,7 @@ import SarSymbol from "@/components/SarSymbol.vue";
 interface ReturnRowState {
   include: boolean;
   qty: number;              // positive qty being returned
-  maxQty: number;           // cap (original qty)
+  maxQty: number;           // cap: original qty minus earlier returns
 }
 
 const route = useRoute();
@@ -68,7 +68,8 @@ onMounted(async () => {
       return;
     }
     orig.value.items.forEach((it, i) => {
-      rows[i] = { include: false, qty: it.qty, maxQty: it.qty };
+      const left = Math.max(0, it.qty - (it.returned_qty ?? 0));
+      rows[i] = { include: false, qty: left, maxQty: left };
     });
   } catch (e) {
     err.value = e instanceof Error ? e.message : String(e);
@@ -95,8 +96,9 @@ const estTotal = computed(() => {
 });
 
 function toggleAll(value: boolean) {
+  // Fully returned lines have nothing left to select.
   Object.values(rows).forEach((r) => {
-    r.include = value;
+    r.include = value && r.maxQty > 0;
   });
 }
 
@@ -127,6 +129,8 @@ async function submit() {
     const res = await returnAgainst({
       original_name: orig.value.name,
       items: picks.map(({ it, r }) => ({
+        // The invoice row being returned, so a repeated item maps correctly.
+        sales_invoice_item: it.name,
         item_code: it.item_code,
         qty: r.qty,
         rate: it.rate,
@@ -138,12 +142,17 @@ async function submit() {
       submit: 1,
     });
     toasts.success(`Credit Note ${res.name} · ${session.currency} ${Math.abs(res.grand_total).toFixed(2)}`);
-    // Route to in-app print view — same ZATCA format handles is_return.
-    // Native WebView can't open the server /printview route directly.
-    void router.push({
-      name: "print-view",
-      params: { doctype: "Sales Invoice", name: res.name },
-    });
+    if (session.printBehaviour?.after_submit) {
+      // "Print after submit": the credit note's detail view prints on arrival.
+      void router.push({ name: "invoice-detail", params: { name: res.name }, query: { autoprint: "1" } });
+    } else {
+      // Route to in-app print view — same format handles is_return.
+      // Native WebView can't open the server /printview route directly.
+      void router.push({
+        name: "print-view",
+        params: { doctype: "Sales Invoice", name: res.name },
+      });
+    }
   } catch (e) {
     toasts.error(
       e instanceof ApiError ? e.serverMessage ?? e.message
@@ -189,6 +198,7 @@ async function submit() {
               <input
                 type="checkbox"
                 v-model="rows[i].include"
+                :disabled="rows[i].maxQty <= 0"
               />
               <div class="head-body">
                 <strong class="truncate">{{ it.item_name }}</strong>
@@ -211,6 +221,7 @@ async function submit() {
               </label>
               <div class="cap">
                 <span class="tiny">Max {{ fmt(rows[i].maxQty) }}</span>
+                <span v-if="it.returned_qty" class="tiny muted">Returned {{ fmt(it.returned_qty) }}</span>
               </div>
             </div>
           </li>

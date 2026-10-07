@@ -79,6 +79,10 @@ export interface InvoiceDetailTax {
 }
 
 export interface InvoiceDetailItem {
+  /** Invoice row name (Sales Invoice Item). */
+  name?: string;
+  /** Qty already returned on submitted credit notes. */
+  returned_qty?: number;
   item_code: string;
   item_name: string;
   qty: number;
@@ -88,6 +92,8 @@ export interface InvoiceDetailItem {
   discount_amount: number;
   amount: number;
   uom: string | null;
+  conversion_factor?: number;
+  stock_uom?: string | null;
   warehouse: string | null;
 }
 
@@ -106,6 +112,11 @@ export interface InvoiceDetail {
   posting_time: string | null;
   due_date: string | null;
   is_return: number;
+  /** 1 = cash (POS) invoice. Absent on servers older than this field. */
+  is_pos?: number;
+  /** Cash or credit, whichever way the cash sale is posted (POS or Payment Entry). */
+  payment_type?: "cash" | "credit";
+  mode_of_payment?: string | null;
   grand_total: number;
   net_total: number;
   total_taxes_and_charges: number;
@@ -214,6 +225,8 @@ export async function taxInfo(customer?: string): Promise<TaxInfo> {
 }
 
 export interface ReturnLine {
+  /** Original invoice row being returned (server matches by item code without it). */
+  sales_invoice_item?: string;
   item_code: string;
   qty: number;                 // positive — server negates
   rate?: number;

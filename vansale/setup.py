@@ -68,7 +68,7 @@ def after_migrate() -> None:
 
 
 def _ensure_print_format() -> None:
-    """Upsert the `Vansale Tax Invoice` print format from its HTML file.
+    """Upsert the app's print formats (tax invoice, payment receipt) from their HTML files.
 
     The v1_0 patch alone is not enough: `install-app` marks every patch as
     done without running it, so a fresh install never got the format and
@@ -152,6 +152,20 @@ VAN_MANAGER_PERMISSIONS: list[dict] = [
 # "value missing for customer: Customer country" regression and left
 # admins with no way to reorder the driver's customer list.
 VANSALE_CUSTOM_FIELDS: dict[str, list[dict]] = {
+    # Cash sale in "Payment Entry" posting mode: the mode the driver chose, kept
+    # on the invoice so a draft remembers it until submit creates the Payment Entry.
+    "Sales Invoice": [
+        {
+            "fieldname": "custom_vansale_payment_mode",
+            "label": "Van Cash Payment Mode",
+            "fieldtype": "Link",
+            "options": "Mode of Payment",
+            "insert_after": "is_pos",
+            "read_only": 1,
+            "no_copy": 1,
+            "module": "Vansale",
+        },
+    ],
     "Customer": [
         {
             "fieldname": "custom_van_sort_order",

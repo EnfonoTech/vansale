@@ -21,6 +21,7 @@ from datetime import date
 from typing import Optional
 
 import frappe
+from frappe.utils import getdate, nowdate
 from frappe import _
 
 from vansale.api.datetime_util import naive_site_to_utc_iso, parse_client_ts
@@ -228,7 +229,7 @@ def today(client_date: Optional[str] = None) -> dict:
     if user == "Guest":
         frappe.throw(_("Login required"))
 
-    today_ = _parse_iso_date(client_date) or date.today()
+    today_ = _parse_iso_date(client_date) or getdate(nowdate())
     sales_person = _resolve_sales_person(user)
     if not sales_person:
         return {
@@ -258,7 +259,7 @@ def start_visit(customer: str, client_date: Optional[str] = None) -> dict:
     if not customer:
         frappe.throw(_("customer required"))
     user = frappe.session.user
-    today_ = _parse_iso_date(client_date) or date.today()
+    today_ = _parse_iso_date(client_date) or getdate(nowdate())
     now = frappe.utils.now_datetime()
     doc = _upsert_visit(
         user,
@@ -301,7 +302,7 @@ def end_visit(
         return {"name": existing_log.name, "idempotent_replay": True}
 
     user = frappe.session.user
-    today_ = _parse_iso_date(client_date) or date.today()
+    today_ = _parse_iso_date(client_date) or getdate(nowdate())
     ended = parse_client_ts(posting_ts) if posting_ts else frappe.utils.now_datetime()
 
     doc = _upsert_visit(
@@ -347,7 +348,7 @@ def skip_visit(
     if not customer:
         frappe.throw(_("customer required"))
     user = frappe.session.user
-    today_ = _parse_iso_date(client_date) or date.today()
+    today_ = _parse_iso_date(client_date) or getdate(nowdate())
 
     existing = _fetch_visit(user, customer, today_)
     if existing and existing["status"] in ("done", "skipped"):
@@ -383,7 +384,7 @@ def daily_report(client_date: Optional[str] = None, plan_date: Optional[str] = N
     """
     user = frappe.session.user
     raw = client_date or plan_date
-    today_ = _parse_iso_date(raw) or date.today()
+    today_ = _parse_iso_date(raw) or getdate(nowdate())
 
     visits = frappe.db.sql(
         """

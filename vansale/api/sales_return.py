@@ -10,6 +10,7 @@ from typing import Any, Optional
 
 import frappe
 from frappe import _
+from frappe.utils import flt
 
 from vansale.api.datetime_util import naive_site_to_utc_iso, parse_client_ts
 
@@ -23,6 +24,95 @@ RETURN_REASONS = (
     "Short Delivery",
     "Other",
 )
+
+
+def returned_qty_by_row(original) -> dict[str, float]:
+    """Qty already returned per original invoice row (submitted returns).
+
+    Returns made before rows were linked (`sales_invoice_item` empty) are
+    counted against that item's rows in invoice order.
+    """
+    returned = {line.name: 0.0 for line in original.items}
+    unlinked: dict[str, float] = {}
+    for r in frappe.db.sql(
+        """
+        SELECT sii.sales_invoice_item, sii.item_code, -sii.qty AS qty
+        FROM `tabSales Invoice Item` sii
+        JOIN `tabSales Invoice` si ON si.name = sii.parent
+        WHERE si.return_against = %s AND si.is_return = 1 AND si.docstatus = 1
+        """,
+        original.name,
+        as_dict=True,
+    ):
+        if r.sales_invoice_item in returned:
+            returned[r.sales_invoice_item] += flt(r.qty)
+        else:
+            unlinked[r.item_code] = unlinked.get(r.item_code, 0.0) + flt(r.qty)
+    for line in original.items:
+        take = min(unlinked.get(line.item_code, 0.0), flt(line.qty) - returned[line.name])
+        if take > 0:
+            returned[line.name] += take
+            unlinked[line.item_code] -= take
+    return returned
+
+
+def append_return_rows(doc, original, items: list[dict[str, Any]]) -> None:
+    """Add return lines to `doc`, each tied to one row of the original invoice.
+
+    A line names its row with `sales_invoice_item`; without it, the first row
+    of that item with qty left is used. Qty may not exceed what is left on the
+    row after earlier returns. UOM, conversion factor, rate, discount and
+    warehouse come from the original row, so the credit matches the sale.
+    Lines with qty 0 are skipped.
+    """
+    rows = {line.name: line for line in original.items}
+    left = {
+        name: flt(rows[name].qty) - done for name, done in returned_qty_by_row(original).items()
+    }
+    for item in items:
+        code = item.get("item_code")
+        qty = abs(flt(item.get("qty")))
+        if qty <= 0:
+            continue
+        row_name = item.get("sales_invoice_item")
+        if row_name:
+            if row_name not in rows:
+                frappe.throw(_("Line {0} is not on invoice {1}").format(row_name, original.name))
+            orig = rows[row_name]
+        else:
+            if not code:
+                frappe.throw(_("item_code is required on every return line"))
+            candidates = [l for l in original.items if l.item_code == code]
+            if not candidates:
+                frappe.throw(_("Item {0} not in original invoice").format(code))
+            orig = next((l for l in candidates if left[l.name] > 0), candidates[0])
+        if qty > left[orig.name] + 1e-9:
+            frappe.throw(
+                _("Cannot return {0} {1} of {2}: only {3} left after earlier returns").format(
+                    qty, orig.uom, orig.item_code, max(left[orig.name], 0)
+                )
+            )
+        left[orig.name] -= qty
+
+        row = doc.append("items", {})
+        row.item_code = orig.item_code
+        row.qty = -qty
+        row.uom = orig.uom
+        row.conversion_factor = flt(orig.conversion_factor) or 1
+        row.price_list_rate = flt(orig.price_list_rate)
+        row.rate = flt(orig.rate)
+        if orig.discount_percentage:
+            row.discount_percentage = flt(orig.discount_percentage)
+        row.warehouse = item.get("warehouse") or orig.warehouse or doc.set_warehouse
+        row.sales_invoice_item = orig.name
+
+    if not doc.get("items"):
+        frappe.throw(_("Enter a return qty for at least one line"))
+
+    # Same taxes as the sale (see invoice._apply_template_taxes).
+    doc.taxes_and_charges = original.taxes_and_charges
+    if doc.taxes_and_charges and not doc.get("taxes"):
+        doc.append_taxes_from_master()
 
 
 def resolve_return_reason(reason: Optional[str]) -> tuple[str, str]:
@@ -107,7 +197,6 @@ def save(
     if original.docstatus != 1:
         frappe.throw(_("Original invoice must be submitted"))
 
-    original_lines = {i.item_code: i for i in original.items}
     posting = parse_client_ts(posting_ts) if posting_ts else frappe.utils.now_datetime()
 
     doc = frappe.new_doc("Sales Invoice")
@@ -128,22 +217,7 @@ def save(
         doc.custom_return_reason = reason_option
     doc.custom_client_id = client_id
 
-    for line in items:
-        code = line.get("item_code")
-        if not code or code not in original_lines:
-            frappe.throw(_("Item {0} not in original invoice").format(code))
-        qty = abs(float(line.get("qty") or 0))
-        if qty <= 0:
-            continue
-        max_qty = float(original_lines[code].qty or 0)
-        if qty > max_qty:
-            frappe.throw(_("Cannot return more than sold: {0}").format(code))
-        row = doc.append("items", {})
-        row.item_code = code
-        row.qty = -qty
-        row.rate = float(original_lines[code].rate or 0)
-        row.uom = original_lines[code].uom
-        row.warehouse = line.get("warehouse") or original_lines[code].warehouse
+    append_return_rows(doc, original, items)
 
     doc.insert(ignore_permissions=False)
     if submit:

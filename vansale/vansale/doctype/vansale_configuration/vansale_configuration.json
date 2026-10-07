@@ -19,6 +19,14 @@
   "uom_change_mode",
   "section_break_pricing",
   "selling_price_list",
+  "customer_price_mode",
+  "cash_sale_posting_mode",
+  "cash_payment_entry_status_mode",
+  "invoice_print_format",
+  "receipt_print_format",
+  "direct_print_mode",
+  "print_after_submit_mode",
+  "print_copies",
   "section_break_visits",
   "require_location",
   "section_break_series",
@@ -110,6 +118,59 @@
    "description": "Van-level selling price list. Takes effect when a customer has no Customer-specific default price list. Falls back to Customer Group → Selling Settings when unset."
   },
   {
+   "default": "Follow Global",
+   "fieldname": "customer_price_mode",
+   "fieldtype": "Select",
+   "label": "Customer-specific price",
+   "options": "Follow Global\nEnabled\nDisabled"
+  },
+  {
+   "default": "Follow Global",
+   "fieldname": "cash_sale_posting_mode",
+   "fieldtype": "Select",
+   "label": "Cash sale posting",
+   "options": "Follow Global\nPOS Invoice\nPayment Entry"
+  },
+  {
+   "default": "Follow Global",
+   "fieldname": "cash_payment_entry_status_mode",
+   "fieldtype": "Select",
+   "label": "Payment Entry status",
+   "options": "Follow Global\nSubmit\nDraft"
+  },
+  {
+   "fieldname": "invoice_print_format",
+   "fieldtype": "Link",
+   "label": "Invoice print format",
+   "options": "Print Format"
+  },
+  {
+   "fieldname": "receipt_print_format",
+   "fieldtype": "Link",
+   "label": "Receipt print format",
+   "options": "Print Format"
+  },
+  {
+   "default": "Follow Global",
+   "fieldname": "direct_print_mode",
+   "fieldtype": "Select",
+   "label": "Print directly (no preview)",
+   "options": "Follow Global\nEnabled\nDisabled"
+  },
+  {
+   "default": "Follow Global",
+   "fieldname": "print_after_submit_mode",
+   "fieldtype": "Select",
+   "label": "Print after submit",
+   "options": "Follow Global\nEnabled\nDisabled"
+  },
+  {
+   "fieldname": "print_copies",
+   "fieldtype": "Int",
+   "label": "Copies (0 = global)",
+   "non_negative": 1
+  },
+  {
    "fieldname": "section_break_visits",
    "fieldtype": "Section Break",
    "label": "Visits"
@@ -174,7 +235,7 @@
  ],
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-04-19 00:00:00",
+ "modified": "2026-10-07 17:54:12.997451",
  "modified_by": "Administrator",
  "module": "Vansale",
  "name": "Vansale Configuration",

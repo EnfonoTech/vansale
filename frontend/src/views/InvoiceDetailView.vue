@@ -6,6 +6,7 @@ import { useSessionStore } from "@/stores/session";
 import { useToastStore } from "@/stores/toasts";
 import { useConfirmStore } from "@/stores/confirm";
 import { ApiError } from "@/app/frappe";
+import { openPrint, printDocument, defaultPrintFormat } from "@/api/print";
 import Icon from "@/components/Icon.vue";
 import SarSymbol from "@/components/SarSymbol.vue";
 
@@ -51,7 +52,26 @@ async function load() {
   }
 }
 
-onMounted(load);
+/** Print once on arrival when sent here with ?autoprint=1 ("Print after submit"). */
+async function autoPrint() {
+  if (route.query.autoprint !== "1" || !inv.value || inv.value.docstatus !== 1) return;
+  void router.replace({ query: {} });
+  try {
+    await printDocument(
+      "Sales Invoice",
+      inv.value.name,
+      defaultPrintFormat("Sales Invoice", session.printFormats),
+      session.printBehaviour?.copies ?? 1,
+    );
+  } catch (e) {
+    toasts.error(e instanceof Error ? e.message : String(e));
+  }
+}
+
+onMounted(async () => {
+  await load();
+  await autoPrint();
+});
 
 function fmt(n: number | null | undefined): string {
   const v = typeof n === "number" ? n : Number(n) || 0;
@@ -75,15 +95,14 @@ function payHere() {
   });
 }
 
-function printInvoice() {
+async function printInvoice() {
   if (!inv.value) return;
-  // In-app PrintView fetches HTML via `frappe.client.get_print` and
-  // renders it inside a sandboxed iframe; works on native + web.
-  // ZATCA Phase 2 format "Vansale Tax Invoice" is the default.
-  void router.push({
-    name: "print-view",
-    params: { doctype: "Sales Invoice", name: inv.value.name },
-  });
+  // Print at once ("Print directly") or open the preview screen.
+  try {
+    await openPrint(router, "Sales Invoice", inv.value.name, session.printFormats, session.printBehaviour);
+  } catch (e) {
+    toasts.error(e instanceof Error ? e.message : String(e));
+  }
 }
 
 function returnInvoice() {
@@ -114,6 +133,14 @@ async function submitInvoice() {
     await submitDraft(inv.value.name);
     toasts.success(`Submitted ${inv.value.name}`);
     await load();
+    if (session.printBehaviour?.after_submit) {
+      await printDocument(
+        "Sales Invoice",
+        inv.value.name,
+        defaultPrintFormat("Sales Invoice", session.printFormats),
+        session.printBehaviour.copies ?? 1,
+      );
+    }
   } catch (e) {
     toasts.error(
       e instanceof ApiError ? e.serverMessage ?? e.message

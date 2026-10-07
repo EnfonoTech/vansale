@@ -307,23 +307,13 @@
             {% endif %}
             <div class="company-name-ar">{{ doc.company }}</div>
 
-            {% set pos = (doc.pos_profile or "").lower() %}
-
+            {# The invoice's company address (ERPNext fills company_address_display
+               from the company's address). Never a hardcoded branch. #}
+            {% if doc.company_address_display %}
             <div class="address">
-                {% if "faisaliya" in pos %}
-                    <div class="address-line" style="font-size:22px;">الفيصلية – الدمام، المملكة العربية السعودية</div>
-                    <div class="address-line" style="font-size:19px;">Al Faisaliyah – Dammam, Saudi Arabia</div>
-                {% elif "doha" in pos %}
-                    <div class="address-line" style="font-size:22px;">الدوحة – الدمام، المملكة العربية السعودية</div>
-                    <div class="address-line" style="font-size:19px;">Doha – Dammam, Saudi Arabia</div>
-                {% elif "saihat" in pos %}
-                    <div class="address-line" style="font-size:22px;">سيهات – الدمام، المملكة العربية السعودية</div>
-                    <div class="address-line" style="font-size:19px;">Saihat – Dammam, Saudi Arabia</div>
-                {% else %}
-                    <div class="address-line" style="font-size:22px;">الفيصلية – الدمام، المملكة العربية السعودية</div>
-                    <div class="address-line" style="font-size:19px;">Al Faisaliyah – Dammam, Saudi Arabia</div>
-                {% endif %}
+                <div class="address-line" style="font-size:16px;">{{ doc.company_address_display }}</div>
             </div>
+            {% endif %}
 
             <div class="address-separator"></div>
 
@@ -363,7 +353,7 @@
             <div class="invoice-details" style="width:100%;">
                 <div class="detail-item" style="width:65%;">
                     <div>مندوب مبيعات / Cashier</div>
-                    <div>{{ doc.owner or "" }}</div>
+                    <div>{{ frappe.db.get_value("User", doc.owner, "full_name") or doc.owner or "" }}</div>
                 </div>
                 <div class="detail-item" style="width:35%;">
                     <div>وقت / Time</div>
@@ -371,6 +361,13 @@
                 </div>
             </div>
         </div>
+
+        {# VAT = "On Net Total" tax rows. A line's rate comes from its item tax
+           template (item_tax_rate) when it has one, else the row's rate. #}
+        {% set vat_rows = doc.taxes | selectattr("charge_type", "equalto", "On Net Total") | list %}
+        {% set ns_vat = namespace(rate=0) %}
+        {% for t in vat_rows %}{% set ns_vat.rate = ns_vat.rate + (t.rate or 0) %}{% endfor %}
+        {% set vat_label = ("%g"|format(ns_vat.rate)) ~ "%" %}
 
         <div class="items-section">
             <table class="items-table">
@@ -380,7 +377,7 @@
                         <th style="padding:3px !important; background:#fff; color:#000; width:12%;"><strong>سعر<br>Price</strong></th>
                         <th style="padding:3px !important; background:#fff; color:#000; width:10%;"><strong>خصم<br>Disc.</strong></th>
                         <th style="padding:3px !important; background:#fff; color:#000; width:15%;"><strong>قيمة قبل ضريبة<br>Before VAT</strong></th>
-                        <th style="padding:3px !important; background:#fff; color:#000; width:12%;"><strong>ضريبة 15%<br>15% VAT</strong></th>
+                        <th style="padding:3px !important; background:#fff; color:#000; width:12%;"><strong>ضريبة {{ vat_label }}<br>{{ vat_label }} VAT</strong></th>
                         <th style="padding:3px !important; background:#fff; color:#000; width:15%;"><strong>قيمة بعد ضريبة<br>After VAT</strong></th>
                     </tr>
                 </thead>
@@ -390,7 +387,7 @@
                         <td colspan="6" class="item-description" style="padding:3px !important;">
                             <div style="display:flex; align-items:center; width:100%;">
                                 <div style="flex:1; text-align:left; font-weight:bold;">
-                                    {{ item.item_code }} {{ item.stock_uom or item.uom or "PCS" }}
+                                    {{ item.item_code }} {{ item.uom or item.stock_uom or "" }}
                                 </div>
                                 <div style="flex:2; text-align:center;">
                                     {{ item.item_name }}
@@ -428,8 +425,14 @@
                             {% endif %}
                         </td>
                         <td style="padding:3px !important;">{{ "%.2f"|format(item.net_amount) }}</td>
-                        <td style="padding:3px !important;">{{ "%.2f"|format(item.tax_amount if item.tax_amount is defined else 0) }}</td>
-                        <td style="padding:3px !important;" class="bold">{{ "%.2f"|format(item.total_amount if item.total_amount is defined else item.amount) }}</td>
+                        {% set item_rates = json.loads(item.item_tax_rate or "{}") %}
+                        {% set ns_line = namespace(vat=0) %}
+                        {% for t in vat_rows %}
+                            {% set line_rate = item_rates.get(t.account_head, t.rate) or 0 %}
+                            {% set ns_line.vat = ns_line.vat + (item.net_amount or 0) * line_rate / 100 %}
+                        {% endfor %}
+                        <td style="padding:3px !important;">{{ "%.2f"|format(ns_line.vat) }}</td>
+                        <td style="padding:3px !important;" class="bold">{{ "%.2f"|format((item.net_amount or 0) + ns_line.vat) }}</td>
                     </tr>
                     {% endfor %}
                 </tbody>
@@ -452,7 +455,7 @@
                         <th style="padding:3px !important; background:#fff; color:#000; width:20%;"><strong>MRP</strong></th>
                         <th style="padding:3px !important; background:#fff; color:#000; width:25%;"><strong>خصم / Tot. Disc.</strong></th>
                         <th style="padding:3px !important; background:#fff; color:#000; width:35%;"><strong>المجموع قبل ضريبة / Total before VAT</strong></th>
-                        <th style="padding:3px !important; background:#fff; color:#000; width:20%;"><strong>ضريبة 15% / 15% VAT</strong></th>
+                        <th style="padding:3px !important; background:#fff; color:#000; width:20%;"><strong>ضريبة {{ vat_label }} / {{ vat_label }} VAT</strong></th>
                     </tr>
                 </thead>
                 <tbody>
@@ -564,10 +567,18 @@
                 <div><span>Online Order #:</span> {{ doc.po_no or "" }}</div>
             </div>
 
+            {% set siaf_qr = None %}
+            {% if doc.docstatus == 1 and frappe.db.exists("DocType", "Sales Invoice Additional Fields") %}
+                {% set siaf_name = frappe.db.get_value("Sales Invoice Additional Fields", {"sales_invoice": doc.name}, "name", order_by="creation desc") %}
+                {% if siaf_name %}{% set siaf_qr = frappe.get_doc("Sales Invoice Additional Fields", siaf_name).qr_image_src %}{% endif %}
+            {% endif %}
             <div class="qr-code-container" style="width: 100%; display: flex; justify-content: center; align-items: flex-start; text-align:center;">
                 <div style="width: 6cm; height: 6cm; border: 1px solid #aaa; display: flex; align-items: center; justify-content: center; background-color: #f9f9f9;">
                     {% if doc.docstatus == 0 %}
                         <strong>NO QR</strong>
+                    {% elif siaf_qr %}
+                        {# ksa_compliance: QR image built from Sales Invoice Additional Fields.qr_code #}
+                        <img src="{{ siaf_qr }}" style="width: 6cm; height: 6cm;" alt="QR Code">
                     {% elif doc.ksa_einv_qr %}
                         {# ksa_compliance Phase 2 attach-image URL #}
                         <img src="{{ doc.ksa_einv_qr }}" style="width: 6cm; height: 6cm;" alt="QR Code">

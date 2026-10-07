@@ -17,6 +17,7 @@ import { useSessionStore } from "@/stores/session";
 import { useToastStore } from "@/stores/toasts";
 import { useConfirmStore } from "@/stores/confirm";
 import { ApiError } from "@/app/frappe";
+import { openPrint, printDocument, defaultPrintFormat } from "@/api/print";
 import Icon from "@/components/Icon.vue";
 import SarSymbol from "@/components/SarSymbol.vue";
 
@@ -60,12 +61,30 @@ function tone(status: string | undefined): string {
   return "info";
 }
 
-function printEntry() {
+async function printEntry() {
   if (!doc.value) return;
-  void router.push({
-    name: "print-view",
-    params: { doctype: "Payment Entry", name: doc.value.name },
-  });
+  // Print at once ("Print directly") or open the preview screen.
+  try {
+    await openPrint(router, "Payment Entry", doc.value.name, session.printFormats, session.printBehaviour);
+  } catch (e) {
+    toasts.error(e instanceof Error ? e.message : String(e));
+  }
+}
+
+/** Print once on arrival when sent here with ?autoprint=1 ("Print after submit"). */
+async function autoPrint() {
+  if (route.query.autoprint !== "1" || !doc.value) return;
+  void router.replace({ query: {} });
+  try {
+    await printDocument(
+      "Payment Entry",
+      doc.value.name,
+      defaultPrintFormat("Payment Entry", session.printFormats),
+      session.printBehaviour?.copies ?? 1,
+    );
+  } catch (e) {
+    toasts.error(e instanceof Error ? e.message : String(e));
+  }
 }
 
 function openInvoice(ref: string) {
@@ -101,7 +120,10 @@ async function onDelete() {
   }
 }
 
-onMounted(load);
+onMounted(async () => {
+  await load();
+  await autoPrint();
+});
 </script>
 
 <template>

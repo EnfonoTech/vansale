@@ -36,10 +36,37 @@ export async function outstanding(customer: string): Promise<Array<Record<string
   return apiCall("GET", `vansale.api.payment.outstanding?customer=${encodeURIComponent(customer)}`);
 }
 
-export interface ModeOfPayment { name: string; type: string | null }
+export interface ModeOfPayment {
+  name: string;
+  type: string | null;
+  /** Account is a Bank account → ERPNext requires a reference number. */
+  needs_reference?: boolean;
+}
 
+const MOP_CACHE_KEY = "vansale.modesOfPayment";
+
+/** Modes with an account for the user's company; last list kept for offline use. */
 export async function modesOfPayment(): Promise<ModeOfPayment[]> {
-  return apiCall<ModeOfPayment[]>("GET", "vansale.api.payment.modes_of_payment");
+  const fromCache = (): ModeOfPayment[] => {
+    try {
+      return JSON.parse(localStorage.getItem(MOP_CACHE_KEY) || "[]") as ModeOfPayment[];
+    } catch {
+      return [];
+    }
+  };
+  if (!isOnline()) return fromCache();
+  try {
+    const rows = await apiCall<ModeOfPayment[]>("GET", "vansale.api.payment.modes_of_payment");
+    try {
+      localStorage.setItem(MOP_CACHE_KEY, JSON.stringify(rows));
+    } catch {
+      /* storage full / blocked — the live list still works */
+    }
+    return rows;
+  } catch (err) {
+    if (err instanceof NetworkError) return fromCache();
+    throw err;
+  }
 }
 
 export interface PaymentReference {

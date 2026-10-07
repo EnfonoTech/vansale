@@ -6,7 +6,9 @@ from typing import Optional
 
 import frappe
 from frappe import _
-from frappe.utils import cint
+from frappe.utils import cint, flt, nowdate
+
+from vansale.api.me import customer_price_enabled, rate_precision
 
 
 _ITEM_FIELDS = [
@@ -48,7 +50,7 @@ def list_mine(
     annotation: annotating after the `limit` means a stocked item outside
     the first N rows of `modified desc` never appears in the results.
     """
-    filters: dict = {"disabled": 0, "has_variants": 0}
+    filters: dict = {"disabled": 0, "has_variants": 0, "is_sales_item": 1}
     if warehouse and cint(only_in_stock):
         allowed = set(
             frappe.get_all(
@@ -66,7 +68,7 @@ def list_mine(
         allowed.update(
             frappe.get_all(
                 "Item",
-                filters={"is_stock_item": 0, "disabled": 0, "has_variants": 0},
+                filters={"is_stock_item": 0, "disabled": 0, "has_variants": 0, "is_sales_item": 1},
                 pluck="name",
                 limit_page_length=0,
             )
@@ -147,25 +149,78 @@ def _customer_price_list(customer: Optional[str]) -> Optional[str]:
     return frappe.db.get_single_value("Selling Settings", "selling_price_list")
 
 
-def _fetch_price(item_code: str, price_list: Optional[str], uom: Optional[str]) -> float:
-    """Fetch Item Price for the (item_code, price_list, uom) triple with UOM fallback."""
-    filters: dict = {"item_code": item_code, "selling": 1}
-    if price_list:
-        filters["price_list"] = price_list
-    if uom:
-        price = frappe.db.get_value(
-            "Item Price",
-            {**filters, "uom": uom},
-            "price_list_rate",
-            order_by="valid_from desc",
-        )
-        if price:
-            return float(price)
-    # Fallback — any UOM for this price list
-    price = frappe.db.get_value(
-        "Item Price", filters, "price_list_rate", order_by="valid_from desc",
+def _item_price(
+    item_code: str, price_list: str, uom: str, stock_uom: str, customer: str = ""
+) -> Optional[float]:
+    """Latest Item Price valid today for (item, price list, uom, customer).
+
+    ``customer=""`` matches only rows with no customer, so one customer's
+    negotiated price never leaks into another customer's invoice. A row
+    without a UOM counts as the stock UOM.
+    """
+    rows = frappe.db.sql(
+        """
+        SELECT price_list_rate FROM `tabItem Price`
+        WHERE item_code = %(item_code)s
+          AND price_list = %(price_list)s
+          AND selling = 1
+          AND IFNULL(NULLIF(uom, ''), %(stock_uom)s) = %(uom)s
+          AND IFNULL(customer, '') = %(customer)s
+          AND IFNULL(valid_from, '1900-01-01') <= %(today)s
+          AND IFNULL(valid_upto, '2999-12-31') >= %(today)s
+        ORDER BY valid_from DESC, modified DESC
+        LIMIT 1
+        """,
+        {
+            "item_code": item_code,
+            "price_list": price_list,
+            "uom": uom,
+            "stock_uom": stock_uom,
+            "customer": customer or "",
+            "today": nowdate(),
+        },
     )
-    return float(price or 0)
+    return flt(rows[0][0]) if rows else None
+
+
+def _fetch_price(
+    item_code: str,
+    price_list: Optional[str],
+    uom: str,
+    stock_uom: str,
+    conversion_factor: float,
+    customer: Optional[str] = None,
+) -> tuple[float, bool]:
+    """Price for one UOM → (rate, is_customer_specific).
+
+    Per price source: the row for this UOM, else the stock UOM row ×
+    conversion factor (as ERPNext does). Never another UOM's rate unconverted.
+    Customer-specific rows are only used when the van's setting allows it.
+    No Item Price → 0, as in ERPNext; the driver types the rate.
+    """
+    if not price_list:
+        return 0.0, False
+    sources = [customer] if customer and customer_price_enabled() else []
+    sources.append("")
+    for source in sources:
+        rate = _item_price(item_code, price_list, uom, stock_uom, source)
+        if rate is None and uom != stock_uom:
+            stock_rate = _item_price(item_code, price_list, stock_uom, stock_uom, source)
+            if stock_rate is not None:
+                rate = stock_rate * flt(conversion_factor or 1)
+        if rate is not None:
+            return flt(rate, rate_precision()), bool(source)
+    return 0.0, False
+
+
+def _item_uoms(doc) -> list[tuple[str, float]]:
+    """(uom, conversion factor) pairs, the item's Sales UOM first."""
+    uoms = [(u.uom, flt(u.conversion_factor) or 1.0) for u in (doc.uoms or []) if u.uom]
+    if doc.stock_uom not in [u for u, _cf in uoms]:
+        uoms.insert(0, (doc.stock_uom, 1.0))
+    default_uom = doc.get("sales_uom") if doc.get("sales_uom") in [u for u, _cf in uoms] else doc.stock_uom
+    uoms.sort(key=lambda u: u[0] != default_uom)
+    return uoms
 
 
 @frappe.whitelist(methods=["GET"])
@@ -174,23 +229,16 @@ def detail(item_code: str, customer: Optional[str] = None) -> dict:
         frappe.throw(_("Item code required"))
     doc = frappe.get_doc("Item", item_code)
     price_list = _customer_price_list(customer)
-    stock_uom_rate = _fetch_price(item_code, price_list, doc.stock_uom)
 
     uoms = []
-    for u in (doc.uoms or []):
-        conv = float(u.conversion_factor or 1)
-        rate = _fetch_price(item_code, price_list, u.uom) or (stock_uom_rate * conv)
-        uoms.append({
-            "uom": u.uom,
-            "conversion_factor": conv,
-            "price_list_rate": float(rate or 0),
-        })
-    if not uoms:
-        uoms.append({
-            "uom": doc.stock_uom,
-            "conversion_factor": 1.0,
-            "price_list_rate": float(stock_uom_rate or doc.standard_rate or 0),
-        })
+    customer_specific = False
+    stock_uom_rate = 0.0
+    for uom, conv in _item_uoms(doc):
+        rate, is_customer = _fetch_price(item_code, price_list, uom, doc.stock_uom, conv, customer)
+        customer_specific = customer_specific or is_customer
+        if uom == doc.stock_uom:
+            stock_uom_rate = rate
+        uoms.append({"uom": uom, "conversion_factor": conv, "price_list_rate": flt(rate)})
 
     return {
         "name": doc.name,
@@ -198,10 +246,12 @@ def detail(item_code: str, customer: Optional[str] = None) -> dict:
         "item_name": doc.item_name,
         "item_group": doc.item_group,
         "stock_uom": doc.stock_uom,
+        "sales_uom": uoms[0]["uom"],
         "standard_rate": float(doc.standard_rate or 0),
         "price_list": price_list,
-        "price_list_rate": float(stock_uom_rate or doc.standard_rate or 0),
+        "price_list_rate": flt(stock_uom_rate),
         "uoms": uoms,
+        "customer_specific": customer_specific,
         "image": doc.image,
         "tax_template": doc.item_tax_template if hasattr(doc, "item_tax_template") else None,
         "customer": customer,
@@ -213,16 +263,17 @@ def price_for(item_code: str, customer: Optional[str] = None, uom: Optional[str]
     """Light-weight price lookup used when the user changes UOM on a line."""
     if not item_code:
         frappe.throw(_("Item code required"))
+    doc = frappe.get_doc("Item", item_code)
+    uom = uom or doc.stock_uom
+    conv = dict(_item_uoms(doc)).get(uom, 1.0)
     price_list = _customer_price_list(customer)
-    rate = _fetch_price(item_code, price_list, uom)
-    if not rate:
-        std = float(frappe.db.get_value("Item", item_code, "standard_rate") or 0)
-        rate = std
+    rate, is_customer = _fetch_price(item_code, price_list, uom, doc.stock_uom, conv, customer)
     return {
         "item_code": item_code,
         "uom": uom,
         "price_list": price_list,
-        "price_list_rate": float(rate or 0),
+        "price_list_rate": flt(rate),
+        "customer_specific": is_customer,
     }
 
 

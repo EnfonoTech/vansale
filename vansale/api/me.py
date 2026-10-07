@@ -104,6 +104,7 @@ def config_defaults() -> dict:
     van_route_mode: str | None = None
     van_pin_mode: str | None = None
     van_uom_mode: str | None = None
+    van_customer_price_mode: str | None = None
     if van_code:
         # require_location is new (v1.0.12); guard with has_field so old sites don't crash
         try:
@@ -127,7 +128,9 @@ def config_defaults() -> dict:
         try:
             meta = frappe.get_meta("Vansale Configuration")
             wanted = [
-                f for f in ("route_mode", "pin_mode", "uom_change_mode") if meta.has_field(f)
+                f
+                for f in ("route_mode", "pin_mode", "uom_change_mode", "customer_price_mode")
+                if meta.has_field(f)
             ]
             if wanted:
                 row = frappe.db.get_value(
@@ -136,8 +139,9 @@ def config_defaults() -> dict:
                 van_route_mode = row.get("route_mode")
                 van_pin_mode = row.get("pin_mode")
                 van_uom_mode = row.get("uom_change_mode")
+                van_customer_price_mode = row.get("customer_price_mode")
         except Exception:
-            van_route_mode = van_pin_mode = van_uom_mode = None
+            van_route_mode = van_pin_mode = van_uom_mode = van_customer_price_mode = None
 
     # Most specific wins: user row → van → global master switch.
     flags = global_flags()
@@ -148,6 +152,9 @@ def config_defaults() -> dict:
         default=flags["require_pin"],
     )
     allow_uom_change = _resolve_mode(van_uom_mode, default=flags["allow_uom_change"])
+    use_customer_price = _resolve_mode(
+        van_customer_price_mode, default=flags.get("use_customer_price", False)
+    )
 
     sales_person_name = None
     if sales_person:
@@ -180,6 +187,11 @@ def config_defaults() -> dict:
         "enable_route": enable_route,
         "require_pin": require_pin,
         "allow_uom_change": allow_uom_change,
+        "use_customer_price": use_customer_price,
+        "currency_precision": rate_precision(),
+        "cash_sale_posting": cash_sale_settings(user)["posting"],
+        "print_formats": print_formats(user),
+        "print": print_behaviour(user),
     }
 
 
@@ -213,6 +225,86 @@ def user_to_van_config(user: str | None) -> str | None:
         {"user": user},
         "parent",
     )
+
+
+def rate_precision() -> int:
+    """Decimals for rates/amounts — the precision ERPNext uses for Sales
+    Invoice Item.rate (field precision → System Settings currency precision
+    → number format)."""
+    from frappe.model.meta import get_field_precision
+
+    return get_field_precision(frappe.get_meta("Sales Invoice Item").get_field("rate"))
+
+
+DEFAULT_INVOICE_PRINT_FORMAT = "Vansale Tax Invoice"
+DEFAULT_RECEIPT_PRINT_FORMAT = "Vansale Payment Receipt"
+
+
+def _van_value(fieldname: str, user: str | None = None):
+    """A field of the user's Vansale Configuration (None if unset / no van)."""
+    van = user_to_van_config(user or frappe.session.user)
+    if not van or not frappe.get_meta("Vansale Configuration").has_field(fieldname):
+        return None
+    return frappe.db.get_value("Vansale Configuration", van, fieldname)
+
+
+def _van_or_global(van_field: str, global_key: str, default, user: str | None = None):
+    value = _van_value(van_field, user)
+    if value and value != "Follow Global":
+        return value
+    return global_flags().get(global_key) or default
+
+
+def cash_sale_settings(user: str | None = None) -> dict:
+    """How a cash sale is posted: van → Vansale Settings.
+
+    posting: "POS Invoice" (is_pos; ERPNext applies the company's POS Profile)
+             or "Payment Entry" (normal invoice + Payment Entry against it).
+    payment_entry_status: "Submit" or "Draft" (office submits later).
+    """
+    return {
+        "posting": _van_or_global("cash_sale_posting_mode", "cash_sale_posting", "POS Invoice", user),
+        "payment_entry_status": _van_or_global(
+            "cash_payment_entry_status_mode", "cash_payment_entry_status", "Submit", user
+        ),
+    }
+
+
+def print_formats(user: str | None = None) -> dict:
+    """Print formats the app uses: van → Vansale Settings → the app's own."""
+    return {
+        "invoice": _van_or_global(
+            "invoice_print_format", "invoice_print_format", DEFAULT_INVOICE_PRINT_FORMAT, user
+        ),
+        "receipt": _van_or_global(
+            "receipt_print_format", "receipt_print_format", DEFAULT_RECEIPT_PRINT_FORMAT, user
+        ),
+    }
+
+
+def print_behaviour(user: str | None = None) -> dict:
+    """Print button / after-submit behaviour and copies: van → Vansale Settings."""
+    flags = global_flags()
+    return {
+        "direct": _resolve_mode(_van_value("direct_print_mode", user), default=flags.get("direct_print", False)),
+        "after_submit": _resolve_mode(
+            _van_value("print_after_submit_mode", user), default=flags.get("print_after_submit", False)
+        ),
+        "copies": max(1, int(_van_value("print_copies", user) or flags.get("print_copies") or 1)),
+    }
+
+
+def customer_price_enabled(user: str | None = None) -> bool:
+    """Whether customer-specific Item Prices apply for this user's van.
+
+    Van `customer_price_mode` → Vansale Settings `use_customer_price` (off by
+    default, since most sites price from the price list only).
+    """
+    van = user_to_van_config(user or frappe.session.user)
+    van_mode = None
+    if van and frappe.get_meta("Vansale Configuration").has_field("customer_price_mode"):
+        van_mode = frappe.db.get_value("Vansale Configuration", van, "customer_price_mode")
+    return _resolve_mode(van_mode, default=global_flags().get("use_customer_price", False))
 
 
 def current_user_van_price_list() -> str | None:

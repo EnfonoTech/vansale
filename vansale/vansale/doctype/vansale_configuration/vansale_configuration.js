@@ -5,6 +5,10 @@
 // a new one on next login. `vansale.api.auth.reset_pin` re-checks the role
 // server-side; this button is only the convenient path to it.
 frappe.ui.form.on("Vansale Configuration", {
+	setup(frm) {
+		vansale_filter_print_formats(frm);
+	},
+
 	refresh(frm) {
 		if (frm.is_new()) return;
 
@@ -57,3 +61,14 @@ frappe.ui.form.on("Vansale Configuration", {
 		);
 	},
 });
+
+// Invoice / receipt print format pickers only offer formats for that doctype.
+// Vansale Settings has the same filter (vansale_settings.js).
+function vansale_filter_print_formats(frm) {
+	frm.set_query("invoice_print_format", () => ({
+		filters: { doc_type: "Sales Invoice", disabled: 0 },
+	}));
+	frm.set_query("receipt_print_format", () => ({
+		filters: { doc_type: "Payment Entry", disabled: 0 },
+	}));
+}

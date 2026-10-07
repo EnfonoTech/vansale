@@ -1,27 +1,34 @@
 /**
- * Router — hash history everywhere, base = full asset path.
+ * Router.
  *
- * The web PWA is served via Frappe's `website_redirects` which 301s
- * `/vansale` → `/assets/vansale/spa/index.html`. Using `createWebHistory`
- * with base `"/vansale/"` fails because the post-redirect URL doesn't
- * start with that base (it starts with `/assets/vansale/spa/`), leaving
- * RouterView unable to resolve any route — empty screen. Also, any deep
- * refresh (`/vansale/login`) hits the server which has no rule for that
- * subpath → Frappe 404.
+ * Web: browser history under `/vansale/` (clean URLs). Frappe serves the
+ * SPA's index.html for `/vansale` and every `/vansale/<path>` (www/vansale +
+ * `website_route_rules` in hooks.py), so a refresh on a deep link loads the
+ * app. Assets keep their `/assets/vansale/spa/` URLs.
  *
- * Hash history with the asset-path base fixes both: the hash fragment
- * drives routing entirely client-side, and the browser only ever requests
- * the real static `index.html` on refresh. This mirrors fatehhr's proven
- * setup.
+ * Native (APK): hash history — the WebView loads a bundled index.html and
+ * has no server to answer `/vansale/<path>`.
+ *
+ * Old web links (`/assets/vansale/spa/index.html#/…`, from installs and
+ * bookmarks before clean URLs) are forwarded to `/vansale/…`; a history
+ * router with the `/vansale/` base would render nothing at that path.
  *
  * Guards:
  *   - Unauthenticated → /login
  *   - Authenticated but stale PIN → /pin (unlock mode)
  */
-import { createRouter, createWebHashHistory } from "vue-router";
+import { createRouter, createWebHashHistory, createWebHistory } from "vue-router";
 import type { RouteRecordRaw } from "vue-router";
 import { useSessionStore } from "@/stores/session";
-import { needsSiteSetup } from "./platform";
+import { isNative, needsSiteSetup } from "./platform";
+
+const WEB_BASE = import.meta.env.DEV ? "/" : "/vansale/";
+const LEGACY_WEB_PATH = "/assets/vansale/spa/";
+
+if (!isNative() && !import.meta.env.DEV && window.location.pathname.startsWith(LEGACY_WEB_PATH)) {
+  const appPath = window.location.hash.replace(/^#\/?/, "");
+  window.location.replace(WEB_BASE + appPath);
+}
 
 const routes: RouteRecordRaw[] = [
   { path: "/setup", name: "setup", component: () => import("@/views/SiteSetupView.vue") },
@@ -167,7 +174,7 @@ const routes: RouteRecordRaw[] = [
 ];
 
 export const router = createRouter({
-  history: createWebHashHistory("/assets/vansale/spa/"),
+  history: isNative() ? createWebHashHistory(LEGACY_WEB_PATH) : createWebHistory(WEB_BASE),
   routes,
 });
 

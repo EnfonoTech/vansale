@@ -56,21 +56,111 @@ def _resolve_accounts(company: str, mode_of_payment: str) -> tuple[str, str]:
         "default_account",
     )
     if not paid_to:
-        paid_to = (
-            frappe.db.get_value(
-                "Account",
-                {"company": company, "account_type": "Cash", "is_group": 0},
-                "name",
-            )
-            or frappe.db.get_value(
-                "Account",
-                {"company": company, "account_type": "Bank", "is_group": 0},
-                "name",
+        # Used to fall back to the company's first Cash/Bank account, which
+        # booked e.g. a card payment into the cash account without telling
+        # anyone. The office must set the account on the Mode of Payment.
+        frappe.throw(
+            _("Mode of Payment {0} has no account for company {1}. Ask the office to set it.").format(
+                mode_of_payment, company
             )
         )
-    if not (receivable and paid_to):
+    if not receivable:
         frappe.throw(_("Could not resolve accounts for payment — set defaults on Company."))
     return receivable, paid_to
+
+
+def build_payment_entry(
+    company: str,
+    customer: str,
+    amount: float,
+    mode_of_payment: str,
+    posting_date,
+    reference_no: Optional[str] = None,
+    reference_date=None,
+    remarks: Optional[str] = None,
+):
+    """Unsaved "Receive" Payment Entry from a customer (no references yet).
+
+    Shared by the payment screen (`save`) and cash sales posted as a
+    Payment Entry (`invoice.save`).
+    """
+    paid_from, paid_to = _resolve_accounts(company, mode_of_payment)
+    # Account currencies — required by ERPNext's Payment Entry validation;
+    # skipping this made validate() trip on str vs Dict attribute access.
+    paid_from_currency = frappe.db.get_value("Account", paid_from, "account_currency") or "SAR"
+    paid_to_currency = frappe.db.get_value("Account", paid_to, "account_currency") or "SAR"
+
+    doc = frappe.new_doc("Payment Entry")
+    doc.payment_type = "Receive"
+    doc.party_type = "Customer"
+    doc.party = customer
+    doc.company = company
+    doc.mode_of_payment = mode_of_payment
+    doc.paid_amount = amount
+    doc.received_amount = amount
+    doc.paid_from = paid_from
+    doc.paid_to = paid_to
+    doc.paid_from_account_currency = paid_from_currency
+    doc.paid_to_account_currency = paid_to_currency
+    # NOTE: do NOT call doc.setup_party_account_field() — it's gone in
+    # ERPNext v15. For Receive, party_account == paid_from (Debtors).
+    doc.party_account = paid_from
+    doc.party_account_currency = paid_from_currency
+    doc.source_exchange_rate = 1
+    doc.target_exchange_rate = 1
+    doc.reference_no = reference_no
+    doc.reference_date = reference_date
+    doc.posting_date = posting_date
+    doc.remarks = remarks
+    return doc
+
+
+def _needs_reference(company: str, mode_of_payment: str) -> bool:
+    """ERPNext requires Reference No + Date when the mode's account is a Bank
+    account — decided by the account, not the Mode of Payment's own type."""
+    account = frappe.db.get_value(
+        "Mode of Payment Account", {"parent": mode_of_payment, "company": company}, "default_account"
+    )
+    return bool(account) and frappe.db.get_value("Account", account, "account_type") == "Bank"
+
+
+def submit_if_configured(pe) -> None:
+    """Submit per the "Payment Entry status" setting (else leave a draft for
+    the office), with a clear message when the user may not submit."""
+    from vansale.api.me import cash_sale_settings
+
+    if cash_sale_settings()["payment_entry_status"] != "Submit":
+        return
+    if not frappe.has_permission("Payment Entry", "submit", doc=pe):
+        frappe.throw(
+            _("You are not allowed to submit Payment Entries. Ask the office to set "
+              "Payment Entry status to Draft or to give your role submit permission."),
+            frappe.PermissionError,
+        )
+    pe.submit()
+
+
+def allocate(doc, invoices: list[dict], amount: float) -> None:
+    """Allocate `amount` FIFO over `invoices` (name, grand_total, outstanding_amount)."""
+    remaining = amount
+    for inv in invoices:
+        if remaining <= 0:
+            break
+        out = float(inv["outstanding_amount"] or 0)
+        if out <= 0:
+            continue
+        alloc = min(remaining, out)
+        doc.append(
+            "references",
+            {
+                "reference_doctype": "Sales Invoice",
+                "reference_name": inv["name"],
+                "total_amount": float(inv["grand_total"] or 0),
+                "outstanding_amount": out,
+                "allocated_amount": alloc,
+            },
+        )
+        remaining -= alloc
 
 
 @frappe.whitelist(methods=["POST"])
@@ -129,34 +219,18 @@ def save(
         or frappe.defaults.get_user_default("Company", frappe.session.user)
         or frappe.db.get_single_value("Global Defaults", "default_company")
     )
-    paid_from, paid_to = _resolve_accounts(company, mode_of_payment)
     posting = parse_client_ts(posting_ts) if posting_ts else frappe.utils.now_datetime()
-
-    # Account currencies — required by ERPNext's Payment Entry validation;
-    # skipping this made validate() trip on str vs Dict attribute access.
-    paid_from_currency = frappe.db.get_value("Account", paid_from, "account_currency") or "SAR"
-    paid_to_currency = frappe.db.get_value("Account", paid_to, "account_currency") or "SAR"
-
-    doc = frappe.new_doc("Payment Entry")
-    doc.payment_type = "Receive"
-    doc.party_type = "Customer"
-    doc.party = customer
-    doc.company = company
-    doc.mode_of_payment = mode_of_payment
-    doc.paid_amount = amount
-    doc.received_amount = amount
-    doc.paid_from = paid_from
-    doc.paid_to = paid_to
-    doc.paid_from_account_currency = paid_from_currency
-    doc.paid_to_account_currency = paid_to_currency
-    doc.party_account = paid_from  # for Receive, party_account == paid_from (Debtors)
-    doc.party_account_currency = paid_from_currency
-    doc.source_exchange_rate = 1
-    doc.target_exchange_rate = 1
-    doc.reference_no = reference_no
-    doc.reference_date = reference_date
-    doc.posting_date = posting.date()
-    doc.remarks = remarks
+    # ERPNext requires Reference No + Date on bank-type modes. The date was
+    # never sent, so every bank collection failed; default it to the posting
+    # date and ask for the number up front.
+    if not reference_no and _needs_reference(company, mode_of_payment):
+        frappe.throw(_("Enter the reference number (transaction / cheque no.) for {0}").format(mode_of_payment))
+    doc = build_payment_entry(
+        company, customer, amount, mode_of_payment, posting.date(),
+        reference_no=reference_no,
+        reference_date=reference_date or (posting.date() if reference_no else None),
+        remarks=remarks,
+    )
 
     # Build the list of invoices to allocate against (FIFO order).
     target_invoices: list[dict] = []
@@ -193,33 +267,12 @@ def save(
             order_by="posting_date asc, creation asc",
         )
 
-    remaining = amount
-    for inv in target_invoices:
-        if remaining <= 0:
-            break
-        out = float(inv["outstanding_amount"] or 0)
-        if out <= 0:
-            continue
-        alloc = min(remaining, out)
-        doc.append(
-            "references",
-            {
-                "reference_doctype": "Sales Invoice",
-                "reference_name": inv["name"],
-                "total_amount": float(inv["grand_total"] or 0),
-                "outstanding_amount": out,
-                "allocated_amount": alloc,
-            },
-        )
-        remaining -= alloc
-
-    # NOTE: do NOT call doc.setup_party_account_field() — it's gone in
-    # ERPNext v15 and previously raised AttributeError("'str'"). The
-    # explicit party_account assignment above already matches what the
-    # method used to populate.
+    allocate(doc, target_invoices, amount)
     doc.insert(ignore_permissions=False)
+    # "Payment Entry status" applies to every payment the app makes: some
+    # sites post at once, others leave drafts for the office to submit.
     if submit:
-        doc.submit()
+        submit_if_configured(doc)
 
     _record_outbox(client_id, doc.name, posting_ts, {
         "customer": customer,
@@ -369,11 +422,25 @@ def detail(name: str) -> dict:
 
 @frappe.whitelist(methods=["GET"])
 def modes_of_payment() -> list[dict]:
-    """Active Modes of Payment for the dropdown. Filters out disabled rows."""
+    """Enabled Modes of Payment that have an account for the user's company.
+
+    A mode without an account cannot be posted, so offering it only produced
+    a failed sale (or, offline, a stuck sync entry).
+    """
+    from vansale.api.invoice import _user_company
+
+    company = _user_company()
+    with_account = frappe.get_all(
+        "Mode of Payment Account",
+        filters={"company": company, "default_account": ["is", "set"]},
+        pluck="parent",
+    )
     rows = frappe.get_all(
         "Mode of Payment",
-        filters={"enabled": 1},
+        filters={"enabled": 1, "name": ["in", with_account or [""]]},
         fields=["name", "type"],
         order_by="name asc",
     )
+    for row in rows:
+        row["needs_reference"] = _needs_reference(company, row["name"])
     return rows

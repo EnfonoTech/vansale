@@ -15,8 +15,8 @@ from frappe import _
 from frappe.utils import cint, flt, getdate, nowdate
 
 from vansale.api.datetime_util import naive_site_to_utc_iso, parse_client_ts
-from vansale.api.sales_return import resolve_return_reason
-from vansale.api.me import current_user_sales_person
+from vansale.api.sales_return import append_return_rows, resolve_return_reason, returned_qty_by_row
+from vansale.api.me import cash_sale_settings, current_user_sales_person
 
 
 def _user_default(allow: str) -> Optional[str]:
@@ -28,11 +28,13 @@ def _user_default(allow: str) -> Optional[str]:
 
 
 def _get_default_warehouse(company: str) -> Optional[str]:
-    """Prefer the Van User's configured warehouse; fall back to company / stock default."""
-    return (
-        _user_default("Warehouse")
-        or frappe.db.get_value("Company", company, "default_warehouse")
-        or frappe.db.get_single_value("Stock Settings", "default_warehouse")
+    """Prefer the Van User's configured warehouse; fall back to the stock default.
+
+    (ERPNext v15 Company has no `default_warehouse` column; reading it crashed
+    for any user without a default Warehouse permission.)
+    """
+    return _user_default("Warehouse") or frappe.db.get_single_value(
+        "Stock Settings", "default_warehouse"
     )
 
 
@@ -235,11 +237,16 @@ def save(
     doc.remarks = remarks
     doc.custom_client_id = client_id  # custom field added via fixture
 
-    # Cash / credit: cash → is_pos + fully paid via mode_of_payment.
+    # Cash / credit. Cash is posted per the "Cash sale posting" setting:
+    # POS Invoice → is_pos + payments row; Payment Entry → normal invoice and a
+    # Payment Entry against it on submit.
     pay_type = (payment_type or "").lower()
-    if pay_type == "cash":
+    pe_mode = pay_type == "cash" and _cash_via_payment_entry()
+    if pay_type == "cash" and not pe_mode:
         doc.is_pos = 1
         # payments row filled after insert so grand_total is known.
+    if pe_mode:
+        _set_cash_mode(doc, mode_of_payment or "Cash")
 
     # Tax template — resolved through the customer's Tax Category / Tax Rule
     # so a zero-rated or exempt customer is not charged standard VAT. Falls
@@ -249,27 +256,8 @@ def save(
     if tax_template:
         doc.taxes_and_charges = tax_template
 
-    for item in items:
-        if not item.get("item_code"):
-            frappe.throw(_("item_code is required on every line"))
-        row = doc.append("items", {})
-        row.item_code = item["item_code"]
-        row.qty = float(item.get("qty") or 1)
-        if item.get("uom"):
-            row.uom = item["uom"]
-        if item.get("conversion_factor"):
-            row.conversion_factor = float(item["conversion_factor"])
-        # Price — prefer price_list_rate so ERPNext computes discount_percentage.
-        if item.get("price_list_rate") is not None:
-            row.price_list_rate = float(item["price_list_rate"])
-        if item.get("rate") is not None:
-            row.rate = float(item["rate"])
-        if item.get("discount_percentage") is not None:
-            row.discount_percentage = float(item["discount_percentage"])
-        if item.get("discount_amount") is not None:
-            row.discount_amount = float(item["discount_amount"])
-        if set_warehouse:
-            row.warehouse = item.get("warehouse") or set_warehouse
+    _append_items(doc, items, set_warehouse)
+    _apply_template_taxes(doc)
 
     # Auto-tag sales person (commission tracking) if configured.
     sp = current_user_sales_person()
@@ -283,8 +271,10 @@ def save(
 
     doc.insert(ignore_permissions=False)
 
-    # Fill payment row only after insert so grand_total is computed.
-    if pay_type == "cash" and submit:
+    # Fill payment row only after insert so grand_total is computed. Drafts
+    # get it too: it is the only place the chosen mode is stored, so editing
+    # or submitting the draft later would otherwise fall back to "Cash".
+    if pay_type == "cash" and not pe_mode:
         mop = mode_of_payment or "Cash"
         account = _default_mop_account(mop, company)
         if not account:
@@ -298,8 +288,10 @@ def save(
         })
         doc.save()
 
+    payment_entry = None
     if submit:
         doc.submit()
+        payment_entry = _cash_payment_entry(doc)
 
     _record_outbox(client_id, doc.name, posting_ts, {
         "customer": customer,
@@ -318,28 +310,115 @@ def save(
         "docstatus": int(doc.docstatus or 0),
         "modified": naive_site_to_utc_iso(doc.modified),
         "idempotent_replay": False,
+        "payment_entry": payment_entry,
     }
+
+
+def _cash_via_payment_entry() -> bool:
+    return cash_sale_settings()["posting"] == "Payment Entry"
+
+
+def _set_cash_mode(doc, mode_of_payment: str) -> None:
+    """Payment Entry posting: no POS payments table, so keep the chosen mode on
+    the invoice until submit creates the Payment Entry."""
+    from vansale.api.payment import _resolve_accounts
+
+    _resolve_accounts(doc.company, mode_of_payment)  # fail now, not at submit
+    doc.is_pos = 0
+    doc.set("payments", [])
+    if doc.meta.has_field("custom_vansale_payment_mode"):
+        doc.custom_vansale_payment_mode = mode_of_payment
+
+
+def _cash_payment_entry(inv) -> Optional[str]:
+    """After submit: Payment Entry for a cash sale in "Payment Entry" posting.
+
+    Covers the invoice's outstanding amount with the mode stored on it, and is
+    submitted or left as a draft per the "Payment Entry status" setting. Runs
+    in the invoice's transaction, so a failure rolls the sale back too.
+    """
+    mode = inv.get("custom_vansale_payment_mode")
+    amount = flt(inv.outstanding_amount)
+    if not mode or amount <= 0:
+        return None
+    from vansale.api.payment import build_payment_entry, submit_if_configured
+
+    pe = build_payment_entry(
+        inv.company,
+        inv.customer,
+        amount,
+        mode,
+        inv.posting_date,
+        # Bank-type modes need a reference; the invoice is the natural one.
+        reference_no=inv.name,
+        reference_date=inv.posting_date,
+        remarks=_("Cash sale {0}").format(inv.name),
+    )
+    pe.append("references", {
+        "reference_doctype": "Sales Invoice",
+        "reference_name": inv.name,
+        "total_amount": flt(inv.grand_total),
+        "outstanding_amount": amount,
+        "allocated_amount": amount,
+    })
+    pe.insert()
+    submit_if_configured(pe)
+    return pe.name
+
+
+def _append_items(doc, items: list[dict[str, Any]], set_warehouse: Optional[str]) -> None:
+    """Add the client's lines to the invoice.
+
+    A missing or zero qty used to be posted as qty 1, so a line the driver
+    had zeroed out was still billed. Reject it instead.
+    """
+    for item in items:
+        if not item.get("item_code"):
+            frappe.throw(_("item_code is required on every line"))
+        qty = flt(item.get("qty"))
+        if qty <= 0:
+            frappe.throw(_("Quantity must be greater than 0 for item {0}").format(item["item_code"]))
+        row = doc.append("items", {})
+        row.item_code = item["item_code"]
+        row.qty = qty
+        if item.get("uom"):
+            row.uom = item["uom"]
+        if item.get("conversion_factor"):
+            row.conversion_factor = float(item["conversion_factor"])
+        # Price — prefer price_list_rate so ERPNext computes discount_percentage.
+        if item.get("price_list_rate") is not None:
+            row.price_list_rate = float(item["price_list_rate"])
+        if item.get("rate") is not None:
+            row.rate = float(item["rate"])
+        if item.get("discount_percentage") is not None:
+            row.discount_percentage = float(item["discount_percentage"])
+        if item.get("discount_amount") is not None:
+            row.discount_amount = float(item["discount_amount"])
+        if set_warehouse:
+            row.warehouse = item.get("warehouse") or set_warehouse
+
+
+def _apply_template_taxes(doc) -> None:
+    """Fill the taxes table from `taxes_and_charges`, as the desk form does.
+
+    On an API insert ERPNext only does this when Accounts Settings
+    `add_taxes_from_taxes_and_charges_template` is on. With it off, a credit
+    invoice got VAT only from item tax templates, so items without one were
+    sold with no VAT while the app showed 15%.
+    """
+    if doc.get("taxes_and_charges") and not doc.get("taxes"):
+        doc.append_taxes_from_master()
 
 
 def _default_mop_account(mop: str, company: str) -> Optional[str]:
     """Resolve the Mode of Payment's account for the given company."""
-    acc = frappe.db.get_value(
+    # Only this company's account: borrowing another company's account
+    # posted the payment to the wrong books.
+    return frappe.db.get_value(
         "Mode of Payment Account",
         {"parent": mop, "company": company},
         "default_account",
     )
-    if acc:
-        return acc
-    # Fallback — any account on the MoP row
-    rows = frappe.get_all(
-        "Mode of Payment Account",
-        filters={"parent": mop},
-        fields=["default_account", "company"],
-    )
-    for r in rows:
-        if r.get("default_account"):
-            return r["default_account"]
-    return None
 
 
 @frappe.whitelist(methods=["POST"])
@@ -389,35 +468,22 @@ def update_draft(
     # so the POS flow activates on the next save (payments row filled
     # after save, same as `save()`).
     pay_type = (payment_type or "").lower()
-    if pay_type == "cash":
+    pe_mode = pay_type == "cash" and _cash_via_payment_entry()
+    if pe_mode:
+        _set_cash_mode(doc, mode_of_payment or "Cash")
+    elif pay_type == "cash":
         doc.is_pos = 1
     elif pay_type == "credit":
         doc.is_pos = 0
         doc.set("payments", [])
+    if pay_type != "cash" and doc.meta.has_field("custom_vansale_payment_mode"):
+        doc.custom_vansale_payment_mode = None
 
     # Rebuild items table. Clearing + appending keeps the child-row
     # docnames consistent with Frappe's expectations on save().
     doc.set("items", [])
-    for item in items:
-        if not item.get("item_code"):
-            frappe.throw(_("item_code is required on every line"))
-        row = doc.append("items", {})
-        row.item_code = item["item_code"]
-        row.qty = float(item.get("qty") or 1)
-        if item.get("uom"):
-            row.uom = item["uom"]
-        if item.get("conversion_factor"):
-            row.conversion_factor = float(item["conversion_factor"])
-        if item.get("price_list_rate") is not None:
-            row.price_list_rate = float(item["price_list_rate"])
-        if item.get("rate") is not None:
-            row.rate = float(item["rate"])
-        if item.get("discount_percentage") is not None:
-            row.discount_percentage = float(item["discount_percentage"])
-        if item.get("discount_amount") is not None:
-            row.discount_amount = float(item["discount_amount"])
-        if set_warehouse:
-            row.warehouse = item.get("warehouse") or set_warehouse
+    _append_items(doc, items, set_warehouse)
+    _apply_template_taxes(doc)
 
     if discount_amount is not None:
         doc.discount_amount = float(discount_amount)
@@ -432,7 +498,7 @@ def update_draft(
     doc.flags.ignore_version = True
     doc.save(ignore_permissions=False)
 
-    if pay_type == "cash" and submit:
+    if pay_type == "cash" and not pe_mode:
         mop = mode_of_payment or "Cash"
         account = _default_mop_account(mop, doc.company)
         if not account:
@@ -446,11 +512,14 @@ def update_draft(
         doc.flags.ignore_version = True
         doc.save()
 
+    payment_entry = None
     if submit:
         doc.submit()
+        payment_entry = _cash_payment_entry(doc)
 
     frappe.db.commit()
     return {
+        "payment_entry": payment_entry,
         "name": doc.name,
         "grand_total": float(doc.grand_total or 0),
         "outstanding_amount": float(doc.outstanding_amount or 0),
@@ -507,8 +576,10 @@ def submit_draft(name: str, mode_of_payment: Optional[str] = None) -> dict:
         doc.save()
 
     doc.submit()
+    payment_entry = _cash_payment_entry(doc)
     frappe.db.commit()
     return {
+        "payment_entry": payment_entry,
         "name": doc.name,
         "grand_total": flt(doc.grand_total),
         "outstanding_amount": flt(doc.outstanding_amount),
@@ -567,10 +638,6 @@ def return_against(
     if int(original.is_return or 0):
         frappe.throw(_("Cannot return against a credit note"))
 
-    orig_line_by_code: dict[str, Any] = {}
-    for line in original.items:
-        orig_line_by_code.setdefault(line.item_code, line)
-
     posting = parse_client_ts(posting_ts) if posting_ts else frappe.utils.now_datetime()
 
     doc = frappe.new_doc("Sales Invoice")
@@ -588,34 +655,13 @@ def return_against(
     doc.set_posting_time = 1
     doc.posting_date = posting.date()
     doc.posting_time = posting.strftime("%H:%M:%S")
-    doc.taxes_and_charges = original.taxes_and_charges
     extra = (note or "").strip()
     doc.remarks = f"{reason_text} — {extra}" if extra and extra != reason_text else reason_text
     if frappe.get_meta("Sales Invoice").has_field("custom_return_reason"):
         doc.custom_return_reason = reason_option
     doc.custom_client_id = client_id
 
-    for item in items:
-        code = item.get("item_code")
-        if not code:
-            frappe.throw(_("item_code is required on every return line"))
-        qty = float(item.get("qty") or 0)
-        if qty <= 0:
-            frappe.throw(_("Return qty must be positive for {0}").format(code))
-        orig = orig_line_by_code.get(code)
-        row = doc.append("items", {})
-        row.item_code = code
-        row.qty = -qty
-        row.uom = item.get("uom") or (orig.uom if orig else None)
-        row.conversion_factor = float(item.get("conversion_factor") or (orig.conversion_factor if orig else 1) or 1)
-        row.rate = float(item.get("rate") if item.get("rate") is not None else (orig.rate if orig else 0))
-        if orig is not None and item.get("rate") is None:
-            row.price_list_rate = float(orig.price_list_rate or 0)
-            if orig.discount_percentage:
-                row.discount_percentage = float(orig.discount_percentage or 0)
-        row.warehouse = item.get("warehouse") or (orig.warehouse if orig else doc.set_warehouse)
-        if orig is not None:
-            row.sales_invoice_item = orig.name  # links back to source row
+    append_return_rows(doc, original, items)
 
     # Keep sales person tagging on returns for reporting consistency.
     sp = current_user_sales_person()
@@ -691,6 +737,7 @@ def list_mine(
 @frappe.whitelist(methods=["GET"])
 def detail(name: str) -> dict:
     doc = frappe.get_doc("Sales Invoice", name)
+    returned = returned_qty_by_row(doc) if doc.docstatus == 1 and not doc.is_return else {}
     taxes = [
         {
             "description": t.description,
@@ -717,6 +764,11 @@ def detail(name: str) -> dict:
         "posting_time": str(doc.posting_time) if doc.posting_time else None,
         "due_date": str(doc.due_date) if doc.due_date else None,
         "is_return": int(doc.is_return or 0),
+        "is_pos": int(doc.is_pos or 0),
+        "payment_type": "cash" if (doc.is_pos or doc.get("custom_vansale_payment_mode")) else "credit",
+        "mode_of_payment": (
+            doc.payments[0].mode_of_payment if doc.get("payments") else doc.get("custom_vansale_payment_mode")
+        ),
         "grand_total": float(doc.grand_total or 0),
         "net_total": float(doc.net_total or 0),
         "total_taxes_and_charges": float(doc.total_taxes_and_charges or 0),
@@ -728,15 +780,19 @@ def detail(name: str) -> dict:
         "remarks": doc.remarks,
         "items": [
             {
+                "name": i.name,
                 "item_code": i.item_code,
                 "item_name": i.item_name,
                 "qty": float(i.qty or 0),
+                "returned_qty": returned.get(i.name, 0.0),
                 "rate": float(i.rate or 0),
                 "price_list_rate": float(i.price_list_rate or 0),
                 "discount_percentage": float(i.discount_percentage or 0),
                 "discount_amount": float(i.discount_amount or 0),
                 "amount": float(i.amount or 0),
                 "uom": i.uom,
+                "conversion_factor": float(i.conversion_factor or 1),
+                "stock_uom": i.stock_uom,
                 "warehouse": i.warehouse,
             }
             for i in doc.items

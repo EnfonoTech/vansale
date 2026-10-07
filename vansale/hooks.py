@@ -14,10 +14,10 @@ after_migrate = [
     "vansale.setup.after_migrate",
 ]
 
-# Web redirects — opening `/vansale` loads the built Vue SPA.
-website_redirects = [
-    {"source": "/vansale", "target": "/assets/vansale/spa/index.html"},
-    {"source": "/vansale/", "target": "/assets/vansale/spa/index.html"},
+# /vansale and every /vansale/<path> render www/vansale (the SPA's index.html),
+# so the web app has clean URLs and a refresh on a deep link works.
+website_route_rules = [
+    {"from_route": "/vansale/<path:app_path>", "to_route": "vansale"},
 ]
 
 # Fixtures exported on `bench export-fixtures --app vansale`.

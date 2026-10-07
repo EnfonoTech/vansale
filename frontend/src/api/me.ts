@@ -26,6 +26,16 @@ export interface ConfigDefaults {
   require_pin?: boolean;
   /** Effective UOM-change permission on invoice lines: van -> global. */
   allow_uom_change?: boolean;
+  /** Customer-specific Item Prices used for pricing: van -> global. */
+  use_customer_price?: boolean;
+  /** Decimals for rates/amounts, as ERPNext rounds Sales Invoice Item.rate. */
+  currency_precision?: number;
+  /** "POS Invoice" | "Payment Entry": how a cash sale is posted. */
+  cash_sale_posting?: string;
+  /** Print formats chosen in Vansale Settings / the van. */
+  print_formats?: { invoice: string; receipt: string };
+  /** Print button: direct or preview; print after submit; copies. */
+  print?: { direct: boolean; after_submit: boolean; copies: number };
 }
 
 export function configDefaults() {

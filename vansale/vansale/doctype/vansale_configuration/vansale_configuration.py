@@ -25,6 +25,9 @@ VAN_USER_ROLE = "Van User"
 class VansaleConfiguration(Document):
     def validate(self):
         """Warehouses + cost centers must belong to the selected company."""
+        from vansale.vansale.doctype.vansale_settings.vansale_settings import validate_print_formats
+
+        validate_print_formats(self)
         self._sync_series_rows()
         if not self.company:
             return

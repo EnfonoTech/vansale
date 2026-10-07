@@ -108,10 +108,17 @@ const totalOutstanding = computed(() =>
   invoices.value.reduce((t, r) => t + (Number(r.outstanding_amount) || 0), 0),
 );
 
+// Modes posting to a Bank account need a reference number (ERPNext requires No + Date).
+const needsReference = computed(() => Boolean(mops.value.find((m) => m.name === mode.value)?.needs_reference));
+
 async function submit() {
   if (!customer.value) { toasts.warn("Select customer"); return; }
   const n = Number(amount.value);
   if (!Number.isFinite(n) || n <= 0) { toasts.warn("Amount must be positive"); return; }
+  if (needsReference.value && !reference.value.trim()) {
+    toasts.warn(`Enter the reference number for ${mode.value}`);
+    return;
+  }
   busy.value = true;
   try {
     const res = await save({
@@ -132,7 +139,8 @@ async function submit() {
     // back to the dashboard. Queued offline saves have no real name yet,
     // so we fall back to the dashboard in that case.
     if (!res.queued && res.name && !res.name.startsWith("QUEUED")) {
-      void router.push({ name: "payment-detail", params: { name: res.name } });
+      const autoprint = session.printBehaviour?.after_submit ? { autoprint: "1" } : undefined;
+      void router.push({ name: "payment-detail", params: { name: res.name }, query: autoprint });
     } else {
       void router.push({ name: "dashboard" });
     }
@@ -248,13 +256,11 @@ async function submit() {
           <option v-for="m in mops" :key="m.name" :value="m.name">{{ m.name }}</option>
         </select>
         <select v-else v-model="mode">
-          <option value="Cash">Cash</option>
-          <option value="Bank">Bank</option>
-          <option value="Credit Card">Credit Card</option>
+          <option :value="mode">{{ mode }}</option>
         </select>
       </label>
       <label class="field">
-        <span class="label">Reference (optional)</span>
+        <span class="label">Reference {{ needsReference ? "(required)" : "(optional)" }}</span>
         <input v-model="reference" placeholder="Cheque / transaction no." />
       </label>
       <label class="field">

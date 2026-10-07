@@ -10,6 +10,20 @@
   "require_pin",
   "section_break_invoicing",
   "allow_uom_change",
+  "use_customer_price",
+  "section_break_cash_sale",
+  "cash_sale_posting",
+  "column_break_cash_sale",
+  "cash_payment_entry_status",
+  "section_break_print",
+  "invoice_print_format",
+  "column_break_print",
+  "receipt_print_format",
+  "section_break_print_behaviour",
+  "direct_print",
+  "print_after_submit",
+  "column_break_print_behaviour",
+  "print_copies",
   "section_break_help",
   "help_html"
  ],
@@ -50,6 +64,83 @@
    "description": "Master switch. On, the driver can switch a line between the item's own UOMs (Pcs / Box / Carton) and the rate re-fetches. Off, every line sells in the item's stock UOM. Individual vans can override this."
   },
   {
+   "default": "0",
+   "fieldname": "use_customer_price",
+   "fieldtype": "Check",
+   "label": "Use customer-specific price"
+  },
+  {
+   "fieldname": "section_break_cash_sale",
+   "fieldtype": "Section Break",
+   "label": "Payments"
+  },
+  {
+   "default": "POS Invoice",
+   "fieldname": "cash_sale_posting",
+   "fieldtype": "Select",
+   "label": "Cash sale posting",
+   "options": "POS Invoice\nPayment Entry"
+  },
+  {
+   "fieldname": "column_break_cash_sale",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "Submit",
+   "fieldname": "cash_payment_entry_status",
+   "fieldtype": "Select",
+   "label": "Payment Entry status",
+   "options": "Submit\nDraft"
+  },
+  {
+   "fieldname": "section_break_print",
+   "fieldtype": "Section Break",
+   "label": "Print"
+  },
+  {
+   "fieldname": "invoice_print_format",
+   "fieldtype": "Link",
+   "label": "Invoice print format",
+   "options": "Print Format"
+  },
+  {
+   "fieldname": "column_break_print",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "receipt_print_format",
+   "fieldtype": "Link",
+   "label": "Receipt print format",
+   "options": "Print Format"
+  },
+  {
+   "fieldname": "section_break_print_behaviour",
+   "fieldtype": "Section Break"
+  },
+  {
+   "default": "0",
+   "fieldname": "direct_print",
+   "fieldtype": "Check",
+   "label": "Print directly (no preview)"
+  },
+  {
+   "default": "0",
+   "fieldname": "print_after_submit",
+   "fieldtype": "Check",
+   "label": "Print after submit"
+  },
+  {
+   "fieldname": "column_break_print_behaviour",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "1",
+   "fieldname": "print_copies",
+   "fieldtype": "Int",
+   "label": "Copies",
+   "non_negative": 1
+  },
+  {
    "fieldname": "section_break_help",
    "fieldtype": "Section Break"
   },
@@ -62,7 +153,7 @@
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-08-04 00:00:00.000000",
+ "modified": "2026-10-07 17:54:12.997451",
  "modified_by": "Administrator",
  "module": "Vansale",
  "name": "Vansale Settings",

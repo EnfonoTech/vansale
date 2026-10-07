@@ -86,6 +86,11 @@ export const useSessionStore = defineStore("session", {
      */
     uomChangeAllowed: (s) => s.defaults?.allow_uom_change !== false,
     vanPriceList: (s) => s.defaults?.selling_price_list ?? null,
+    /** Decimals for rates and amounts (server: Sales Invoice Item.rate precision). */
+    currencyPrecision: (s) => s.defaults?.currency_precision ?? 2,
+    /** Configured print formats (null → the app's own defaults). */
+    printFormats: (s) => s.defaults?.print_formats ?? null,
+    printBehaviour: (s) => s.defaults?.print ?? null,
   },
   actions: {
     setLogin(payload: { user: string; fullName: string; email: string; language?: string }) {

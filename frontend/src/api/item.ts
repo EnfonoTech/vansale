@@ -23,9 +23,32 @@ export interface ItemUom {
 export interface ItemDetail extends ItemRow {
   price_list_rate: number;
   price_list?: string | null;
+  /** Item's Sales UOM; `uoms` is ordered with it first. */
+  sales_uom?: string;
+  /** True when a price came from this customer's own Item Price. */
+  customer_specific?: boolean;
   uoms: ItemUom[];
   tax_template?: string | null;
   customer?: string | null;
+}
+
+/**
+ * `item_cache` entry. `details` holds one detail per customer ("" = no
+ * customer): prices can differ per customer (price list, customer-specific
+ * Item Price), so a detail fetched for one customer must not price another.
+ * `detail` is a customer-neutral copy, kept only when no price in it was
+ * customer-specific.
+ */
+type CachedItemWithDetail = CachedItem & {
+  detail?: ItemDetail;
+  details?: Record<string, ItemDetail>;
+};
+
+function cachedDetailFor(cached: CachedItemWithDetail | undefined, customer?: string): ItemDetail | undefined {
+  if (!cached) return undefined;
+  const own = cached.details?.[customer ?? ""];
+  if (own) return own;
+  return cached.detail && !cached.detail.customer_specific ? cached.detail : undefined;
 }
 
 export interface PriceForResult {
@@ -116,8 +139,8 @@ async function _writeCache(rows: ItemRow[]): Promise<void> {
   for (const r of rows) {
     // Merge: preserve any previously-stored `detail` (uoms + price_list_rate)
     // that a prior `detail()` call hydrated — don't clobber on list refresh.
-    const existing = (await tx.store.get(r.name)) as (CachedItem & { detail?: ItemDetail }) | undefined;
-    const entry: CachedItem & { detail?: ItemDetail } = {
+    const existing = (await tx.store.get(r.name)) as CachedItemWithDetail | undefined;
+    const entry: CachedItemWithDetail = {
       name: r.name,
       item_name: r.item_name,
       item_code: r.item_code,
@@ -127,6 +150,7 @@ async function _writeCache(rows: ItemRow[]): Promise<void> {
       cachedAt: Date.now(),
       raw: r as unknown as Record<string, unknown>,
       detail: existing?.detail,
+      details: existing?.details,
     };
     await tx.store.put(entry);
   }
@@ -140,11 +164,13 @@ export async function detail(itemCode: string, customer?: string): Promise<ItemD
 
   const fetchFromCache = async (): Promise<ItemDetail> => {
     const d = await db();
-    const cached = (await d.get("item_cache", itemCode)) as (CachedItem & { detail?: ItemDetail }) | undefined;
-    if (cached?.detail) return cached.detail;
+    const cached = (await d.get("item_cache", itemCode)) as CachedItemWithDetail | undefined;
+    const known = cachedDetailFor(cached, customer);
+    if (known) return known;
     if (cached) {
       // Synthesize a minimal detail from row data — single stock_uom entry,
-      // no price list. Better than throwing when offline.
+      // no price list (rate 0, as online without an Item Price — Item.standard_rate
+      // is not a selling price). Better than throwing when offline.
       return {
         name: cached.name,
         item_code: cached.item_code,
@@ -152,9 +178,9 @@ export async function detail(itemCode: string, customer?: string): Promise<ItemD
         item_group: undefined,
         stock_uom: cached.stock_uom,
         standard_rate: cached.price,
-        price_list_rate: cached.price ?? 0,
+        price_list_rate: 0,
         price_list: null,
-        uoms: [{ uom: cached.stock_uom, conversion_factor: 1, price_list_rate: cached.price ?? 0 }],
+        uoms: [{ uom: cached.stock_uom, conversion_factor: 1, price_list_rate: 0 }],
         tax_template: null,
         customer: customer ?? null,
       };
@@ -166,7 +192,7 @@ export async function detail(itemCode: string, customer?: string): Promise<ItemD
   try {
     const doc = await apiCall<ItemDetail>("GET", `vansale.api.item.detail?${qs.toString()}`);
     // Write-through: stash the detail so the next offline addLine has UOMs + price.
-    void _writeDetail(doc).catch(() => {});
+    void _writeDetail(doc, customer).catch(() => {});
     return doc;
   } catch (err) {
     if (err instanceof NetworkError) return await fetchFromCache();
@@ -174,11 +200,11 @@ export async function detail(itemCode: string, customer?: string): Promise<ItemD
   }
 }
 
-async function _writeDetail(doc: ItemDetail): Promise<void> {
+async function _writeDetail(doc: ItemDetail, customer?: string): Promise<void> {
   const d = await db();
   const tx = d.transaction("item_cache", "readwrite");
-  const existing = (await tx.store.get(doc.item_code)) as (CachedItem & { detail?: ItemDetail }) | undefined;
-  const entry: CachedItem & { detail?: ItemDetail } = {
+  const existing = (await tx.store.get(doc.item_code)) as CachedItemWithDetail | undefined;
+  const entry: CachedItemWithDetail = {
     name: doc.name,
     item_name: doc.item_name,
     item_code: doc.item_code,
@@ -187,7 +213,8 @@ async function _writeDetail(doc: ItemDetail): Promise<void> {
     stock_qty: existing?.stock_qty,
     cachedAt: Date.now(),
     raw: (existing?.raw ?? doc) as unknown as Record<string, unknown>,
-    detail: doc,
+    detail: doc.customer_specific ? existing?.detail : doc,
+    details: { ...(existing?.details ?? {}), [customer ?? ""]: doc },
   };
   await tx.store.put(entry);
   await tx.done;
@@ -201,13 +228,14 @@ export async function priceFor(itemCode: string, customer?: string, uom?: string
 
   const fetchFromCache = async (): Promise<PriceForResult> => {
     const d = await db();
-    const cached = (await d.get("item_cache", itemCode)) as (CachedItem & { detail?: ItemDetail }) | undefined;
-    const uomRow = cached?.detail?.uoms?.find((u) => u.uom === (uom ?? cached.detail?.stock_uom));
-    const rate = uomRow?.price_list_rate ?? cached?.detail?.price_list_rate ?? cached?.price ?? 0;
+    const cached = (await d.get("item_cache", itemCode)) as CachedItemWithDetail | undefined;
+    const known = cachedDetailFor(cached, customer);
+    const uomRow = known?.uoms?.find((u) => u.uom === (uom ?? known.stock_uom));
+    const rate = uomRow?.price_list_rate ?? known?.price_list_rate ?? 0;
     return {
       item_code: itemCode,
       uom: uom ?? null,
-      price_list: cached?.detail?.price_list ?? null,
+      price_list: known?.price_list ?? null,
       price_list_rate: rate,
     };
   };

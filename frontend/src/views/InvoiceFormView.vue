@@ -25,6 +25,7 @@ import {
   type ItemUom,
 } from "@/api/item";
 import { save, detail, updateDraft, taxInfo, type InvoiceItem, type TaxInfo } from "@/api/invoice";
+import { modesOfPayment, type ModeOfPayment } from "@/api/payment";
 import { ApiError } from "@/app/frappe";
 import { useSessionStore } from "@/stores/session";
 import { useToastStore } from "@/stores/toasts";
@@ -62,13 +63,17 @@ const remarks = ref("");
 
 const paymentType = ref<"cash" | "credit">("cash");
 const modeOfPayment = ref<string>("Cash");
+// Modes with an account for this company (server-filtered), not a fixed list.
+const mops = ref<ModeOfPayment[]>([]);
 const discountAmount = ref<number | null>(null);
 
 const busy = ref(false);
 const savingDraft = ref(false);
 
-// UOM cache — item_code → uoms list, so re-adding same item doesn't refetch.
+// UOM cache — "customer|item_code" → uoms list, so re-adding the same item
+// doesn't refetch. Keyed by customer too: prices differ per customer.
 const uomCache = reactive<Record<string, ItemUom[]>>({});
+const uomKey = (itemCode: string) => `${customer.value}|${itemCode}`;
 
 /**
  * Tax comes from the server, never a constant.
@@ -84,11 +89,32 @@ const uomCache = reactive<Record<string, ItemUom[]>>({});
  */
 const tax = ref<TaxInfo>({ template: null, rate: 0, inclusive: false, simple: true, taxes: [] });
 
+// Last tax info per customer, so an offline sale previews the real tax
+// instead of 0% (the server always recomputes on save).
+const TAX_CACHE_KEY = "vansale.taxInfo";
+
+function cachedTaxInfo(): Record<string, TaxInfo> {
+  try {
+    return JSON.parse(localStorage.getItem(TAX_CACHE_KEY) || "{}") as Record<string, TaxInfo>;
+  } catch {
+    return {};
+  }
+}
+
 async function loadTaxInfo() {
+  const key = customer.value || "";
   try {
     tax.value = await taxInfo(customer.value || undefined);
+    try {
+      localStorage.setItem(TAX_CACHE_KEY, JSON.stringify({ ...cachedTaxInfo(), [key]: tax.value }));
+    } catch {
+      /* storage full / blocked */
+    }
   } catch {
-    /* offline — keep the last known template; the server recomputes on save */
+    // Offline: this customer's last tax info, else the default (no customer).
+    const cached = cachedTaxInfo();
+    const known = cached[key] ?? cached[""];
+    if (known) tax.value = known;
   }
 }
 
@@ -191,8 +217,8 @@ watch(customer, async (newCustomer) => {
     try {
       const p = await priceFor(l.item_code, newCustomer, l.uom);
       if (p.price_list_rate) {
-        l.price_list_rate = p.price_list_rate;
-        l.rate = p.price_list_rate;
+        l.price_list_rate = round(p.price_list_rate);
+        l.rate = round(p.price_list_rate);
         recalc(l);
       }
     } catch {
@@ -201,8 +227,21 @@ watch(customer, async (newCustomer) => {
   }
 });
 
+async function loadModesOfPayment() {
+  try {
+    mops.value = await modesOfPayment();
+  } catch {
+    mops.value = [];
+  }
+  // Keep the current choice valid: default to a Cash-type mode, else the first.
+  if (mops.value.length && !mops.value.some((m) => m.name === modeOfPayment.value)) {
+    modeOfPayment.value = (mops.value.find((m) => m.type === "Cash") ?? mops.value[0]).name;
+  }
+}
+
 async function loadAll() {
   void loadTaxInfo();
+  void loadModesOfPayment();
   customers.value = await listCustomers(undefined, 200);
   // `onlyInStock` — a van can only sell what it carries, and an item with
   // no incoming stock has no valuation rate, which ERPNext rejects at
@@ -224,6 +263,10 @@ async function prefillFromDraft(name: string) {
     customer.value = doc.customer;
     remarks.value = doc.remarks || "";
     discountAmount.value = doc.discount_amount || null;
+    // Keep the draft's own payment choice: the form defaults to Cash, and
+    // saving with that default turned an unpaid credit draft into a paid one.
+    paymentType.value = doc.payment_type ?? (doc.is_pos ? "cash" : "credit");
+    if (doc.mode_of_payment) modeOfPayment.value = doc.mode_of_payment;
     // Rebuild line rows. We skip UOM re-fetching since the doc already has
     // rate/price_list_rate frozen; operator can still change qty/rate inline.
     lines.value = doc.items.map<Line>((it) => ({
@@ -235,9 +278,13 @@ async function prefillFromDraft(name: string) {
       discount_percentage: it.discount_percentage,
       discount_amount: it.discount_amount,
       uom: it.uom ?? undefined,
-      conversion_factor: 1,  // server recomputes on save
+      // The saved factor, not 1: the server stores what we send, so 1 made a
+      // Carton line move a single piece of stock.
+      conversion_factor: it.conversion_factor ?? 1,
       warehouse: it.warehouse ?? undefined,
-      uoms: it.uom ? [{ uom: it.uom, conversion_factor: 1, price_list_rate: it.price_list_rate }] : [],
+      uoms: it.uom
+        ? [{ uom: it.uom, conversion_factor: it.conversion_factor ?? 1, price_list_rate: it.price_list_rate }]
+        : [],
       amount: it.amount,
     }));
   } catch (e) {
@@ -250,30 +297,38 @@ async function searchItems() {
   items.value = await listItems(itemSearch.value || undefined, warehouse.value || undefined, 80, true);
 }
 
+/** Round to the site's currency precision (floats give 248.39999999999998). */
+function round(n: number): number {
+  const f = 10 ** session.currencyPrecision;
+  return Math.round((Number(n) || 0) * f) / f;
+}
+const money = (n: number) => (Number(n) || 0).toFixed(session.currencyPrecision);
+
 function recalc(l: Line) {
   const qty = Number(l.qty) || 0;
   const rate = Number(l.rate) || 0;
   const disc = Number(l.discount_percentage) || 0;
   const net = qty * rate * (1 - disc / 100);
-  l.amount = Math.max(0, net);
+  l.amount = round(Math.max(0, net));
 }
 
 async function addLine(item: ItemRow) {
   // Always add a new row (same-item multi-row per PDF 1a).
-  let uoms = uomCache[item.item_code];
-  let priceListRate = item.standard_rate ?? 0;
+  let uoms = uomCache[uomKey(item.item_code)];
+  // No price from the price list → 0, as in ERPNext; the driver types it.
+  let priceListRate = 0;
   if (!uoms) {
     try {
       const d = await itemDetail(item.item_code, customer.value || undefined);
       uoms = d.uoms;
       priceListRate = d.price_list_rate || priceListRate;
-      uomCache[item.item_code] = uoms;
+      uomCache[uomKey(item.item_code)] = uoms;
     } catch {
       uoms = [
         {
           uom: item.stock_uom,
           conversion_factor: 1,
-          price_list_rate: item.standard_rate ?? 0,
+          price_list_rate: 0,
         },
       ];
     }
@@ -282,13 +337,17 @@ async function addLine(item: ItemRow) {
     const match = uoms.find((u) => u.uom === item.stock_uom) ?? uoms[0];
     priceListRate = match?.price_list_rate || priceListRate;
   }
-  const firstUom = uoms[0];
+  // The server lists the item's Sales UOM first. When UOM change is off the
+  // line must sell in the stock UOM (the UOM field is read-only then).
+  const firstUom = session.uomChangeAllowed
+    ? uoms[0]
+    : (uoms.find((u) => u.uom === item.stock_uom) ?? uoms[0]);
   const line: Line = {
     item_code: item.item_code,
     item_name: item.item_name,
     qty: 1,
-    rate: firstUom?.price_list_rate || priceListRate,
-    price_list_rate: firstUom?.price_list_rate || priceListRate,
+    rate: round(firstUom?.price_list_rate || priceListRate),
+    price_list_rate: round(firstUom?.price_list_rate || priceListRate),
     uom: firstUom?.uom || item.stock_uom,
     conversion_factor: firstUom?.conversion_factor || 1,
     discount_percentage: 0,
@@ -305,13 +364,13 @@ async function onUomChange(l: Line) {
   const chosen = l.uoms.find((u) => u.uom === l.uom);
   if (chosen) {
     l.conversion_factor = chosen.conversion_factor;
-    l.price_list_rate = chosen.price_list_rate;
-    l.rate = chosen.price_list_rate;
+    l.price_list_rate = round(chosen.price_list_rate);
+    l.rate = round(chosen.price_list_rate);
   } else {
     try {
       const p = await priceFor(l.item_code, customer.value || undefined, l.uom);
-      l.price_list_rate = p.price_list_rate;
-      l.rate = p.price_list_rate;
+      l.price_list_rate = round(p.price_list_rate);
+      l.rate = round(p.price_list_rate);
     } catch {
       /* keep existing rate */
     }
@@ -326,6 +385,8 @@ function removeLine(idx: number) {
 async function doSave(submit: 0 | 1) {
   if (!customer.value) { toasts.warn("Pick a customer"); return; }
   if (lines.value.length === 0) { toasts.warn("Add at least one item"); return; }
+  const zeroQty = lines.value.find((l) => !(Number(l.qty) > 0));
+  if (zeroQty) { toasts.warn(`Enter a quantity for ${zeroQty.item_name || zeroQty.item_code}`); return; }
   const flag = submit === 1;
   if (flag) busy.value = true; else savingDraft.value = true;
   try {
@@ -375,7 +436,11 @@ async function doSave(submit: 0 | 1) {
       // — so both the detail view and the ZATCA print format see the
       // strike-through + discounted rate we want.
       items: lines.value.map<InvoiceItem>((l, i) => {
-        const baseRate = Number(l.price_list_rate) || Number(l.rate) || 0;
+        // The rate the driver sees (and may have typed) is the base. Using
+        // price_list_rate here silently replaced a typed rate with the list
+        // price: the screen showed one total and the invoice posted another.
+        const listRate = Number(l.price_list_rate) || 0;
+        const baseRate = Number(l.rate) || listRate;
         const linePct = Math.max(0, Math.min(100, Number(l.discount_percentage) || 0));
         const rateAfterLinePct = baseRate * (1 - linePct / 100);
         const perUnitDoc = perLineExtraDisc[i] || 0;
@@ -385,7 +450,11 @@ async function doSave(submit: 0 | 1) {
           item_name: l.item_name,
           qty: l.qty,
           rate: effectiveRate,
-          price_list_rate: baseRate,
+          // Below the list price → ERPNext records the difference as a
+          // discount. Above it → send the typed rate as the list price, since a
+          // rate above price_list_rate makes ERPNext add a margin that grows
+          // on every save.
+          price_list_rate: Math.max(listRate, baseRate),
           // Do NOT send discount_percentage / discount_amount — let ERPNext
           // derive both from (price_list_rate - rate) so the stored values
           // survive submit (its on_submit recalc overrides stamps we send).
@@ -425,7 +494,7 @@ async function doSave(submit: 0 | 1) {
     toasts.success(
       res.queued
         ? "Saved offline — will sync when online"
-        : `Invoice ${res.name} ${flag ? "submitted" : isEditMode.value ? "updated" : "saved as draft"} (${session.currency} ${res.grand_total.toFixed(2)})`,
+        : `Invoice ${res.name} ${flag ? "submitted" : isEditMode.value ? "updated" : "saved as draft"} (${session.currency} ${money(res.grand_total)})`,
     );
     lines.value = [];
     // Always land on the detail view after a successful save/submit so the
@@ -434,7 +503,9 @@ async function doSave(submit: 0 | 1) {
     // WebView — it maps `_blank` to the host browser) and then bounced to
     // the dashboard on the queued path, which felt like "submit = home".
     if (!res.queued && res.name && !res.name.startsWith("QUEUED")) {
-      void router.push({ name: "invoice-detail", params: { name: res.name } });
+      // "Print after submit": the detail view prints on arrival.
+      const autoprint = flag && session.printBehaviour?.after_submit ? { autoprint: "1" } : undefined;
+      void router.push({ name: "invoice-detail", params: { name: res.name }, query: autoprint });
     } else {
       // Queued offline — no real doc name, so the detail page can't resolve.
       void router.push({ name: "invoices" });
@@ -509,9 +580,8 @@ onMounted(loadAll);
       <label v-if="paymentType === 'cash'" class="field">
         <span class="tiny">Mode of Payment</span>
         <select v-model="modeOfPayment">
-          <option value="Cash">Cash</option>
-          <option value="Bank Draft">Bank</option>
-          <option value="Credit Card">Credit Card</option>
+          <option v-for="m in mops" :key="m.name" :value="m.name">{{ m.name }}</option>
+          <option v-if="!mops.length" :value="modeOfPayment">{{ modeOfPayment }}</option>
         </select>
       </label>
     </section>
@@ -521,7 +591,7 @@ onMounted(loadAll);
       <div class="section-head">
         <h3 style="margin:0">Lines</h3>
         <strong v-if="lines.length > 0" class="tabular">
-          <SarSymbol :code="session.currency" />{{ netTotal.toFixed(2) }}
+          <SarSymbol :code="session.currency" />{{ money(netTotal) }}
         </strong>
       </div>
       <div v-if="lines.length === 0" class="empty" style="padding:1rem 0">
@@ -567,9 +637,9 @@ onMounted(loadAll);
           </div>
           <div class="line-foot">
             <span v-if="l.price_list_rate && l.price_list_rate !== l.rate" class="muted xsmall">
-              List: <SarSymbol :code="session.currency" />{{ (l.price_list_rate || 0).toFixed(2) }}
+              List: <SarSymbol :code="session.currency" />{{ money(l.price_list_rate || 0) }}
             </span>
-            <strong class="tabular"><SarSymbol :code="session.currency" />{{ l.amount.toFixed(2) }}</strong>
+            <strong class="tabular"><SarSymbol :code="session.currency" />{{ money(l.amount) }}</strong>
           </div>
         </li>
       </ul>
@@ -590,7 +660,6 @@ onMounted(loadAll);
               <div class="muted xsmall">{{ it.item_code }}</div>
             </div>
             <div class="right-col">
-              <strong><SarSymbol :code="session.currency" />{{ (it.standard_rate ?? 0).toFixed(2) }}</strong>
               <span v-if="typeof it.stock_qty === 'number'" class="pill" data-tone="primary">
                 {{ it.stock_qty }} in stock
               </span>
@@ -610,7 +679,7 @@ onMounted(loadAll);
     <section v-if="lines.length > 0" class="card stack totals">
       <div class="tot-row">
         <span>Net total</span>
-        <span class="tabular"><SarSymbol :code="session.currency" />{{ netTotal.toFixed(2) }}</span>
+        <span class="tabular"><SarSymbol :code="session.currency" />{{ money(netTotal) }}</span>
       </div>
       <label class="field">
         <span class="tiny">Invoice discount ({{ session.currency }})</span>
@@ -629,12 +698,12 @@ onMounted(loadAll);
             <div class="disc-split-name">
               <strong class="truncate">{{ row.item_name }}</strong>
               <span class="muted xsmall">
-                {{ row.qty }} × - <SarSymbol :code="session.currency" />{{ row.perUnit.toFixed(2) }}/unit
+                {{ row.qty }} × - <SarSymbol :code="session.currency" />{{ money(row.perUnit) }}/unit
               </span>
             </div>
             <div class="disc-split-amt">
-              <strong class="tabular warn"><SarSymbol :code="session.currency" />{{ row.share.toFixed(2) }}</strong>
-              <span class="muted xsmall">Net <SarSymbol :code="session.currency" />{{ row.netAfter.toFixed(2) }}</span>
+              <strong class="tabular warn"><SarSymbol :code="session.currency" />{{ money(row.share) }}</strong>
+              <span class="muted xsmall">Net <SarSymbol :code="session.currency" />{{ money(row.netAfter) }}</span>
             </div>
           </li>
         </ul>
@@ -644,15 +713,15 @@ onMounted(loadAll);
           {{ tax.taxes[0]?.description || "VAT" }} ({{ tax.rate.toFixed(tax.rate % 1 ? 2 : 0) }}%)
           <em v-if="tax.inclusive" class="incl">incl.</em>
         </span>
-        <span class="tabular"><SarSymbol :code="session.currency" />{{ taxTotal.toFixed(2) }}</span>
+        <span class="tabular"><SarSymbol :code="session.currency" />{{ money(taxTotal) }}</span>
       </div>
       <div class="tot-row grand">
         <span>Grand total</span>
-        <span class="tabular"><SarSymbol :code="session.currency" />{{ grandTotal.toFixed(2) }}</span>
+        <span class="tabular"><SarSymbol :code="session.currency" />{{ money(grandTotal) }}</span>
       </div>
       <div v-if="tax.inclusive" class="tot-row muted small">
         <span>Net of tax</span>
-        <span class="tabular"><SarSymbol :code="session.currency" />{{ netOfTax.toFixed(2) }}</span>
+        <span class="tabular"><SarSymbol :code="session.currency" />{{ money(netOfTax) }}</span>
       </div>
       <p v-if="!tax.simple" class="muted xsmall">
         This tax template has compound rows — the preview is approximate. The
@@ -677,7 +746,7 @@ onMounted(loadAll);
               :disabled="busy || savingDraft || lines.length === 0"
               @click="doSave(1)">
         <Icon name="check" :size="18" />
-        {{ busy ? "Submitting…" : `Submit · ${session.currency} ${grandTotal.toFixed(2)}` }}
+        {{ busy ? "Submitting…" : `Submit · ${session.currency} ${money(grandTotal)}` }}
       </button>
     </div>
   </div>

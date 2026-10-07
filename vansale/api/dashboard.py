@@ -6,6 +6,7 @@ from datetime import date, timedelta
 from typing import Optional
 
 import frappe
+from frappe.utils import getdate, nowdate
 
 from vansale.api.datetime_util import naive_site_to_utc_iso
 
@@ -13,7 +14,7 @@ from vansale.api.datetime_util import naive_site_to_utc_iso
 @frappe.whitelist(methods=["GET"])
 def today_sales() -> dict:
     user = frappe.session.user
-    today = date.today()
+    today = getdate(nowdate())
     total = (
         frappe.db.sql(
             """
@@ -46,7 +47,7 @@ def today_sales() -> dict:
 @frappe.whitelist(methods=["GET"])
 def today_collection() -> dict:
     user = frappe.session.user
-    today = date.today()
+    today = getdate(nowdate())
     rows = frappe.db.sql(
         """
         SELECT mode_of_payment, COALESCE(SUM(paid_amount), 0) amt, COUNT(name) n
@@ -68,7 +69,7 @@ def today_collection() -> dict:
 @frappe.whitelist(methods=["GET"])
 def month_summary(offset: int = 0) -> dict:
     """Aggregate for the current or previous months (``offset=0`` is current)."""
-    today = date.today()
+    today = getdate(nowdate())
     year, month = today.year, today.month
     while offset > 0:
         month -= 1

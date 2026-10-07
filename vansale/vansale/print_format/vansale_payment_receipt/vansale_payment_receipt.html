@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=0.9">
+    <title>Receipt - {{ doc.name }}</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'DejaVu Sans', Arial, sans-serif;
+            font-weight: 600;
+            font-size: 15px;
+            color: #000;
+            background: #fff;
+            width: 110mm;
+            margin: 0 auto;
+        }
+        .header { text-align: center; margin-bottom: 8px; }
+        .logo { width: 150px; height: auto; }
+        .company-name { font-size: 24px; font-weight: bold; margin: 6px 0; }
+        .address { font-size: 14px; color: #333; margin: 3px 0; line-height: 1.4; }
+        .separator { border-top: 1px solid #000; margin: 4px 0; }
+        .title { text-align: center; font-size: 22px; font-weight: 800; margin: 4px 0; }
+        .row { display: flex; justify-content: space-between; margin: 4px 0; font-size: 14px; }
+        .row .value { font-weight: 800; text-align: left; }
+        .amount-box {
+            border: 2px solid #000;
+            text-align: center;
+            padding: 6px;
+            margin: 8px 0;
+        }
+        .amount-box .amount { font-size: 26px; font-weight: 800; }
+        .in-words { font-size: 12px; margin-top: 3px; }
+        table { width: 100%; border-collapse: collapse; font-size: 13px; margin: 6px 0; }
+        th, td { text-align: center; padding: 3px; }
+        thead tr { border-top: 1px solid #000; border-bottom: 1px solid #000; }
+        .footer { text-align: center; margin-top: 10px; font-size: 13px; }
+        .signature { margin-top: 24px; display: flex; justify-content: space-between; font-size: 13px; }
+        .draft { color: #c00; text-align: center; font-size: 18px; font-weight: 800; }
+        @media print {
+            @page { size: 100mm auto; margin: 0 1em 0 1em; }
+            body { width: 110mm; margin: 0; }
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        {% set logo = frappe.db.get_value("Company", doc.company, "company_logo") %}
+        {% if logo %}<img src="{{ logo }}" alt="Logo" class="logo">{% endif %}
+        <div class="company-name">{{ doc.company }}</div>
+        {% set company_address = frappe.db.get_value("Dynamic Link",
+            {"link_doctype": "Company", "link_name": doc.company, "parenttype": "Address"}, "parent") %}
+        {% if company_address %}
+            {% set addr = frappe.db.get_value("Address", company_address, ["address_line1", "city", "country"], as_dict=True) %}
+            <div class="address">{{ [addr.address_line1, addr.city, addr.country] | select | join(", ") }}</div>
+        {% endif %}
+        {% set vat_id = frappe.db.get_value("Company", doc.company, "tax_id") %}
+        {% if vat_id %}<div class="address">VAT ID: {{ vat_id }}</div>{% endif %}
+        <div class="separator"></div>
+    </div>
+
+    {% if doc.docstatus == 0 %}
+        <div class="draft">DRAFT — NOT POSTED / مسودة</div>
+    {% elif doc.docstatus == 2 %}
+        <div class="draft">CANCELLED / ملغي</div>
+    {% endif %}
+
+    <div class="title">
+        {% if doc.payment_type == "Pay" %}
+            <div>سند صرف</div><div style="font-size:18px;">PAYMENT VOUCHER</div>
+        {% else %}
+            <div>سند قبض</div><div style="font-size:18px;">RECEIPT VOUCHER</div>
+        {% endif %}
+    </div>
+    <div class="separator"></div>
+
+    <div class="row"><span>رقم السند / Receipt No</span><span class="value">{{ doc.name }}</span></div>
+    <div class="row"><span>التاريخ / Date</span><span class="value">{{ doc.get_formatted("posting_date") }}</span></div>
+    <div class="row"><span>العميل / Customer</span><span class="value">{{ doc.party_name or doc.party }}</span></div>
+    <div class="row"><span>طريقة الدفع / Mode</span><span class="value">{{ doc.mode_of_payment or "" }}</span></div>
+    {% if doc.reference_no %}
+        <div class="row"><span>المرجع / Reference</span><span class="value">{{ doc.reference_no }}{% if doc.reference_date %} · {{ doc.get_formatted("reference_date") }}{% endif %}</span></div>
+    {% endif %}
+
+    <div class="amount-box">
+        <div>المبلغ المستلم / Amount Received</div>
+        <div class="amount">{{ doc.get_formatted("paid_amount") }}</div>
+        <div class="in-words">{{ frappe.utils.money_in_words(doc.paid_amount, doc.paid_from_account_currency or doc.paid_to_account_currency) }}</div>
+    </div>
+
+    {% if doc.references %}
+    <table>
+        <thead>
+            <tr>
+                <th>الفاتورة<br>Invoice</th>
+                <th>المبلغ<br>Invoice Total</th>
+                <th>المخصص<br>Allocated</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for ref in doc.references %}
+            <tr>
+                <td>{{ ref.reference_name }}</td>
+                <td>{{ "%.2f"|format(ref.total_amount or 0) }}</td>
+                <td>{{ "%.2f"|format(ref.allocated_amount or 0) }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% endif %}
+    {% if doc.unallocated_amount %}
+        <div class="row"><span>رصيد دائن / Advance (unallocated)</span><span class="value">{{ "%.2f"|format(doc.unallocated_amount) }}</span></div>
+    {% endif %}
+
+    {% if doc.remarks and not doc.remarks.startswith("Amount ") %}
+        <div class="row"><span>ملاحظات / Notes</span><span class="value">{{ doc.remarks }}</span></div>
+    {% endif %}
+
+    <div class="signature">
+        <div>المستلم / Received by<br>{{ frappe.get_fullname(doc.owner) }}</div>
+        <div>توقيع العميل / Customer signature<br><br>__________</div>
+    </div>
+
+    <div class="footer">
+        <div>شكرا لكم</div>
+        <div>Thank you</div>
+    </div>
+</body>
+</html>
