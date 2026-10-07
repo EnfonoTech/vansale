@@ -16,6 +16,8 @@ from frappe.utils import cint, flt, getdate, nowdate
 
 from vansale.api.datetime_util import naive_site_to_utc_iso, parse_client_ts
 from vansale.api.sales_return import append_return_rows, resolve_return_reason, returned_qty_by_row
+from vansale.api.access import readable_doc
+from vansale.api.outbox import claim
 from vansale.api.me import cash_sale_settings, current_user_sales_person
 
 
@@ -159,16 +161,6 @@ def tax_info(customer: Optional[str] = None, posting_date: Optional[str] = None)
     }
 
 
-def _existing_by_client_id(client_id: str) -> Optional[str]:
-    """Look up a prior submission of the same idempotency key."""
-    if not client_id:
-        return None
-    name = frappe.db.get_value("Vansale Outbox", {"client_id": client_id}, "ref_name")
-    if name and frappe.db.exists("Sales Invoice", name):
-        return name
-    return None
-
-
 def _record_outbox(client_id: str, ref_name: str, posting_ts: Optional[str], payload: dict) -> None:
     if not client_id:
         return
@@ -210,7 +202,7 @@ def save(
     if not items:
         frappe.throw(_("At least one item is required"))
 
-    existing = _existing_by_client_id(client_id)
+    existing = claim(client_id, "invoice", "Sales Invoice")
     if existing:
         doc = frappe.get_doc("Sales Invoice", existing)
         return {
@@ -621,7 +613,7 @@ def return_against(
     # accepted as the reason source so returns keep working mid-rollout.
     reason_option, reason_text = resolve_return_reason(reason or remarks)
 
-    existing = _existing_by_client_id(client_id)
+    existing = claim(client_id, "return", "Sales Invoice")
     if existing:
         doc = frappe.get_doc("Sales Invoice", existing)
         return {
@@ -632,7 +624,7 @@ def return_against(
             "idempotent_replay": True,
         }
 
-    original = frappe.get_doc("Sales Invoice", original_name)
+    original = readable_doc("Sales Invoice", original_name)
     if original.docstatus != 1:
         frappe.throw(_("Original invoice must be submitted"))
     if int(original.is_return or 0):
@@ -736,7 +728,7 @@ def list_mine(
 
 @frappe.whitelist(methods=["GET"])
 def detail(name: str) -> dict:
-    doc = frappe.get_doc("Sales Invoice", name)
+    doc = readable_doc("Sales Invoice", name)
     returned = returned_qty_by_row(doc) if doc.docstatus == 1 and not doc.is_return else {}
     taxes = [
         {

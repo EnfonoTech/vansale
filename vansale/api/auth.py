@@ -20,7 +20,8 @@ from __future__ import annotations
 
 import frappe
 from frappe import _
-from frappe.utils import now_datetime
+from frappe.rate_limiter import rate_limit
+from frappe.utils import cint, now_datetime
 
 try:
     import bcrypt
@@ -52,6 +53,39 @@ def _validate_pin(pin: str) -> str:
     return pin
 
 
+# Wrong-PIN lockout. A 4-digit PIN has 10,000 values and `login_with_pin`
+# is open to guests and returns the user's permanent API secret, so
+# unlimited guesses would hand out the account. After _MAX_PIN_FAILURES
+# wrong PINs the user must wait _PIN_LOCK_SECONDS or sign in with the
+# password (which clears the counter).
+_MAX_PIN_FAILURES = 5
+_PIN_LOCK_SECONDS = 15 * 60
+
+
+def _pin_failure_key(user: str) -> str:
+    return f"vansale:pin_failures:{user}"
+
+
+def _check_pin_lock(user: str) -> None:
+    if cint(frappe.cache().get_value(_pin_failure_key(user), expires=True)) >= _MAX_PIN_FAILURES:
+        frappe.throw(
+            _("Too many wrong PINs. Try again in {0} minutes or sign in with your password.").format(
+                _PIN_LOCK_SECONDS // 60
+            ),
+            frappe.AuthenticationError,
+        )
+
+
+def _record_pin_failure(user: str) -> None:
+    key = _pin_failure_key(user)
+    failures = cint(frappe.cache().get_value(key, expires=True)) + 1
+    frappe.cache().set_value(key, failures, expires_in_sec=_PIN_LOCK_SECONDS)
+
+
+def _clear_pin_failures(user: str) -> None:
+    frappe.cache().delete_value(_pin_failure_key(user))
+
+
 def _resolve_user(email: str) -> str:
     name = frappe.db.get_value("User", {"email": email}, "name") or frappe.db.get_value(
         "User", {"name": email}, "name"
@@ -74,6 +108,7 @@ def login(usr: str, pwd: str):
     login_manager = frappe.auth.LoginManager()
     login_manager.authenticate(user=usr, pwd=pwd)
     login_manager.post_login()
+    _clear_pin_failures(frappe.session.user)
 
     user_doc = frappe.get_doc("User", frappe.session.user)
     # Also mint (or return existing) api_key/api_secret so the APK can
@@ -142,6 +177,7 @@ def setup_pin(pin: str):
 
 
 @frappe.whitelist(allow_guest=True, methods=["POST"])
+@rate_limit(limit=30, seconds=10 * 60)
 def login_with_pin(email: str, pin: str):
     """PIN unlock for the native APK.
 
@@ -154,6 +190,7 @@ def login_with_pin(email: str, pin: str):
     pin = _validate_pin(pin)
 
     user = _resolve_user(email)
+    _check_pin_lock(user)
     pin_doc_name = frappe.db.get_value("Vansale Pin", {"user": user}, "name")
     if not pin_doc_name:
         frappe.throw(
@@ -161,14 +198,17 @@ def login_with_pin(email: str, pin: str):
             frappe.AuthenticationError,
         )
 
-    doc = frappe.get_doc("Vansale Pin", pin_doc_name)
-    stored_hash = doc.get_password("pin_hash")  # never `doc.pin_hash` — that's the mask
-    if not bcrypt.checkpw(pin.encode("utf-8"), stored_hash.encode("utf-8")):
-        frappe.throw(_("Invalid credentials"), frappe.AuthenticationError)
-
+    # Disabled check before the PIN, so a disabled account can't be probed.
     user_doc = frappe.get_doc("User", user)
     if user_doc.enabled == 0:
         frappe.throw(_("User is disabled"), frappe.AuthenticationError)
+
+    doc = frappe.get_doc("Vansale Pin", pin_doc_name)
+    stored_hash = doc.get_password("pin_hash")  # never `doc.pin_hash` — that's the mask
+    if not bcrypt.checkpw(pin.encode("utf-8"), stored_hash.encode("utf-8")):
+        _record_pin_failure(user)
+        frappe.throw(_("Invalid credentials"), frappe.AuthenticationError)
+    _clear_pin_failures(user)
 
     api_key, api_secret = get_or_create_stable_secret(user_doc)
 
@@ -197,10 +237,13 @@ def change_pin(old_pin: str, new_pin: str):
     if not pin_doc_name:
         frappe.throw(_("No PIN to change — use setup_pin first"))
 
+    _check_pin_lock(user)
     doc = frappe.get_doc("Vansale Pin", pin_doc_name)
     stored_hash = doc.get_password("pin_hash")
     if not bcrypt.checkpw(old_pin.encode("utf-8"), stored_hash.encode("utf-8")):
+        _record_pin_failure(user)
         frappe.throw(_("Current PIN incorrect"), frappe.AuthenticationError)
+    _clear_pin_failures(user)
 
     doc.pin_hash = bcrypt.hashpw(new_pin.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
     doc.save(ignore_permissions=True)
@@ -257,6 +300,7 @@ def reset_pin(user: str):
     if not frappe.db.exists("User", user):
         frappe.throw(_("Unknown user"))
 
+    _clear_pin_failures(user)
     name = frappe.db.get_value("Vansale Pin", {"user": user}, "name")
     if not name:
         return {"ok": True, "cleared": False}

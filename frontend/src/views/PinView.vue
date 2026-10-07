@@ -6,6 +6,7 @@ import { configDefaults } from "@/api/me";
 import { useSessionStore } from "@/stores/session";
 import { ApiError, NetworkError } from "@/app/frappe";
 import { isOnline } from "@/app/online";
+import { canUnlockOffline, forgetPin, rememberPin, verifyPinOffline } from "@/app/pin-offline";
 import { useToastStore } from "@/stores/toasts";
 import Icon from "@/components/Icon.vue";
 import BrandMark from "@/components/BrandMark.vue";
@@ -29,9 +30,10 @@ type Mode = "setup" | "unlock" | "change";
 type Step = "current" | "enter" | "confirm";
 
 const isChange = route.query.change === "1";
-const mode = ref<Mode>(
-  isChange ? "change" : session.pinVerifiedAt === null ? "setup" : "unlock",
-);
+// "Set a PIN" only when the server has none for this user (login response);
+// older sessions without that flag fall back to the previous rule.
+const needsSetup = session.hasPin === null ? session.pinVerifiedAt === null : !session.hasPin;
+const mode = ref<Mode>(isChange ? "change" : needsSetup ? "setup" : "unlock");
 const step = ref<Step>(isChange ? "current" : "enter");
 const pin = ref("");
 const firstPin = ref("");
@@ -106,22 +108,36 @@ async function submit() {
   }
 
   busy.value = true;
+  const email = session.email ?? "";
+  // No signal: unlock against the PIN hash kept from the last online unlock.
+  if (mode.value === "unlock" && !isOnline()) {
+    await unlockOffline(email);
+    busy.value = false;
+    return;
+  }
   try {
     if (mode.value === "change") {
       await changePin(currentPin.value, pin.value);
+      await rememberPin(email, pin.value);
       session.markPinVerified();
       toasts.success("PIN changed");
       await router.replace({ name: "more" });
       return;
     }
     if (mode.value === "setup") await setupPin(pin.value);
-    else await loginWithPin(session.email ?? "", pin.value);
+    else await loginWithPin(email, pin.value);
+    session.setHasPin(true);
+    await rememberPin(email, pin.value);
     session.markPinVerified();
     if (isOnline()) {
       try { session.setDefaults(await configDefaults()); } catch { /* non-fatal */ }
     }
     await router.replace({ name: "dashboard" });
   } catch (err) {
+    if (err instanceof NetworkError && mode.value === "unlock") {
+      await unlockOffline(email);
+      return;
+    }
     if (err instanceof ApiError) error.value = err.serverMessage ?? "Incorrect PIN";
     else if (err instanceof NetworkError) error.value = "Offline";
     else error.value = "Incorrect PIN";
@@ -139,7 +155,26 @@ async function submit() {
   }
 }
 
+async function unlockOffline(email: string) {
+  if (!canUnlockOffline(email)) {
+    error.value = "Offline — connect to unlock";
+    buzz();
+    pin.value = "";
+    return;
+  }
+  if (await verifyPinOffline(email, pin.value)) {
+    session.markPinVerified();
+    toasts.success("Unlocked offline — sales will sync when you're back online");
+    await router.replace({ name: "dashboard" });
+    return;
+  }
+  error.value = canUnlockOffline(email) ? "Incorrect PIN" : "Too many wrong PINs — connect to unlock";
+  buzz();
+  pin.value = "";
+}
+
 function signInAgain() {
+  forgetPin();
   session.logout();
   void router.replace({ name: "login" });
 }

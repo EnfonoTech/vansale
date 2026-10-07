@@ -12,16 +12,9 @@ from typing import Optional
 import frappe
 from frappe import _
 
+from vansale.api.access import check_read, readable_doc
+from vansale.api.outbox import claim
 from vansale.api.datetime_util import naive_site_to_utc_iso, parse_client_ts
-
-
-def _existing_by_client_id(client_id: str) -> Optional[str]:
-    if not client_id:
-        return None
-    name = frappe.db.get_value("Vansale Outbox", {"client_id": client_id}, "ref_name")
-    if name and frappe.db.exists("Payment Entry", name):
-        return name
-    return None
 
 
 def _record_outbox(client_id: str, ref_name: str, posting_ts: Optional[str], payload: dict) -> None:
@@ -199,7 +192,7 @@ def save(
     if amount <= 0:
         frappe.throw(_("Amount must be positive"))
 
-    existing = _existing_by_client_id(client_id)
+    existing = claim(client_id, "payment", "Payment Entry")
     if existing:
         doc = frappe.get_doc("Payment Entry", existing)
         return {
@@ -361,6 +354,9 @@ def outstanding(customer: str) -> list[dict]:
     so we stringify them — ``naive_site_to_utc_iso`` expects a datetime
     and crashes on a plain date with ``AttributeError: tzinfo``.
     """
+    # All of the customer's open invoices (any salesman's), but only for a
+    # customer this user may read.
+    check_read("Customer", customer)
     rows = frappe.get_all(
         "Sales Invoice",
         filters={"customer": customer, "docstatus": 1, "outstanding_amount": [">", 0]},
@@ -390,7 +386,7 @@ def detail(name: str) -> dict:
     """
     if not name:
         frappe.throw(_("name required"))
-    doc = frappe.get_doc("Payment Entry", name)
+    doc = readable_doc("Payment Entry", name)
     refs = [
         {
             "reference_doctype": r.reference_doctype,

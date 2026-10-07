@@ -459,6 +459,8 @@ def customer_query(
     with NO Sales Team row for the resolved sales_person (handy for the
     "add these customers" workflow).
     """
+    # Manager page only: it lists every customer with mobile numbers.
+    _require_manager()
     filters = filters or {}
     user = filters.get("user")
     sales_person = filters.get("sales_person") or (user_to_sales_person(user) if user else None)

@@ -7,27 +7,10 @@ from typing import Optional
 import frappe
 from frappe import _
 
+from vansale.api.access import check_read
+from vansale.api.outbox import claim
 from vansale.api.datetime_util import naive_site_to_utc_iso, parse_client_ts
 from vansale.api.me import current_user_sales_person
-
-
-def _existing_customer_by_client_id(client_id: str | None) -> Optional[str]:
-    """Look up a previously-created Customer by the offline client_id.
-
-    Mirrors the `invoice.save` pattern — Vansale Outbox is the single
-    source of truth for idempotency. Returns the Customer.name if the
-    outbox row still points at a live Customer, else None (stale row).
-    """
-    if not client_id:
-        return None
-    name = frappe.db.get_value(
-        "Vansale Outbox",
-        {"client_id": client_id, "event_type": "customer"},
-        "ref_name",
-    )
-    if name and frappe.db.exists("Customer", name):
-        return name
-    return None
 
 
 def _record_customer_outbox(
@@ -144,6 +127,7 @@ def list_mine(limit: int = 50, search: Optional[str] = None) -> list[dict]:
 def detail(name: str) -> dict:
     if not name:
         frappe.throw(_("Customer name required"))
+    check_read("Customer", name)
     doc = frappe.get_doc("Customer", name)
     addresses = frappe.db.sql(
         """
@@ -229,7 +213,7 @@ def create(
     # client_id already drained. Clients on the offline queue retry
     # after network loss; without this guard we'd create duplicates.
     if client_id:
-        prior = _existing_customer_by_client_id(client_id)
+        prior = claim(client_id, "customer", "Customer")
         if prior:
             doc = frappe.get_doc("Customer", prior)
             return {
@@ -327,10 +311,8 @@ def create(
         # Link back to customer as primary address.
         frappe.db.set_value("Customer", doc.name, "customer_primary_address", address_name)
 
-    frappe.db.commit()
-
-    # Record the outbox row AFTER commit so a rolled-back insert doesn't
-    # leave a ghost idempotency key.
+    # Outbox row in the same transaction as the Customer (claimed above), so
+    # a retry can never create a second customer and a rollback drops both.
     if client_id:
         _record_customer_outbox(
             client_id,
@@ -343,6 +325,7 @@ def create(
                 "mobile_no": mobile_no,
             },
         )
+    frappe.db.commit()
 
     return {
         "name": doc.name,
@@ -361,6 +344,7 @@ def _build_statement_html(name: str, from_date: str | None, to_date: str | None)
     """
     if not name:
         frappe.throw(_("Customer name required"))
+    check_read("Customer", name)
     cust = frappe.get_doc("Customer", name)
 
     to_date = to_date or str(frappe.utils.today())
@@ -554,6 +538,7 @@ def statement_pdf(name: str, from_date: str | None = None, to_date: str | None =
 @frappe.whitelist(methods=["GET"])
 def summary(customer: str) -> dict:
     """Aggregates for the customer detail tile strip."""
+    check_read("Customer", customer)
     outstanding = frappe.db.sql(
         """
         SELECT COALESCE(SUM(outstanding_amount), 0)

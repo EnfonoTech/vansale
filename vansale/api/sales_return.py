@@ -12,6 +12,8 @@ import frappe
 from frappe import _
 from frappe.utils import flt
 
+from vansale.api.access import readable_doc
+from vansale.api.outbox import claim
 from vansale.api.datetime_util import naive_site_to_utc_iso, parse_client_ts
 
 # Structured return reasons. Mirrors the `custom_return_reason` Select options
@@ -134,15 +136,6 @@ def resolve_return_reason(reason: Optional[str]) -> tuple[str, str]:
     return "Other", text
 
 
-def _existing(client_id: str) -> Optional[str]:
-    if not client_id:
-        return None
-    name = frappe.db.get_value("Vansale Outbox", {"client_id": client_id}, "ref_name")
-    if name and frappe.db.exists("Sales Invoice", name):
-        return name
-    return None
-
-
 def _record_outbox(client_id: str, ref_name: str, posting_ts: Optional[str], payload: dict) -> None:
     if not client_id:
         return
@@ -183,7 +176,7 @@ def save(
     # reason-less return through on the second attempt.
     reason_option, reason_text = resolve_return_reason(reason)
 
-    existing = _existing(client_id)
+    existing = claim(client_id, "return", "Sales Invoice")
     if existing:
         doc = frappe.get_doc("Sales Invoice", existing)
         return {
@@ -193,7 +186,7 @@ def save(
             "idempotent_replay": True,
         }
 
-    original = frappe.get_doc("Sales Invoice", original_invoice)
+    original = readable_doc("Sales Invoice", original_invoice)
     if original.docstatus != 1:
         frappe.throw(_("Original invoice must be submitted"))
 

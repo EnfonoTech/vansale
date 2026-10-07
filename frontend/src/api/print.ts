@@ -1,10 +1,10 @@
 /**
  * Print helpers for native + web.
  *
- * We use the built-in whitelisted method
- *   `frappe.www.printview.get_html_and_style(doc, name, print_format, ...)`
- * which ships with every Frappe v15 install and returns
- *   { html: "<div class='...'>...</div>", style: "<style>...</style>" }.
+ * The app's `vansale.api.printing.html` returns the print format the way
+ * desk's /printview renders it: format HTML, Print Style and Frappe's
+ * print.bundle.css (+ text direction), so in-app preview / web print match
+ * desk printing.
  *
  * We previously tried `frappe.client.get_print` — that one is NOT
  * exposed on the trading-demo Frappe image (AttributeError). We also
@@ -37,6 +37,10 @@ export function defaultPrintFormat(
 interface PrintResponse {
   html: string | null;
   style: string | null;
+  /** Frappe's print.bundle.css (hashed path), as desk's /printview links it. */
+  print_css?: string;
+  dir?: "ltr" | "rtl";
+  lang?: string;
 }
 
 export async function fetchPrintHtml(
@@ -47,19 +51,18 @@ export async function fetchPrintHtml(
   copies = 1,
 ): Promise<string> {
   const qs = new URLSearchParams({
-    doc: doctype,
+    doctype,
     name,
-    print_format: printFormat,
+    format: printFormat,
   });
   if (noLetterhead) qs.set("no_letterhead", "1");
-  const res = await apiCall<PrintResponse>(
-    "GET",
-    `frappe.www.printview.get_html_and_style?${qs.toString()}`,
-  );
+  // The app's endpoint also returns the print CSS desk's /printview loads;
+  // without it tables, grid and fonts rendered differently from desk.
+  const res = await apiCall<PrintResponse>("GET", `vansale.api.printing.html?${qs.toString()}`);
   if (!res.html) {
     throw new Error(`Print format "${printFormat}" not found`);
   }
-  return buildStandalone(res.html, res.style ?? "", apiBase(), copies);
+  return buildStandalone(res, apiBase(), copies);
 }
 
 /**
@@ -157,44 +160,50 @@ function normalisePrintHtml(raw: string): { html: string; inlineStyle: string } 
     const styles = head.match(/<style[\s\S]*?<\/style>/gi);
     if (styles) inlineStyle = styles.join("\n");
   }
-  // Prefer the body contents when present; otherwise just strip doctype/html/head.
-  const bodyMatch = html.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
-  if (bodyMatch) {
-    html = bodyMatch[1];
-  } else {
-    html = html
-      .replace(/<!doctype[^>]*>/gi, "")
-      .replace(/<\/?html[^>]*>/gi, "")
-      .replace(/<head[\s\S]*?<\/head>/gi, "");
-  }
+  // Remove only the wrapper tags and keep everything else in place. Keeping
+  // just the <body> contents dropped any <style> a format puts before its
+  // <body> tag (e.g. "Sales Invoice PF"), so tables printed without borders.
+  html = html
+    .replace(/<!doctype[^>]*>/gi, "")
+    .replace(/<\/?html[^>]*>/gi, "")
+    .replace(/<head[\s\S]*?<\/head>/gi, "")
+    .replace(/<\/?body[^>]*>/gi, "");
   return { html, inlineStyle };
 }
 
-function buildStandalone(html: string, style: string, base: string, copies = 1): string {
+function buildStandalone(res: PrintResponse, base: string, copies = 1): string {
+  const style = res.style ?? "";
   const absBase = base ? (base.endsWith("/") ? base : `${base}/`) : "/";
   const baseTag = `<base href="${absBase}">`;
-  const { html: cleanHtml, inlineStyle } = normalisePrintHtml(html);
+  const { html: cleanHtml, inlineStyle } = normalisePrintHtml(res.html ?? "");
+  // Root-relative so <base> points it at the site (native) or this origin (web).
+  const printCss = res.print_css
+    ? `<link rel="stylesheet" href="${res.print_css.replace(/^\//, "")}">`
+    : "";
   // Frappe's `get_html_and_style` returns `style` as raw CSS (no surrounding
   // <style> tags). Dropping it into <head> as naked text made browsers
   // parse-error-recover by moving it into <body>, which is why the iframe
   // showed raw CSS source above the invoice. Always wrap in <style>.
   const styleTag = style ? `<style>${style}</style>` : "";
+  // Same structure as desk's www/printview.html: print.bundle.css, Print Style,
+  // .print-format-gutter > .print-format. No app font/background overrides —
+  // they made the app's print differ from desk's with the same format.
+  const body = Array.from({ length: Math.max(1, copies) }, () => cleanHtml).join(
+    '<div style="page-break-after: always; break-after: page;"></div>',
+  );
   return `<!doctype html>
-<html>
+<html lang="${res.lang ?? "en"}" dir="${res.dir ?? "ltr"}">
 <head>
 <meta charset="utf-8">
 ${baseTag}
 <meta name="viewport" content="width=device-width, initial-scale=1">
+${printCss}
 ${styleTag}
 ${inlineStyle}
-<style>
-  body { margin: 0; padding: 1rem; background: #f6f7fb; font-family: system-ui, -apple-system, sans-serif; }
-  @media print { body { background: #fff; padding: 0; } }
-</style>
 </head>
-<body>${Array.from({ length: Math.max(1, copies) }, () => cleanHtml).join(
-    '<div style="page-break-after: always; break-after: page;"></div>',
-  )}</body>
+<body>
+<div class="print-format-gutter"><div class="print-format">${body}</div></div>
+</body>
 </html>`;
 }
 

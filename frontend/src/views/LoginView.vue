@@ -68,6 +68,7 @@ async function onSubmit() {
     // PinView falls into "setup" mode instead of asking the user to enter a
     // PIN that no longer exists (e.g. after the 1.0.13 PIN-wipe migration).
     if (!res.has_pin) session.clearPinWindow();
+    session.setHasPin(Boolean(res.has_pin));
     // PIN unlock is configurable (user row → van → global). When the admin
     // turned it off, skip the PIN screen entirely rather than asking the
     // driver to invent a PIN nobody will ever check.

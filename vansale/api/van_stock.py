@@ -10,25 +10,9 @@ from typing import Optional
 import frappe
 from frappe import _
 
+from vansale.api.access import check_read
+from vansale.api.outbox import claim
 from vansale.api.datetime_util import naive_site_to_utc_iso, parse_client_ts
-
-
-def _existing_stock_entry_by_client_id(client_id: str | None) -> Optional[str]:
-    """Return the Stock Entry the given offline client_id already drained as,
-    or None. Mirrors `invoice.save` / `customer.create` — Vansale Outbox is
-    the single source of truth for idempotency so retries after a network
-    blip don't duplicate van replenishments.
-    """
-    if not client_id:
-        return None
-    name = frappe.db.get_value(
-        "Vansale Outbox",
-        {"client_id": client_id, "event_type": "stock_adjust"},
-        "ref_name",
-    )
-    if name and frappe.db.exists("Stock Entry", name):
-        return name
-    return None
 
 
 def _record_stock_entry_outbox(
@@ -94,6 +78,7 @@ def list_stock(warehouse: Optional[str] = None, limit: int = 500) -> dict:
     wh = warehouse or _user_van_warehouse()
     if not wh:
         frappe.throw(_("No van warehouse set. Assign one on your Sales Person profile."))
+    check_read("Warehouse", wh)
     rows = frappe.db.sql(
         """
         SELECT b.item_code, i.item_name, i.stock_uom, b.actual_qty,
@@ -134,7 +119,7 @@ def transfer_in(
     # successful load doesn't re-throw "At least one item required"
     # because the caller trimmed the payload.
     if client_id:
-        prior = _existing_stock_entry_by_client_id(client_id)
+        prior = claim(client_id, "stock_adjust", "Stock Entry")
         if prior:
             prior_doc = frappe.get_doc("Stock Entry", prior)
             return {
@@ -166,10 +151,9 @@ def transfer_in(
 
     doc.insert(ignore_permissions=False)
     doc.submit()
-    frappe.db.commit()
 
-    # Outbox row recorded post-commit so a rolled-back Stock Entry
-    # doesn't leave a ghost idempotency key (§ frappe-vue-pwa 4.4).
+    # Outbox row in the same transaction as the Stock Entry (claimed above):
+    # a retry can't load the van twice, and a rollback drops both.
     if client_id:
         _record_stock_entry_outbox(
             client_id,
@@ -182,5 +166,7 @@ def transfer_in(
                 "items": items,
             },
         )
+
+    frappe.db.commit()
 
     return {"name": doc.name, "modified": naive_site_to_utc_iso(doc.modified)}

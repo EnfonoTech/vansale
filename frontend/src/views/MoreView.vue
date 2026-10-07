@@ -3,6 +3,7 @@ import { computed } from "vue";
 import { useRouter } from "vue-router";
 import { useSessionStore } from "@/stores/session";
 import { logout } from "@/api/auth";
+import { forgetPin } from "@/app/pin-offline";
 import { useSyncStore } from "@/stores/sync";
 import { useConfirmStore } from "@/stores/confirm";
 import { clearSiteUrl, isNative, siteUrl } from "@/app/platform";
@@ -71,6 +72,20 @@ const initials = computed(() => {
 });
 
 async function onLogout() {
+  // Same guard as changing server: queued sales would otherwise drain under
+  // the next user's login and post as that user.
+  if (sync.pending > 0) {
+    await confirm.ask({
+      title: "Sync first",
+      message:
+        `${sync.pending} item${sync.pending === 1 ? "" : "s"} still waiting to reach the server. ` +
+        `Get back online and let them sync before logging out.`,
+      confirmText: "OK",
+      cancelText: "Close",
+    });
+    return;
+  }
+  forgetPin();
   try { await logout(); }
   finally { session.logout(); await router.replace({ name: "login" }); }
 }

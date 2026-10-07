@@ -28,6 +28,13 @@ interface Persisted {
    * switched off.
    */
   requirePin: boolean;
+  /**
+   * Whether the server has a PIN on file for this user (login response).
+   * The PIN screen uses it to choose "Enter PIN" vs "Set a PIN"; deciding by
+   * `pinVerifiedAt` asked to set a new PIN after every logout + login and
+   * overwrote the existing one. null = unknown (sessions from older builds).
+   */
+  hasPin: boolean | null;
 }
 
 function loadPersisted(): Persisted {
@@ -49,6 +56,7 @@ function initial(): Persisted {
     pinVerifiedAt: null,
     defaults: null,
     requirePin: true,
+    hasPin: null,
   };
 }
 
@@ -110,6 +118,10 @@ export const useSessionStore = defineStore("session", {
     },
     setRequirePin(required: boolean) {
       this.requirePin = required;
+      persist(this.$state);
+    },
+    setHasPin(hasPin: boolean) {
+      this.hasPin = hasPin;
       persist(this.$state);
     },
     /**

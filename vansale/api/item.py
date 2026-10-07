@@ -8,6 +8,7 @@ import frappe
 from frappe import _
 from frappe.utils import cint, flt, nowdate
 
+from vansale.api.access import check_read
 from vansale.api.me import customer_price_enabled, rate_precision
 
 
@@ -281,6 +282,7 @@ def price_for(item_code: str, customer: Optional[str] = None, uom: Optional[str]
 def stock_balance(warehouse: str, limit: int = 500) -> list[dict]:
     if not warehouse:
         frappe.throw(_("Warehouse required"))
+    check_read("Warehouse", warehouse)
     rows = frappe.db.sql(
         """
         SELECT b.item_code, i.item_name, i.stock_uom, b.actual_qty
