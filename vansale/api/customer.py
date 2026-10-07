@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Optional
 
 import frappe
@@ -10,7 +11,7 @@ from frappe import _
 from vansale.api.access import check_read
 from vansale.api.outbox import claim
 from vansale.api.datetime_util import naive_site_to_utc_iso, parse_client_ts
-from vansale.api.me import current_user_sales_person
+from vansale.api.me import current_user_sales_person, customer_name_2_field, is_office_user, user_to_van_config
 
 
 def _record_customer_outbox(
@@ -76,51 +77,267 @@ def _assigned_customer_names(sales_person: str | None) -> list[str] | None:
     return [r["name"] for r in rows]
 
 
+def _sales_person_customers(sales_person: str | None) -> set[str]:
+    """Customers linked to a sales person: Sales Team rows, plus
+    Customer.custom_sales_person on sites that have that field (Badria)."""
+    if not sales_person:
+        return set()
+    names = set(_assigned_customer_names(sales_person) or [])
+    if frappe.get_meta("Customer").has_field("custom_sales_person"):
+        names.update(frappe.get_all("Customer", {"custom_sales_person": sales_person}, pluck="name"))
+    return names
+
+
+# KSA ZATCA address fields: names differ by app / version (ksa_compliance uses
+# custom_building_number / custom_area). Written to the first that exists.
+_ADDRESS_FIELDS = {
+    "building_number": ("custom_building_number", "building_number"),
+    "additional_number": ("custom_additional_number", "additional_number"),
+    "district": ("custom_area", "custom_district", "district"),
+}
+_KSA = "Saudi Arabia"
+
+
+def _address_field(key: str) -> Optional[str]:
+    meta = frappe.get_meta("Address")
+    return next((f for f in _ADDRESS_FIELDS[key] if meta.has_field(f)), None)
+
+
+def _validate_ksa(
+    country: Optional[str],
+    is_b2b: bool,
+    vat: Optional[str] = None,
+    building_number: Optional[str] = None,
+    pincode: Optional[str] = None,
+    district: Optional[str] = None,
+    street: Optional[str] = None,
+    city: Optional[str] = None,
+) -> None:
+    """ZATCA rules for Saudi customers: VAT 15 digits starting and ending
+    with 3, building number 4 digits, postal code 5 digits; a B2B (standard
+    invoice) buyer needs street, building number, district, city and postal
+    code."""
+    if (country or _KSA) != _KSA:
+        return
+    errors = []
+    if vat and not re.fullmatch(r"3\d{13}3", vat.strip()):
+        errors.append(_("VAT number must be 15 digits, starting and ending with 3"))
+    if building_number and not re.fullmatch(r"\d{4}", str(building_number).strip()):
+        errors.append(_("Building number must be 4 digits"))
+    if pincode and not re.fullmatch(r"\d{5}", str(pincode).strip()):
+        errors.append(_("Postal code must be 5 digits"))
+    if is_b2b:
+        missing = [
+            label
+            for label, value in (
+                (_("Street"), street),
+                (_("Building number"), building_number),
+                (_("District"), district),
+                (_("City"), city),
+                (_("Postal code"), pincode),
+            )
+            if not (value and str(value).strip())
+        ]
+        if missing:
+            errors.append(_("Required for B2B customers: {0}").format(", ".join(missing)))
+    if errors:
+        frappe.throw("<br>".join(errors), title=_("Customer details"))
+
+
+def _title_field() -> Optional[str]:
+    """Customer's title field when it isn't customer_name (Badria shows
+    custom_customer_name_english as the customer's title)."""
+    meta = frappe.get_meta("Customer")
+    tf = meta.title_field
+    return tf if tf and tf != "customer_name" and meta.has_field(tf) else None
+
+
+def _display_names(row) -> tuple[str, Optional[str]]:
+    """(name to show, second name) — title field first, as desk shows it."""
+    tf, name_2 = _title_field(), customer_name_2_field()
+    title = row.get(tf) if tf else None
+    display = title or row.get("customer_name")
+    other = row.get("customer_name") if title else (row.get(name_2) if name_2 else None)
+    return display, (other if other and other != display else None)
+
+
+def _default_leaf(doctype: str, van_field: str, selling_settings_field: str) -> Optional[str]:
+    """Default Customer Group / Territory for a new customer.
+
+    The van's default, else Selling Settings, else none — never a group node
+    (ERPNext rejects "Cannot select a Group type Customer Group"; falling back
+    to "All Customer Groups" made customer create fail on sites without a
+    Selling Settings default).
+    """
+    van = user_to_van_config(frappe.session.user)
+    candidates = [
+        frappe.db.get_value("Vansale Configuration", van, van_field)
+        if van and frappe.get_meta("Vansale Configuration").has_field(van_field)
+        else None,
+        frappe.db.get_single_value("Selling Settings", selling_settings_field),
+    ]
+    for value in candidates:
+        if value and not frappe.db.get_value(doctype, value, "is_group"):
+            return value
+    return None
+
+
+def _vat_field() -> Optional[str]:
+    """ZATCA VAT field (ksa_compliance) when the site has it."""
+    return "custom_vat_registration_number" if frappe.get_meta("Customer").has_field(
+        "custom_vat_registration_number"
+    ) else None
+
+
 @frappe.whitelist(methods=["GET"])
 def list_mine(limit: int = 50, search: Optional[str] = None) -> list[dict]:
     filters: dict = {"disabled": 0}
-    roles = frappe.get_roles(frappe.session.user)
-    is_admin = "System Manager" in roles or "Van Manager" in roles
 
-    # Option C: Van users see union of
-    #   (a) customers they created (owner = session.user), and
-    #   (b) customers tagged with their Sales Person in Sales Team.
-    # Either set alone is legit — (a) covers PWA-created customers before
-    # the Vansale Configuration backfill runs, (b) covers customers seeded
-    # by admins or assigned via Customer > Sales Team.
-    #
-    # Because Frappe's get_all `or_filters` are OR-ed against the base
-    # `filters` (AND-ed), we precompute the union of names up-front and
-    # scope by `name IN (...)`. Search remains an AND-layer over that set.
-    if not is_admin:
-        sp = current_user_sales_person()
-        assigned = set(_assigned_customer_names(sp) or []) if sp else set()
-        owned = set(
-            r[0] for r in frappe.db.sql(
-                "SELECT name FROM `tabCustomer` WHERE owner = %s",
-                (frappe.session.user,),
-            )
+    # Van users see the union of customers linked to their Sales Person
+    # (Sales Team / custom_sales_person) and customers they created. Office
+    # users (Vansale Settings "Office roles", default System / Van Manager)
+    # see all. Computed up front because get_list's or_filters are AND-ed
+    # with filters; search stays an AND-layer over that set.
+    if not is_office_user(default_roles={"System Manager", "Van Manager"}):
+        allowed = _sales_person_customers(current_user_sales_person()) | set(
+            frappe.get_all("Customer", {"owner": frappe.session.user}, pluck="name")
         )
-        allowed = assigned | owned
         if not allowed:
             return []
         filters["name"] = ["in", list(allowed)]
 
+    name_2, vat, title = customer_name_2_field(), _vat_field(), _title_field()
+    fields = _LIST_FIELDS + [f for f in {name_2, vat, title} if f]
     or_filters = {}
     if search:
         s = f"%{search}%"
         or_filters = {"customer_name": ["like", s], "mobile_no": ["like", s], "tax_id": ["like", s]}
-    rows = frappe.get_all(
+        for f in {name_2, vat, title}:
+            if f:
+                or_filters[f] = ["like", s]
+    # get_list (not get_all): role permissions and the user's User
+    # Permissions apply, e.g. a salesman limited to some Customer Groups.
+    rows = frappe.get_list(
         "Customer",
         filters=filters,
         or_filters=or_filters or None,
-        fields=_LIST_FIELDS,
+        fields=fields,
         limit=int(limit),
         order_by="modified desc",
     )
     for r in rows:
         r["modified"] = naive_site_to_utc_iso(r.get("modified"))
+        # Stable keys for the app whatever the site calls these fields.
+        r["customer_name_2"] = r.get(name_2) if name_2 else None
+        r["vat_number"] = (r.get(vat) if vat else None) or r.get("tax_id")
+        r["display_name"], r["secondary_name"] = _display_names(r)
     return rows
+
+
+@frappe.whitelist(methods=["POST"])
+def save_address(
+    customer: str,
+    address: str | None = None,
+    address_line1: str | None = None,
+    address_line2: str | None = None,
+    city: str | None = None,
+    state: str | None = None,
+    pincode: str | None = None,
+    country: str | None = None,
+    building_number: str | None = None,
+    additional_number: str | None = None,
+    district: str | None = None,
+    phone: str | None = None,
+) -> dict:
+    """Edit a customer's address, or add one when `address` is empty."""
+    check_read("Customer", customer)
+    cust = frappe.get_doc("Customer", customer)
+    country = country or frappe.db.get_single_value("Global Defaults", "country") or _KSA
+    if not address_line1 or not city:
+        frappe.throw(_("Street and city are required"))
+    _validate_ksa(
+        country, cust.customer_type == "Company", None, building_number, pincode, district, address_line1, city
+    )
+
+    if address:
+        doc = frappe.get_doc("Address", address)
+        if not any(l.link_doctype == "Customer" and l.link_name == customer for l in doc.links):
+            frappe.throw(_("Address {0} does not belong to {1}").format(address, customer), frappe.PermissionError)
+    else:
+        doc = frappe.new_doc("Address")
+        doc.address_title = cust.customer_name
+        doc.address_type = "Billing"
+        doc.is_primary_address = 0 if cust.customer_primary_address else 1
+        doc.append("links", {"link_doctype": "Customer", "link_name": customer})
+
+    doc.update({
+        "address_line1": address_line1,
+        "address_line2": address_line2,
+        "city": city,
+        "state": state,
+        "pincode": pincode,
+        "country": country,
+        "phone": phone,
+    })
+    for key, value in (
+        ("building_number", building_number),
+        ("additional_number", additional_number),
+        ("district", district),
+    ):
+        field = _address_field(key)
+        if field:
+            doc.set(field, str(value).strip() if value else None)
+    doc.save()
+    if not cust.customer_primary_address:
+        frappe.db.set_value("Customer", customer, "customer_primary_address", doc.name)
+    return {"name": doc.name}
+
+
+@frappe.whitelist(methods=["POST"])
+def save_contact(customer: str, mobile_no: str | None = None, email_id: str | None = None) -> dict:
+    """Set the customer's mobile / email.
+
+    In ERPNext these live on the customer's primary Contact (Customer.mobile_no
+    and email_id only copy it), so update that Contact, or create one and make
+    it primary when the customer has none.
+    """
+    check_read("Customer", customer)
+    cust = frappe.get_doc("Customer", customer)
+    mobile_no = (mobile_no or "").strip()
+    email_id = (email_id or "").strip()
+
+    if cust.customer_primary_contact:
+        contact = frappe.get_doc("Contact", cust.customer_primary_contact)
+    else:
+        contact = frappe.new_doc("Contact")
+        contact.first_name = cust.customer_name
+        contact.append("links", {"link_doctype": "Customer", "link_name": customer})
+
+    if mobile_no:
+        row = next((p for p in contact.phone_nos if p.is_primary_mobile_no), None)
+        if row:
+            row.phone = mobile_no
+        else:
+            contact.add_phone(mobile_no, is_primary_mobile_no=1)
+    else:
+        contact.set("phone_nos", [p for p in contact.phone_nos if not p.is_primary_mobile_no])
+    if email_id:
+        row = next((e for e in contact.email_ids if e.is_primary), None)
+        if row:
+            row.email_id = email_id
+        else:
+            contact.add_email(email_id, is_primary=1)
+    else:
+        contact.set("email_ids", [e for e in contact.email_ids if not e.is_primary])
+    contact.save()
+
+    # Customer copies the primary contact's mobile / email (fetch_from).
+    frappe.db.set_value(
+        "Customer",
+        customer,
+        {"customer_primary_contact": contact.name, "mobile_no": mobile_no or None, "email_id": email_id or None},
+    )
+    return {"contact": contact.name, "mobile_no": mobile_no, "email_id": email_id}
 
 
 @frappe.whitelist(methods=["GET"])
@@ -129,18 +346,24 @@ def detail(name: str) -> dict:
         frappe.throw(_("Customer name required"))
     check_read("Customer", name)
     doc = frappe.get_doc("Customer", name)
-    addresses = frappe.db.sql(
-        """
-        SELECT a.name, a.address_line1, a.address_line2, a.city, a.state, a.pincode, a.country,
-               a.is_primary_address, a.is_shipping_address, a.phone
-        FROM `tabAddress` a
-        JOIN `tabDynamic Link` l ON l.parent = a.name
-        WHERE l.link_doctype = 'Customer' AND l.link_name = %s
-        ORDER BY a.is_primary_address DESC, a.creation DESC
-        """,
-        (name,),
-        as_dict=True,
+    address_names = frappe.get_all(
+        "Dynamic Link",
+        filters={"link_doctype": "Customer", "link_name": name, "parenttype": "Address"},
+        pluck="parent",
     )
+    fields = ["name", "address_line1", "address_line2", "city", "state", "pincode", "country",
+              "is_primary_address", "is_shipping_address", "phone"]
+    mapped = {key: _address_field(key) for key in _ADDRESS_FIELDS}
+    addresses = frappe.get_all(
+        "Address",
+        filters={"name": ["in", address_names or [""]]},
+        fields=fields + [f for f in mapped.values() if f],
+        order_by="is_primary_address desc, creation desc",
+    )
+    for a in addresses:
+        # Stable keys for the app whatever the site calls these fields.
+        for key, field in mapped.items():
+            a[key] = a.pop(field, None) if field and field != key else a.get(key)
     outstanding = (
         frappe.db.sql(
             """
@@ -152,9 +375,15 @@ def detail(name: str) -> dict:
         )[0][0]
         or 0
     )
+    display_name, secondary_name = _display_names(doc)
+    vat = _vat_field()
     return {
         "name": doc.name,
         "customer_name": doc.customer_name,
+        "display_name": display_name,
+        "secondary_name": secondary_name,
+        "vat_number": (doc.get(vat) if vat else None) or doc.tax_id,
+        "customer_type": doc.customer_type,
         "customer_group": doc.customer_group,
         "territory": doc.territory,
         "mobile_no": doc.mobile_no,
@@ -187,6 +416,8 @@ def create(
     district: str | None = None,
     client_id: str | None = None,
     posting_ts: str | None = None,
+    cr_number: str | None = None,
+    customer_name_2: str | None = None,
 ) -> dict:
     """Create a Customer + optional primary Address.
 
@@ -225,20 +456,6 @@ def create(
             }
     ctype = (customer_type or "b2c").lower()
     is_b2b = ctype == "b2b"
-    if is_b2b:
-        missing = []
-        if not address_line1:
-            missing.append(_("Address line 1"))
-        if not city:
-            missing.append(_("City"))
-        if not building_number or not str(building_number).strip():
-            missing.append(_("Building number"))
-        if missing:
-            frappe.throw(
-                _("The following fields are mandatory for B2B customers: {0}").format(
-                    ", ".join(missing),
-                )
-            )
 
     # Resolve country once — used for both Customer.custom_country (a
     # site-custom reqd Link field added on trading-demo) and the primary
@@ -251,14 +468,35 @@ def create(
         or "Saudi Arabia"
     )
 
+    if resolved_country == _KSA:
+        _validate_ksa(resolved_country, is_b2b, tax_id, building_number, pincode, district, address_line1, city)
+    elif is_b2b:
+        missing = [label for label, value in ((_("Address line 1"), address_line1), (_("City"), city)) if not value]
+        if missing:
+            frappe.throw(
+                _("The following fields are mandatory for B2B customers: {0}").format(", ".join(missing))
+            )
+    if address_line1:
+        # Address fields this site makes mandatory (e.g. pincode), checked
+        # before anything is created so the driver gets a clear message.
+        address_meta = frappe.get_meta("Address")
+        given = {"city": city, "state": state, "pincode": pincode}
+        missing = [
+            _(address_meta.get_label(f)) for f, v in given.items()
+            if not v and address_meta.get_field(f) and address_meta.get_field(f).reqd
+        ]
+        if missing:
+            frappe.throw(_("Please fill in the address: {0}").format(", ".join(missing)))
+
     customer_payload: dict = {
         "doctype": "Customer",
         "customer_name": customer_name,
         "customer_type": "Company" if is_b2b else "Individual",
         "mobile_no": mobile_no,
         "email_id": email_id,
-        "territory": territory or frappe.db.get_single_value("Selling Settings", "territory") or "All Territories",
-        "customer_group": customer_group or frappe.db.get_single_value("Selling Settings", "customer_group") or "All Customer Groups",
+        "territory": territory or _default_leaf("Territory", "default_territory", "territory"),
+        "customer_group": customer_group
+        or _default_leaf("Customer Group", "default_customer_group", "customer_group"),
         "tax_id": tax_id,
     }
     # Only set `custom_country` if the field actually exists on Customer
@@ -267,13 +505,26 @@ def create(
     customer_meta = frappe.get_meta("Customer")
     if customer_meta.has_field("custom_country"):
         customer_payload["custom_country"] = resolved_country
+    # Optional fields, written only where the site has them (ksa_compliance
+    # ZATCA fields, a second-language name).
+    vat_field = _vat_field()
+    if vat_field and tax_id:
+        customer_payload[vat_field] = tax_id
+    if cr_number and customer_meta.has_field("custom_cr_number"):
+        customer_payload["custom_cr_number"] = cr_number
+    name_2_field = customer_name_2_field()
+    if name_2_field and customer_name_2:
+        customer_payload[name_2_field] = customer_name_2
     doc = frappe.get_doc(customer_payload)
     # Auto-stamp the creating van user's sales_person into Sales Team so
     # the customer shows up in list_mine() without a manual admin tag +
-    # so invoice commission tracking works from the first invoice.
+    # so invoice commission tracking works from the first invoice. Sites
+    # that link customers by Customer.custom_sales_person get that too.
     sp = current_user_sales_person()
     if sp:
         doc.append("sales_team", {"sales_person": sp, "allocated_percentage": 100})
+        if customer_meta.has_field("custom_sales_person"):
+            doc.custom_sales_person = sp
     doc.insert(ignore_permissions=False)
 
     # Create Address if fields provided (mandatory for B2B, optional for B2C).
@@ -295,16 +546,14 @@ def create(
             "is_shipping_address": 1,
             "links": [{"link_doctype": "Customer", "link_name": doc.name}],
         }
-        # KSA ZATCA Phase 2 address fields — these are custom fields added
-        # by the `ksa_compliance` app. Only include them if the fieldnames
-        # actually exist on Address; otherwise `Document.update` will warn.
-        meta = frappe.get_meta("Address")
-        if building_number and meta.has_field("building_number"):
-            addr_data["building_number"] = str(building_number).strip()
-        if additional_number and meta.has_field("additional_number"):
-            addr_data["additional_number"] = str(additional_number).strip()
-        if district and meta.has_field("district"):
-            addr_data["district"] = district
+        for key, value in (
+            ("building_number", building_number),
+            ("additional_number", additional_number),
+            ("district", district),
+        ):
+            field = _address_field(key)
+            if value and field:
+                addr_data[field] = str(value).strip()
         addr = frappe.get_doc(addr_data)
         addr.insert(ignore_permissions=False)
         address_name = addr.name

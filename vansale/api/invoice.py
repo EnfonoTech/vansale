@@ -16,8 +16,9 @@ from frappe.utils import cint, flt, getdate, nowdate
 
 from vansale.api.datetime_util import naive_site_to_utc_iso, parse_client_ts
 from vansale.api.sales_return import append_return_rows, resolve_return_reason, returned_qty_by_row
-from vansale.api.access import readable_doc
+from vansale.api.access import check_read, readable_doc
 from vansale.api.outbox import claim
+from vansale.api.payment import check_mode_allowed
 from vansale.api.me import cash_sale_settings, current_user_sales_person
 
 
@@ -268,6 +269,7 @@ def save(
     # or submitting the draft later would otherwise fall back to "Cash".
     if pay_type == "cash" and not pe_mode:
         mop = mode_of_payment or "Cash"
+        check_mode_allowed(mop)
         account = _default_mop_account(mop, company)
         if not account:
             frappe.throw(_("No default account configured for Mode of Payment {0}").format(mop))
@@ -313,8 +315,9 @@ def _cash_via_payment_entry() -> bool:
 def _set_cash_mode(doc, mode_of_payment: str) -> None:
     """Payment Entry posting: no POS payments table, so keep the chosen mode on
     the invoice until submit creates the Payment Entry."""
-    from vansale.api.payment import _resolve_accounts
+    from vansale.api.payment import _resolve_accounts, check_mode_allowed
 
+    check_mode_allowed(mode_of_payment)
     _resolve_accounts(doc.company, mode_of_payment)  # fail now, not at submit
     doc.is_pos = 0
     doc.set("payments", [])
@@ -362,8 +365,15 @@ def _append_items(doc, items: list[dict[str, Any]], set_warehouse: Optional[str]
     """Add the client's lines to the invoice.
 
     A missing or zero qty used to be posted as qty 1, so a line the driver
-    had zeroed out was still billed. Reject it instead.
+    had zeroed out was still billed. Reject it instead. The customer must be
+    readable by the user and every item in an allowed Item Group, so User
+    Permissions hold on save, not only in the app's lists.
     """
+    from vansale.api.item import check_item_allowed
+
+    check_read("Customer", doc.customer)
+    for code in {i.get("item_code") for i in items if i.get("item_code")}:
+        check_item_allowed(code)
     for item in items:
         if not item.get("item_code"):
             frappe.throw(_("item_code is required on every line"))
@@ -492,6 +502,7 @@ def update_draft(
 
     if pay_type == "cash" and not pe_mode:
         mop = mode_of_payment or "Cash"
+        check_mode_allowed(mop)
         account = _default_mop_account(mop, doc.company)
         if not account:
             frappe.throw(_("No default account configured for Mode of Payment {0}").format(mop))
@@ -557,6 +568,7 @@ def submit_draft(name: str, mode_of_payment: Optional[str] = None) -> dict:
 
     if cint(doc.is_pos) and not doc.get("payments"):
         mop = mode_of_payment or "Cash"
+        check_mode_allowed(mop)
         account = _default_mop_account(mop, doc.company)
         if not account:
             frappe.throw(_("No default account configured for Mode of Payment") + ": " + mop)

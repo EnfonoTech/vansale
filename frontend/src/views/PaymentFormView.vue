@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
-import { listMine as listCustomers } from "@/api/customer";
+import { listMine as listCustomers, customerLabel, type CustomerRow } from "@/api/customer";
 import { outstanding, save, modesOfPayment, type ModeOfPayment } from "@/api/payment";
 import { ApiError, NetworkError } from "@/app/frappe";
 import { useSessionStore } from "@/stores/session";
@@ -14,7 +14,7 @@ const route = useRoute();
 const session = useSessionStore();
 const toasts = useToastStore();
 
-const customers = ref<Array<{ name: string; customer_name: string }>>([]);
+const customers = ref<CustomerRow[]>([]);
 const invoices = ref<Array<Record<string, unknown>>>([]);
 const mops = ref<ModeOfPayment[]>([]);
 const customer = ref(String(route.query.customer ?? ""));
@@ -163,7 +163,7 @@ async function submit() {
         <select v-model="customer">
           <option value="" disabled>Select customer…</option>
           <option v-for="c in customers" :key="c.name" :value="c.name">
-            {{ c.customer_name }}
+            {{ customerLabel(c) }}
           </option>
         </select>
       </label>

@@ -111,19 +111,23 @@ def month_summary(offset: int = 0) -> dict:
 def recent_activity(limit: int = 10) -> list[dict]:
     """Last N sales invoices + payments for the current user."""
     user = frappe.session.user
+    # Last N of each kind first, then merge: a plain UNION + ORDER BY read
+    # every invoice and payment the user ever made (4 s on 300k rows).
     rows = frappe.db.sql(
         """
-        SELECT 'invoice' AS kind, name, customer AS party, grand_total AS amount, posting_date, modified
-        FROM `tabSales Invoice`
-        WHERE docstatus = 1 AND is_return = 0 AND owner = %s
+        (SELECT 'invoice' AS kind, name, customer AS party, grand_total AS amount, posting_date, modified
+         FROM `tabSales Invoice`
+         WHERE docstatus = 1 AND is_return = 0 AND owner = %(user)s
+         ORDER BY modified DESC LIMIT %(limit)s)
         UNION ALL
-        SELECT 'payment' AS kind, name, party, paid_amount AS amount, posting_date, modified
-        FROM `tabPayment Entry`
-        WHERE docstatus = 1 AND payment_type = 'Receive' AND owner = %s
+        (SELECT 'payment' AS kind, name, party, paid_amount AS amount, posting_date, modified
+         FROM `tabPayment Entry`
+         WHERE docstatus = 1 AND payment_type = 'Receive' AND owner = %(user)s
+         ORDER BY modified DESC LIMIT %(limit)s)
         ORDER BY modified DESC
-        LIMIT %s
+        LIMIT %(limit)s
         """,
-        (user, user, int(limit)),
+        {"user": user, "limit": int(limit)},
         as_dict=True,
     )
     for r in rows:

@@ -26,6 +26,38 @@ _ITEM_FIELDS = [
 ]
 
 
+def permitted_item_groups() -> set[str] | None:
+    """Item Groups the user may sell, from "Item Group" User Permissions
+    (sub-groups included); None when the user has none (no restriction).
+
+    Only Item Group is applied — Frappe's full Item permission check also
+    applies e.g. a Warehouse permission to the Item Defaults table, which hid
+    items from drivers whose van isn't an item's default warehouse.
+    """
+    from frappe.utils.nestedset import get_descendants_of
+
+    perms = frappe.get_all(
+        "User Permission",
+        filters={"user": frappe.session.user, "allow": "Item Group"},
+        fields=["for_value", "applicable_for", "apply_to_all_doctypes", "hide_descendants"],
+    )
+    perms = [p for p in perms if p.apply_to_all_doctypes or p.applicable_for in (None, "", "Item")]
+    if not perms:
+        return None
+    groups: set[str] = set()
+    for p in perms:
+        groups.add(p.for_value)
+        if not p.hide_descendants:
+            groups.update(get_descendants_of("Item Group", p.for_value, ignore_permissions=True))
+    return groups
+
+
+def check_item_allowed(item_code: str) -> None:
+    groups = permitted_item_groups()
+    if groups is not None and frappe.db.get_value("Item", item_code, "item_group") not in groups:
+        frappe.throw(_("You are not permitted to sell item {0}").format(item_code), frappe.PermissionError)
+
+
 @frappe.whitelist(methods=["GET"])
 def list_mine(
     limit: int = 100,
@@ -93,6 +125,11 @@ def list_mine(
         ]
         if barcode_parents:
             or_filters["name"] = ["in", barcode_parents]
+    groups = permitted_item_groups()
+    if groups is not None:
+        if not groups:
+            return []
+        filters["item_group"] = ["in", list(groups)]
     rows = frappe.get_all(
         "Item",
         filters=filters,

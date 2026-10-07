@@ -13,6 +13,7 @@ import frappe
 from frappe import _
 
 from vansale.api.access import check_read, readable_doc
+from vansale.api.me import is_office_user
 from vansale.api.outbox import claim
 from vansale.api.datetime_util import naive_site_to_utc_iso, parse_client_ts
 
@@ -106,6 +107,29 @@ def build_payment_entry(
     doc.posting_date = posting_date
     doc.remarks = remarks
     return doc
+
+
+def van_allowed_modes() -> Optional[set[str]]:
+    """Modes of payment the user's van may use; None = no restriction."""
+    from vansale.api.me import user_to_van_config
+
+    van = user_to_van_config(frappe.session.user)
+    if not van:
+        return None
+    modes = set(
+        frappe.get_all(
+            "Vansale Allowed Mode of Payment",
+            filters={"parent": van, "parenttype": "Vansale Configuration"},
+            pluck="mode_of_payment",
+        )
+    )
+    return modes or None
+
+
+def check_mode_allowed(mode_of_payment: str) -> None:
+    allowed = van_allowed_modes()
+    if allowed is not None and mode_of_payment not in allowed:
+        frappe.throw(_("Mode of Payment {0} is not allowed for your van").format(mode_of_payment))
 
 
 def _needs_reference(company: str, mode_of_payment: str) -> bool:
@@ -216,6 +240,7 @@ def save(
     # ERPNext requires Reference No + Date on bank-type modes. The date was
     # never sent, so every bank collection failed; default it to the posting
     # date and ask for the number up front.
+    check_mode_allowed(mode_of_payment)
     if not reference_no and _needs_reference(company, mode_of_payment):
         frappe.throw(_("Enter the reference number (transaction / cheque no.) for {0}").format(mode_of_payment))
     doc = build_payment_entry(
@@ -294,8 +319,7 @@ def list_mine(limit: int = 50, customer: Optional[str] = None) -> list[dict]:
     offer Edit/Delete actions on unsubmitted entries; the Payment
     Detail view already gates submit/delete buttons on docstatus.
     """
-    roles = frappe.get_roles(frappe.session.user)
-    is_admin = any(r in roles for r in ("System Manager", "Van Manager", "Accounts Manager"))
+    is_admin = is_office_user(default_roles={"System Manager", "Van Manager", "Accounts Manager"})
 
     filters: dict = {"docstatus": ["<", 2]}  # drafts + submitted (not cancelled)
     if customer:
@@ -333,8 +357,7 @@ def delete_payment(name: str) -> dict:
     if doc.docstatus != 0:
         frappe.throw(_("Only draft payments can be deleted here. Submitted payments must be cancelled from the Desk."))
     # Ownership check — non-admins can only delete their own drafts.
-    roles = frappe.get_roles(frappe.session.user)
-    is_admin = any(r in roles for r in ("System Manager", "Van Manager", "Accounts Manager"))
+    is_admin = is_office_user(default_roles={"System Manager", "Van Manager", "Accounts Manager"})
     if not is_admin and doc.owner != frappe.session.user:
         frappe.throw(_("You can only delete your own draft payments."))
     frappe.delete_doc("Payment Entry", name, ignore_permissions=False)
@@ -437,6 +460,9 @@ def modes_of_payment() -> list[dict]:
         fields=["name", "type"],
         order_by="name asc",
     )
+    allowed = van_allowed_modes()
+    if allowed is not None:
+        rows = [r for r in rows if r["name"] in allowed]
     for row in rows:
         row["needs_reference"] = _needs_reference(company, row["name"])
     return rows

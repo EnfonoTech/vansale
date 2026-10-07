@@ -28,6 +28,10 @@ class VansaleConfiguration(Document):
         from vansale.vansale.doctype.vansale_settings.vansale_settings import validate_print_formats
 
         validate_print_formats(self)
+        for fieldname, doctype in (("default_customer_group", "Customer Group"), ("default_territory", "Territory")):
+            value = self.get(fieldname)
+            if value and frappe.db.get_value(doctype, value, "is_group"):
+                frappe.throw(_("{0} {1} is a group; choose one below it").format(_(doctype), frappe.bold(value)))
         self._sync_series_rows()
         if not self.company:
             return

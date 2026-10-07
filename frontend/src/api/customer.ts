@@ -14,10 +14,39 @@ export interface CustomerRow {
   tax_id?: string;
   default_currency?: string;
   modified?: string;
+  /** Second name (site's field, e.g. English / Arabic), when the site has one. */
+  customer_name_2?: string | null;
+  /** ZATCA VAT Registration Number, else Tax ID. */
+  vat_number?: string | null;
+  /** Name to show: the Customer title field (e.g. English name) else customer_name. */
+  display_name?: string;
+  /** The other name, when different from display_name. */
+  secondary_name?: string | null;
+}
+
+/** Name to show for a customer row (older cached rows lack display_name). */
+export function customerLabel(c: { display_name?: string; customer_name: string }): string {
+  return c.display_name || c.customer_name;
+}
+
+export interface CustomerAddress {
+  name: string;
+  address_line1?: string;
+  address_line2?: string;
+  city?: string;
+  state?: string;
+  pincode?: string;
+  country?: string;
+  phone?: string;
+  building_number?: string | null;
+  additional_number?: string | null;
+  district?: string | null;
+  is_primary_address?: number;
 }
 
 export interface CustomerDetail extends CustomerRow {
-  addresses: Array<Record<string, string>>;
+  customer_type?: string;
+  addresses: CustomerAddress[];
   outstanding: number;
 }
 
@@ -60,7 +89,10 @@ async function _listFromCache(search: string | undefined, limit: number): Promis
     ? rows.filter(
         (r) =>
           (r.customer_name ?? "").toLowerCase().includes(q) ||
+          (r.display_name ?? "").toLowerCase().includes(q) ||
+          (r.customer_name_2 ?? "").toLowerCase().includes(q) ||
           (r.mobile_no ?? "").toLowerCase().includes(q) ||
+          (r.vat_number ?? "").toLowerCase().includes(q) ||
           (r.name ?? "").toLowerCase().includes(q),
       )
     : rows;
@@ -186,6 +218,10 @@ export interface CustomerCreatePayload {
   building_number?: string;
   additional_number?: string;
   district?: string;
+  /** Commercial registration (sites with ksa_compliance). */
+  cr_number?: string;
+  /** Second name, saved to the site's second-name field. */
+  customer_name_2?: string;
 }
 
 export interface CustomerCreateResult {
@@ -212,4 +248,33 @@ export async function refreshCache(): Promise<CustomerRow[]> {
 export async function fromCache(): Promise<CachedCustomer[]> {
   const d = await db();
   return await d.getAll("customer_cache");
+}
+
+export interface AddressPayload {
+  customer: string;
+  address?: string;
+  address_line1: string;
+  address_line2?: string;
+  city: string;
+  state?: string;
+  pincode?: string;
+  country?: string;
+  building_number?: string;
+  additional_number?: string;
+  district?: string;
+  phone?: string;
+}
+
+/** Edit a customer's address, or add one when `address` is empty. */
+export async function saveAddress(payload: AddressPayload): Promise<{ name: string }> {
+  return apiCall<{ name: string }>("POST", "vansale.api.customer.save_address", payload);
+}
+
+/** Set the customer's mobile / email (its primary Contact). */
+export async function saveContact(payload: {
+  customer: string;
+  mobile_no?: string;
+  email_id?: string;
+}): Promise<{ contact: string }> {
+  return apiCall<{ contact: string }>("POST", "vansale.api.customer.save_contact", payload);
 }

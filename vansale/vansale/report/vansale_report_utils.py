@@ -28,7 +28,9 @@ def user_van(user: str | None = None) -> str | None:
 
 
 def is_manager() -> bool:
-    return bool(MANAGER_ROLES & set(frappe.get_roles()))
+    from vansale.api.me import is_office_user
+
+    return is_office_user(default_roles=MANAGER_ROLES)
 
 
 def van_scope(filters: dict) -> tuple[str, dict]:

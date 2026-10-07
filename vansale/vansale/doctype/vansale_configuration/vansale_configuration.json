@@ -19,11 +19,21 @@
   "uom_change_mode",
   "section_break_pricing",
   "selling_price_list",
+  "column_break_pricing",
   "customer_price_mode",
+  "section_break_new_customer",
+  "default_customer_group",
+  "column_break_new_customer",
+  "default_territory",
+  "section_break_payments",
   "cash_sale_posting_mode",
   "cash_payment_entry_status_mode",
+  "column_break_payments",
+  "allowed_modes_of_payment",
+  "section_break_printing",
   "invoice_print_format",
   "receipt_print_format",
+  "column_break_printing",
   "direct_print_mode",
   "print_after_submit_mode",
   "print_copies",
@@ -118,11 +128,41 @@
    "description": "Van-level selling price list. Takes effect when a customer has no Customer-specific default price list. Falls back to Customer Group → Selling Settings when unset."
   },
   {
+   "fieldname": "column_break_pricing",
+   "fieldtype": "Column Break"
+  },
+  {
    "default": "Follow Global",
    "fieldname": "customer_price_mode",
    "fieldtype": "Select",
    "label": "Customer-specific price",
    "options": "Follow Global\nEnabled\nDisabled"
+  },
+  {
+   "fieldname": "section_break_new_customer",
+   "fieldtype": "Section Break",
+   "label": "New Customers"
+  },
+  {
+   "fieldname": "default_customer_group",
+   "fieldtype": "Link",
+   "label": "Default customer group",
+   "options": "Customer Group"
+  },
+  {
+   "fieldname": "column_break_new_customer",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "default_territory",
+   "fieldtype": "Link",
+   "label": "Default territory",
+   "options": "Territory"
+  },
+  {
+   "fieldname": "section_break_payments",
+   "fieldtype": "Section Break",
+   "label": "Payments"
   },
   {
    "default": "Follow Global",
@@ -139,6 +179,21 @@
    "options": "Follow Global\nSubmit\nDraft"
   },
   {
+   "fieldname": "column_break_payments",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "allowed_modes_of_payment",
+   "fieldtype": "Table MultiSelect",
+   "label": "Allowed modes of payment",
+   "options": "Vansale Allowed Mode of Payment"
+  },
+  {
+   "fieldname": "section_break_printing",
+   "fieldtype": "Section Break",
+   "label": "Printing"
+  },
+  {
    "fieldname": "invoice_print_format",
    "fieldtype": "Link",
    "label": "Invoice print format",
@@ -149,6 +204,10 @@
    "fieldtype": "Link",
    "label": "Receipt print format",
    "options": "Print Format"
+  },
+  {
+   "fieldname": "column_break_printing",
+   "fieldtype": "Column Break"
   },
   {
    "default": "Follow Global",
@@ -235,7 +294,7 @@
  ],
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-10-07 17:54:12.997451",
+ "modified": "2026-10-07 20:17:21.681691",
  "modified_by": "Administrator",
  "module": "Vansale",
  "name": "Vansale Configuration",

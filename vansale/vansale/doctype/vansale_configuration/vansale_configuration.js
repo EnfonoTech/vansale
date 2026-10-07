@@ -7,6 +7,9 @@
 frappe.ui.form.on("Vansale Configuration", {
 	setup(frm) {
 		vansale_filter_print_formats(frm);
+		// ERPNext rejects a group Customer Group on a Customer; offer leaves only.
+		frm.set_query("default_customer_group", () => ({ filters: { is_group: 0 } }));
+		frm.set_query("default_territory", () => ({ filters: { is_group: 0 } }));
 	},
 
 	refresh(frm) {

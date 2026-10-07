@@ -17,7 +17,7 @@
  */
 import { computed, onMounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
-import { listMine, fromCache, refreshCache, type CustomerRow } from "@/api/customer";
+import { listMine, fromCache, refreshCache, customerLabel, type CustomerRow } from "@/api/customer";
 import { isOnline, useOnline } from "@/app/online";
 import { NetworkError } from "@/app/frappe";
 import Icon from "@/components/Icon.vue";
@@ -84,12 +84,22 @@ watch(search, () => {
 
 watch(online, (v) => { if (v) void load(); });
 
+function metaParts(c: CustomerRow): Array<{ text: string; mono?: boolean; muted?: boolean }> {
+  const parts: Array<{ text: string; mono?: boolean; muted?: boolean }> = [];
+  if (c.mobile_no) parts.push({ text: c.mobile_no });
+  const vat = c.vat_number || c.tax_id;
+  if (vat) parts.push({ text: `VAT ${vat}`, mono: true });
+  if (c.territory) parts.push({ text: c.territory });
+  if (c.name !== c.customer_name && c.name !== customerLabel(c)) parts.push({ text: c.name, muted: true });
+  return parts;
+}
+
 function openCustomer(c: CustomerRow) {
   void router.push({ name: "customer-detail", params: { name: c.name } });
 }
 
 const sorted = computed<CustomerRow[]>(() =>
-  [...rows.value].sort((a, b) => a.customer_name.localeCompare(b.customer_name)),
+  [...rows.value].sort((a, b) => customerLabel(a).localeCompare(customerLabel(b))),
 );
 
 const totalCount = computed(() => rows.value.length);
@@ -143,18 +153,19 @@ const totalCount = computed(() => rows.value.length);
           type="button"
           class="row-btn"
           @click="openCustomer(c)"
-          :aria-label="`Open customer ${c.customer_name}`"
+          :aria-label="`Open customer ${customerLabel(c)}`"
         >
           <span class="accent" aria-hidden="true" />
           <span class="content">
-            <strong class="name">{{ c.customer_name }}</strong>
-            <span class="meta">
-              <span v-if="c.mobile_no" class="meta-item">{{ c.mobile_no }}</span>
-              <span v-if="c.mobile_no && (c.territory || c.tax_id)" class="sep">·</span>
-              <span v-if="c.territory" class="meta-item">{{ c.territory }}</span>
-              <span v-if="c.territory && c.tax_id" class="sep">·</span>
-              <span v-if="c.tax_id" class="meta-item mono">VAT {{ c.tax_id }}</span>
-              <span v-if="!c.mobile_no && !c.territory && !c.tax_id" class="meta-item muted">{{ c.name }}</span>
+            <strong class="name">{{ customerLabel(c) }}</strong>
+            <span v-if="c.secondary_name" class="name-2">{{ c.secondary_name }}</span>
+            <!-- Details only; the customer ID shows only when it differs from the
+                 name (on sites naming customers by name it just repeated it). -->
+            <span v-if="metaParts(c).length" class="meta">
+              <template v-for="(part, i) in metaParts(c)" :key="i">
+                <span v-if="i" class="sep">·</span>
+                <span class="meta-item" :class="{ mono: part.mono, muted: part.muted }">{{ part.text }}</span>
+              </template>
             </span>
           </span>
           <Icon name="chevron-right" :size="16" class="chev" />
@@ -275,6 +286,10 @@ const totalCount = computed(() => rows.value.length);
   flex-direction: column;
   gap: 0.15rem;
   min-width: 0;
+}
+.name-2 {
+  font-size: var(--text-sm);
+  color: var(--text-muted);
 }
 .name {
   font-family: var(--font-display);

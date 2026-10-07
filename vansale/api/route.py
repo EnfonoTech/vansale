@@ -81,7 +81,8 @@ def _list_customers_for_sales_person(
     sales_person: str,
     visit_date: date | None = None,
 ) -> list[dict]:
-    """Customers whose Sales Team row references this Sales Person.
+    """Customers linked to this Sales Person (Sales Team, or
+    Customer.custom_sales_person where the site has it).
 
     Ordered by `custom_van_sort_order` asc (nulls last → `COALESCE, big
     number`), then by customer_name for stability. Disabled customers
@@ -92,9 +93,14 @@ def _list_customers_for_sales_person(
     return every tagged customer regardless of schedule — used by the
     admin assignment page so operators can see and edit the full roster.
     """
+    from vansale.api.customer import _sales_person_customers
+
+    names = _sales_person_customers(sales_person)
+    if not names:
+        return []
     rows = frappe.db.sql(
         """
-        SELECT DISTINCT
+        SELECT
             c.name AS customer,
             c.customer_name AS customer_name,
             c.mobile_no AS mobile_no,
@@ -102,12 +108,10 @@ def _list_customers_for_sales_person(
             COALESCE(c.custom_van_sort_order, 999999) AS sort_order,
             c.custom_visit_days AS visit_days
         FROM `tabCustomer` c
-        INNER JOIN `tabSales Team` st
-            ON st.parent = c.name AND st.parenttype = 'Customer'
-        WHERE st.sales_person = %s AND c.disabled = 0
+        WHERE c.name IN %(names)s AND c.disabled = 0
         ORDER BY sort_order ASC, c.customer_name ASC
         """,
-        (sales_person,),
+        {"names": tuple(names)},
         as_dict=True,
     )
     if visit_date is None:

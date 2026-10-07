@@ -18,6 +18,8 @@ const TITLES: Record<string, string> = {
   "customer-new": "New customer",
   "customer-detail": "Customer",
   "customer-statement": "Statement",
+  "customer-address": "Address",
+  "customer-contact": "Contact",
   invoices: "Invoices",
   "invoice-new": "New invoice",
   "invoice-detail": "Invoice",
@@ -52,6 +54,14 @@ const PARENTS: Record<string, (r: RouteLike) => RouteTarget> = {
   "customer-new": () => ({ name: "customers" }),
   "customer-detail": () => ({ name: "customers" }),
   "customer-statement": (r) => ({
+    name: "customer-detail",
+    params: { name: String(r.params?.name ?? "") },
+  }),
+  "customer-address": (r) => ({
+    name: "customer-detail",
+    params: { name: String(r.params?.name ?? "") },
+  }),
+  "customer-contact": (r) => ({
     name: "customer-detail",
     params: { name: String(r.params?.name ?? "") },
   }),
@@ -92,6 +102,8 @@ const showBack = computed(() => {
     "customer-new",
     "customer-detail",
     "customer-statement",
+    "customer-address",
+    "customer-contact",
     "invoice-new",
     "invoice-detail",
     "invoice-return",

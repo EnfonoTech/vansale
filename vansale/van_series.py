@@ -185,7 +185,9 @@ def set_naming_series_from_van(doc, method=None) -> None:
     current = (doc.get("naming_series") or "").strip()
     if current.startswith(prefix):
         return
-    if current and TRUSTED_ROLES & set(frappe.get_roles()):
+    from vansale.api.me import is_office_user
+
+    if current and is_office_user(default_roles=TRUSTED_ROLES):
         return
 
     is_return = cint(doc.get("is_return"))

@@ -1,0 +1,30 @@
+{
+ "istable": 1,
+ "editable_grid": 1,
+ "creation": "2026-10-07 19:11:38.646980",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "mode_of_payment"
+ ],
+ "fields": [
+  {
+   "fieldname": "mode_of_payment",
+   "fieldtype": "Link",
+   "label": "Mode of Payment",
+   "options": "Mode of Payment",
+   "reqd": 1,
+   "in_list_view": 1
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-10-07 19:11:38.646980",
+ "modified_by": "Administrator",
+ "module": "Vansale",
+ "name": "Vansale Allowed Mode of Payment",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC"
+}

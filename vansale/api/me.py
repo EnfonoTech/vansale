@@ -98,7 +98,7 @@ def config_defaults() -> dict:
         as_dict=True,
     )
     van_code = cfg_user.parent if cfg_user else None
-    sales_person = cfg_user.sales_person if cfg_user else None
+    sales_person = user_to_sales_person(user)
     require_location = False
     selling_price_list: str | None = None
     van_route_mode: str | None = None
@@ -192,6 +192,7 @@ def config_defaults() -> dict:
         "cash_sale_posting": cash_sale_settings(user)["posting"],
         "print_formats": print_formats(user),
         "print": print_behaviour(user),
+        "customer_form": customer_form_config(),
     }
 
 
@@ -201,7 +202,11 @@ def current_user_sales_person() -> str | None:
 
 
 def user_to_sales_person(user: str | None) -> str | None:
-    """Map a User to their linked Sales Person via Vansale Configuration.
+    """Map a User to their Sales Person.
+
+    Vansale Configuration User.sales_person first; else the user's "Sales
+    Person" User Permission (default one first) — how sites without a
+    sales person on the van row (e.g. Badria) link salesmen.
 
     Used by the Van Route Plan desk-side customer filter (route.py
     customer_query) — the driver they're building the route for may
@@ -213,7 +218,64 @@ def user_to_sales_person(user: str | None) -> str | None:
         "Vansale Configuration User",
         {"user": user},
         "sales_person",
+    ) or frappe.db.get_value(
+        "User Permission",
+        {"user": user, "allow": "Sales Person"},
+        "for_value",
+        order_by="is_default desc, creation asc",
     )
+
+
+def is_office_user(user: str | None = None, default_roles: frozenset[str] | set[str] = frozenset()) -> bool:
+    """Whether `user` sees everyone's data (office staff, not a driver).
+
+    Vansale Settings "Office roles" when set; otherwise `default_roles`, the
+    caller's previous hard-coded set, so sites that haven't set it behave as
+    before. A site whose drivers hold manager roles (Badria: Accounts / Stock
+    Manager through a Role Profile) lists only its real office roles.
+    """
+    roles = set(frappe.get_roles(user or frappe.session.user))
+    configured = set(
+        frappe.get_all("Vansale Office Role", filters={"parenttype": "Vansale Settings"}, pluck="role")
+    )
+    return bool(roles & (configured or set(default_roles)))
+
+
+# Second customer name fields seen on sites, most common first.
+_CUSTOMER_NAME_2_CANDIDATES = (
+    "custom_customer_name_english",
+    "custom_customer_name_arabic",
+    "customer_name_in_arabic",
+    "custom_arabic_name",
+)
+
+
+def customer_name_2_field() -> str | None:
+    """Customer field for a second name (e.g. Arabic / English).
+
+    Vansale Settings "Second customer name field" if it exists on Customer,
+    else the first known field that exists; None when the site has none.
+    """
+    meta = frappe.get_meta("Customer")
+    configured = frappe.db.get_single_value("Vansale Settings", "customer_name_2_field")
+    for fieldname in ([configured] if configured else []) + list(_CUSTOMER_NAME_2_CANDIDATES):
+        if fieldname and meta.has_field(fieldname):
+            return fieldname
+    return None
+
+
+def customer_form_config() -> dict:
+    """Optional customer fields this site has, for the app's customer form."""
+    meta = frappe.get_meta("Customer")
+    name_2 = customer_name_2_field()
+    return {
+        "name_2": {"field": name_2, "label": _(meta.get_label(name_2))} if name_2 else None,
+        "cr_number": meta.has_field("custom_cr_number"),
+        # ZATCA "additional number" only where the site's Address has a field for it.
+        "additional_number": any(
+            frappe.get_meta("Address").has_field(f) for f in ("custom_additional_number", "additional_number")
+        ),
+    }
 
 
 def user_to_van_config(user: str | None) -> str | None:

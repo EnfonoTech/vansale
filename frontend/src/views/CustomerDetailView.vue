@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
-import { detail, type CustomerDetail } from "@/api/customer";
+import { customerLabel, detail, type CustomerDetail } from "@/api/customer";
 import { listMine as listInvoices } from "@/api/invoice";
 import { endVisit } from "@/api/route";
 import { currentPosition } from "@/features/van/gps";
@@ -33,6 +33,19 @@ const customerName = String(route.params.name ?? "");
 const activeForThisCustomer = computed(
   () => visit.hasActive && visit.activeCustomer === customerName,
 );
+
+function editContact() {
+  if (!customer.value) return;
+  void router.push({ name: "customer-contact", params: { name: customer.value.name } });
+}
+
+function editAddress(address?: string) {
+  if (!customer.value) return;
+  void router.push({
+    name: "customer-address",
+    params: { name: customer.value.name, address: address ?? "" },
+  });
+}
 
 async function load() {
   if (!customerName) return;
@@ -117,7 +130,7 @@ async function onEndVisit() {
           <Icon name="map-pin" :size="18" />
           <div>
             <span class="muted xsmall">Active visit</span>
-            <strong>{{ customer.customer_name }}</strong>
+            <strong>{{ customerLabel(customer) }}</strong>
           </div>
         </div>
         <button class="submit danger" :disabled="ending" @click="onEndVisit">
@@ -129,11 +142,11 @@ async function onEndVisit() {
       <section class="card stack">
         <div class="header-row">
           <span class="avatar">
-            {{ customer.customer_name.split(/\s+/).slice(0,2).map(s=>s.charAt(0).toUpperCase()).join("") || "?" }}
+            {{ customerLabel(customer).split(/\s+/).slice(0,2).map(s=>s.charAt(0).toUpperCase()).join("") || "?" }}
           </span>
-          <div style="min-width:0">
-            <h2 class="truncate" style="margin:0">{{ customer.customer_name }}</h2>
-            <span class="muted small truncate">{{ customer.name }}</span>
+          <div class="title-block">
+            <h2 class="truncate" style="margin:0">{{ customerLabel(customer) }}</h2>
+            <div v-if="customer.secondary_name" class="muted small truncate">{{ customer.secondary_name }}</div>
           </div>
         </div>
         <div class="meta-grid">
@@ -145,10 +158,18 @@ async function onEndVisit() {
             <Icon name="map-pin" :size="16" />
             <span>{{ customer.territory }}</span>
           </div>
-          <div v-if="customer.tax_id" class="meta-item">
-            <Icon name="tag" :size="16" />
-            <span>{{ customer.tax_id }}</span>
+          <div v-if="customer.email_id" class="meta-item">
+            <Icon name="user" :size="16" />
+            <span>{{ customer.email_id }}</span>
           </div>
+          <div v-if="customer.vat_number || customer.tax_id" class="meta-item">
+            <Icon name="tag" :size="16" />
+            <span>VAT {{ customer.vat_number || customer.tax_id }}</span>
+          </div>
+          <button type="button" class="link-btn" @click="editContact">
+            <Icon name="edit" :size="14" />
+            {{ customer.mobile_no || customer.email_id ? "Edit contact" : "Add phone / email" }}
+          </button>
         </div>
       </section>
 
@@ -169,16 +190,35 @@ async function onEndVisit() {
         </button>
       </section>
 
-      <section v-if="customer.addresses.length > 0" class="card stack">
-        <h3 style="margin:0 0 0.25rem">Addresses</h3>
-        <div v-for="(a, i) in customer.addresses" :key="i" class="address">
+      <section class="card stack">
+        <div class="addr-head">
+          <h3 style="margin:0 0 0.25rem">Addresses</h3>
+          <button type="button" class="link-btn" @click="editAddress()">
+            <Icon name="plus" :size="14" /> Add
+          </button>
+        </div>
+        <p v-if="customer.addresses.length === 0" class="muted small">No address yet.</p>
+        <button
+          v-for="(a, i) in customer.addresses"
+          :key="i"
+          type="button"
+          class="address"
+          @click="editAddress(a.name)"
+        >
           <Icon name="map-pin" :size="16" class="addr-ic" />
-          <div>
-            <div>{{ [a.address_line1, a.address_line2].filter(Boolean).join(", ") }}</div>
-            <div class="muted small">{{ [a.city, a.state, a.country].filter(Boolean).join(", ") }}</div>
+          <div class="addr-body">
+            <div>
+              <span v-if="a.building_number" class="mono">{{ a.building_number }}</span>
+              {{ [a.address_line1, a.address_line2].filter(Boolean).join(", ") }}
+            </div>
+            <div class="muted small">
+              {{ [a.district, a.city, a.pincode, a.state, a.country].filter(Boolean).join(", ") }}
+            </div>
+            <div v-if="a.additional_number" class="muted xsmall">Additional no. {{ a.additional_number }}</div>
             <div v-if="a.phone" class="muted xsmall">{{ a.phone }}</div>
           </div>
-        </div>
+          <Icon name="edit" :size="16" class="addr-edit" />
+        </button>
       </section>
 
       <section class="card stack">
@@ -205,6 +245,7 @@ async function onEndVisit() {
 
 <style scoped>
 .header-row { display: flex; align-items: center; gap: 0.75rem; }
+.title-block { min-width: 0; display: flex; flex-direction: column; gap: 0.1rem; }
 .avatar {
   width: 3rem; height: 3rem;
   border-radius: var(--radius-pill);
@@ -238,6 +279,18 @@ async function onEndVisit() {
   border-top: 1px solid var(--border);
 }
 .address:first-of-type { border-top: none; padding-top: 0; }
+.addr-head { display: flex; justify-content: space-between; align-items: center; }
+.link-btn {
+  all: unset; cursor: pointer; color: var(--primary);
+  font-size: var(--text-xs); font-weight: 600;
+  display: inline-flex; align-items: center; gap: 0.25rem;
+}
+button.address {
+  all: unset; cursor: pointer; box-sizing: border-box; width: 100%;
+  display: flex; gap: 0.5rem; padding: 0.5rem 0; border-top: 1px solid var(--border);
+}
+.addr-body { flex: 1; min-width: 0; }
+.addr-edit { color: var(--text-muted); align-self: center; }
 .addr-ic { color: var(--text-faint); flex-shrink: 0; margin-top: 0.15rem; }
 
 .inv-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0; }

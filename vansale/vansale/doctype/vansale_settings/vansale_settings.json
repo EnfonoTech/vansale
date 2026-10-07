@@ -24,6 +24,10 @@
   "print_after_submit",
   "column_break_print_behaviour",
   "print_copies",
+  "section_break_access",
+  "office_roles",
+  "section_break_customer",
+  "customer_name_2_field",
   "section_break_help",
   "help_html"
  ],
@@ -141,6 +145,27 @@
    "non_negative": 1
   },
   {
+   "fieldname": "section_break_access",
+   "fieldtype": "Section Break",
+   "label": "Access"
+  },
+  {
+   "fieldname": "office_roles",
+   "fieldtype": "Table MultiSelect",
+   "label": "Office roles",
+   "options": "Vansale Office Role"
+  },
+  {
+   "fieldname": "section_break_customer",
+   "fieldtype": "Section Break",
+   "label": "Customer"
+  },
+  {
+   "fieldname": "customer_name_2_field",
+   "fieldtype": "Data",
+   "label": "Second customer name field"
+  },
+  {
    "fieldname": "section_break_help",
    "fieldtype": "Section Break"
   },
@@ -153,7 +178,7 @@
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-10-07 17:54:12.997451",
+ "modified": "2026-10-07 19:11:38.646980",
  "modified_by": "Administrator",
  "module": "Vansale",
  "name": "Vansale Settings",

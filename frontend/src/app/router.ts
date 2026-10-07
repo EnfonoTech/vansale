@@ -65,6 +65,18 @@ const routes: RouteRecordRaw[] = [
     props: true,
   },
   {
+    path: "/customer/:name/contact",
+    name: "customer-contact",
+    component: () => import("@/views/ContactFormView.vue"),
+    meta: { requiresAuth: true, requiresPin: true },
+  },
+  {
+    path: "/customer/:name/address/:address?",
+    name: "customer-address",
+    component: () => import("@/views/AddressFormView.vue"),
+    meta: { requiresAuth: true, requiresPin: true },
+  },
+  {
     path: "/customer/:name/statement",
     name: "customer-statement",
     component: () => import("@/views/StatementView.vue"),

@@ -16,18 +16,24 @@ import { ref, computed } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { create as createCustomer } from "@/api/customer";
 import { ApiError } from "@/app/frappe";
+import { isKsa, ksaAddressErrors, ksaVatError } from "@/features/van/ksa";
+import { useSessionStore } from "@/stores/session";
 import { useToastStore } from "@/stores/toasts";
 import Icon from "@/components/Icon.vue";
 
 const router = useRouter();
 const route = useRoute();
 const toasts = useToastStore();
+const session = useSessionStore();
 
 const customerType = ref<"b2c" | "b2b">("b2c");
 const customerName = ref("");
 const mobileNo = ref("");
 const emailId = ref("");
 const taxId = ref("");
+// Shown only when the site has the field (session.customerForm).
+const customerName2 = ref("");
+const crNumber = ref("");
 
 const addressLine1 = ref("");
 const addressLine2 = ref("");
@@ -54,20 +60,36 @@ const district = ref("");
 const busy = ref(false);
 
 const isB2B = computed(() => customerType.value === "b2b");
-const canSubmit = computed(() => {
-  if (!customerName.value.trim()) return false;
-  if (isB2B.value) {
-    if (!addressLine1.value.trim()) return false;
-    if (!city.value.trim()) return false;
-    if (!buildingNumber.value.trim()) return false;
+// Field-level problems (KSA / ZATCA rules + B2B required address), shown
+// in the toast so the driver knows what to fix. The server checks again.
+const problems = computed(() => {
+  const list: string[] = [];
+  if (!customerName.value.trim()) list.push("Customer name is required");
+  const vatError = ksaVatError(taxId.value, country.value);
+  if (vatError) list.push(vatError);
+  if (isKsa(country.value)) {
+    list.push(
+      ...ksaAddressErrors({
+        country: country.value,
+        isB2B: isB2B.value,
+        street: addressLine1.value,
+        buildingNumber: buildingNumber.value,
+        district: district.value,
+        city: city.value,
+        pincode: pincode.value,
+      }),
+    );
+  } else if (isB2B.value && (!addressLine1.value.trim() || !city.value.trim())) {
+    list.push("Street and city are required for B2B");
   }
-  return true;
+  return list;
 });
+const canSubmit = computed(() => problems.value.length === 0);
 
 const redirectTo = String(route.query.redirect ?? "");
 
 async function submit() {
-  if (!canSubmit.value) { toasts.warn("Fill mandatory fields"); return; }
+  if (!canSubmit.value) { toasts.warn(problems.value.join(" · ")); return; }
   busy.value = true;
   try {
     const res = await createCustomer({
@@ -85,6 +107,8 @@ async function submit() {
       building_number: buildingNumber.value || undefined,
       additional_number: additionalNumber.value || undefined,
       district: district.value || undefined,
+      cr_number: crNumber.value || undefined,
+      customer_name_2: customerName2.value || undefined,
     });
     toasts.success(`Customer ${res.customer_name} created`);
     if (redirectTo === "invoice") {
@@ -125,6 +149,10 @@ async function submit() {
         <span class="tiny">Customer name *</span>
         <input type="text" v-model="customerName" placeholder="Name or company" />
       </label>
+      <label v-if="session.customerForm?.name_2" class="field">
+        <span class="tiny">{{ session.customerForm.name_2.label }}</span>
+        <input type="text" v-model="customerName2" />
+      </label>
       <div class="two-col">
         <label class="field">
           <span class="tiny">Mobile</span>
@@ -136,8 +164,12 @@ async function submit() {
         </label>
       </div>
       <label class="field">
-        <span class="tiny">Tax ID (VAT)</span>
+        <span class="tiny">VAT number</span>
         <input type="text" v-model="taxId" inputmode="numeric" />
+      </label>
+      <label v-if="session.customerForm?.cr_number" class="field">
+        <span class="tiny">CR number</span>
+        <input type="text" v-model="crNumber" inputmode="numeric" />
       </label>
     </section>
 
@@ -163,7 +195,7 @@ async function submit() {
             placeholder="4-digit"
           />
         </label>
-        <label class="field">
+        <label v-if="session.customerForm?.additional_number" class="field">
           <span class="tiny">Additional no.</span>
           <input type="text" v-model="additionalNumber" inputmode="numeric" maxlength="4" />
         </label>
@@ -178,7 +210,7 @@ async function submit() {
       </label>
       <div class="two-col">
         <label class="field">
-          <span class="tiny">District</span>
+          <span class="tiny">District {{ isB2B ? "*" : "" }}</span>
           <input type="text" v-model="district" />
         </label>
         <label class="field">
@@ -188,7 +220,7 @@ async function submit() {
       </div>
       <div class="two-col">
         <label class="field">
-          <span class="tiny">Pincode</span>
+          <span class="tiny">Postal code {{ isB2B ? "*" : "" }}</span>
           <input type="text" v-model="pincode" inputmode="numeric" maxlength="5" />
         </label>
         <label class="field">
@@ -204,7 +236,7 @@ async function submit() {
       </label>
     </section>
 
-    <button class="submit" type="button" :disabled="!canSubmit || busy" @click="submit">
+    <button class="submit" type="button" :disabled="busy" @click="submit">
       <Icon name="check" :size="18" />
       {{ busy ? "Saving…" : "Save customer" }}
     </button>

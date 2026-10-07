@@ -16,7 +16,7 @@
  */
 import { computed, onMounted, reactive, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
-import { listMine as listCustomers } from "@/api/customer";
+import { listMine as listCustomers, customerLabel, type CustomerRow } from "@/api/customer";
 import {
   listMine as listItems,
   detail as itemDetail,
@@ -52,7 +52,7 @@ interface Line extends InvoiceItem {
   amount: number;          // computed
 }
 
-const customers = ref<Array<{ name: string; customer_name: string }>>([]);
+const customers = ref<CustomerRow[]>([]);
 const items = ref<ItemRow[]>([]);
 
 const customer = ref(String(route.query.customer ?? ""));
@@ -135,7 +135,15 @@ const emptyCatalogHint = computed(() => {
  * vanish from the list mid-edit.
  */
 const customerOptions = computed(() =>
-  customers.value.map((c) => ({ value: c.name, label: c.customer_name, sub: c.name })),
+  // Title (e.g. English name) with the other name / VAT underneath — not the
+  // customer ID, which on sites naming customers by name just repeats it.
+  customers.value.map((c) => ({
+    value: c.name,
+    label: customerLabel(c),
+    sub: [c.secondary_name, c.vat_number ? `VAT ${c.vat_number}` : ""]
+      .filter(Boolean)
+      .join(" · ") || (c.name !== customerLabel(c) ? c.name : ""),
+  })),
 );
 
 async function onCustomerSearch(termText: string) {
@@ -546,7 +554,7 @@ onMounted(loadAll);
         @search="onCustomerSearch"
       />
       <div v-if="selectedCustomer" class="selected-hint">
-        <Icon name="customer" :size="14" /> {{ selectedCustomer.customer_name }}
+        <Icon name="customer" :size="14" /> {{ customerLabel(selectedCustomer) }}
       </div>
       <div v-if="warehouse" class="muted small">
         <Icon name="truck" :size="14" /> {{ warehouse }}

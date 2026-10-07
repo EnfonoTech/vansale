@@ -99,6 +99,7 @@ export const useSessionStore = defineStore("session", {
     /** Configured print formats (null → the app's own defaults). */
     printFormats: (s) => s.defaults?.print_formats ?? null,
     printBehaviour: (s) => s.defaults?.print ?? null,
+    customerForm: (s) => s.defaults?.customer_form ?? null,
   },
   actions: {
     setLogin(payload: { user: string; fullName: string; email: string; language?: string }) {

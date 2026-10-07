@@ -36,6 +36,12 @@ export interface ConfigDefaults {
   print_formats?: { invoice: string; receipt: string };
   /** Print button: direct or preview; print after submit; copies. */
   print?: { direct: boolean; after_submit: boolean; copies: number };
+  /** Optional customer fields the site has (customer create form). */
+  customer_form?: {
+    name_2: { field: string; label: string } | null;
+    cr_number: boolean;
+    additional_number: boolean;
+  };
 }
 
 export function configDefaults() {
