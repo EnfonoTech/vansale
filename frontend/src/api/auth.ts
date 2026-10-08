@@ -22,6 +22,9 @@ export interface PinUnlockResult {
 }
 
 export async function login(usr: string, pwd: string): Promise<LoginResult> {
+  // Always the current session's token: the one cached when the screen
+  // loaded may belong to a session that has since changed.
+  resetCsrfToken();
   const res = await apiCall<LoginResult>("POST", "vansale.api.auth.login", { usr, pwd });
   // Logging in replaces the session, and the CSRF token is per session.
   resetCsrfToken();

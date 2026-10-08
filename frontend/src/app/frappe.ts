@@ -205,6 +205,15 @@ export async function apiCall<T>(
   path: string,
   body?: unknown,
 ): Promise<T> {
+  return callOnce<T>(method, path, body, false);
+}
+
+async function callOnce<T>(
+  method: "GET" | "POST" | "PUT" | "DELETE",
+  path: string,
+  body: unknown,
+  csrfRetried: boolean,
+): Promise<T> {
   const hasDotted = /^[a-z_][\w.]+$/i.test(path.split("?")[0]);
   const url = apiUrl(path, hasDotted);
   const headers: Record<string, string> = {
@@ -240,6 +249,17 @@ export async function apiCall<T>(
     data = await res.json();
   } catch {
     /* empty body is fine for 204 etc. */
+  }
+
+  // The cached CSRF token is stale: the browser's Frappe session changed
+  // outside the app (e.g. a desk login in another tab). Fetch the current
+  // session's token and retry once.
+  if (
+    res.status === 400 && !csrfRetried && !isNative() &&
+    (data as { exc_type?: string } | null)?.exc_type === "CSRFTokenError"
+  ) {
+    resetCsrfToken();
+    return callOnce<T>(method, path, body, true);
   }
 
   if (!res.ok) {
