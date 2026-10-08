@@ -188,6 +188,18 @@ VANSALE_CUSTOM_FIELDS: dict[str, list[dict]] = {
             "no_copy": 1,
             "module": "Vansale",
         },
+        {
+            # Split cash payment (several modes) kept on the invoice until submit
+            # creates one Payment Entry per row: [{"mode_of_payment", "amount", "reference_no"}].
+            "fieldname": "custom_vansale_payments",
+            "label": "Van Cash Payments",
+            "fieldtype": "Small Text",
+            "insert_after": "custom_vansale_payment_mode",
+            "read_only": 1,
+            "hidden": 1,
+            "no_copy": 1,
+            "module": "Vansale",
+        },
     ],
     "Customer": [
         {

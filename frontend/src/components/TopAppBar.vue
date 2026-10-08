@@ -25,6 +25,7 @@ const TITLES: Record<string, string> = {
   "invoice-detail": "Invoice",
   "invoice-return": "Sales return",
   returns: "Returns",
+  "return-new": "Bulk return",
   "payment-new": "Collect payment",
   "route-today": "Today's route",
   "van-stock": "Van stock",
@@ -72,6 +73,7 @@ const PARENTS: Record<string, (r: RouteLike) => RouteTarget> = {
     params: { name: String(r.params?.name ?? "") },
   }),
   "payment-new": () => ({ name: "dashboard" }),
+  "return-new": () => ({ name: "returns" }),
   "sync-errors": () => ({ name: "more" }),
   "print-view": (r) => {
     // Print is launched from invoice detail or statement.
@@ -107,6 +109,7 @@ const showBack = computed(() => {
     "invoice-new",
     "invoice-detail",
     "invoice-return",
+    "return-new",
     "payment-new",
     "sync-errors",
     "print-view",

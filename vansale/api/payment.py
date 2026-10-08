@@ -11,6 +11,7 @@ from typing import Optional
 
 import frappe
 from frappe import _
+from frappe.utils import flt
 
 from vansale.api.access import check_read, readable_doc
 from vansale.api.me import is_office_user
@@ -107,6 +108,40 @@ def build_payment_entry(
     doc.posting_date = posting_date
     doc.remarks = remarks
     return doc
+
+
+def pending_by_invoice(invoices: list[str]) -> dict[str, float]:
+    """Amount allocated to each invoice by draft Payment Entries — collected
+    in the field but not yet submitted by the office. ERPNext's
+    outstanding_amount ignores drafts, so without this the app offered the
+    same money for collection again."""
+    if not invoices:
+        return {}
+    return {
+        r[0]: flt(r[1])
+        for r in frappe.db.sql(
+            """
+            SELECT r.reference_name, SUM(r.allocated_amount)
+            FROM `tabPayment Entry Reference` r
+            JOIN `tabPayment Entry` p ON p.name = r.parent
+            WHERE p.docstatus = 0 AND r.reference_doctype = 'Sales Invoice'
+              AND r.reference_name IN %(names)s
+            GROUP BY r.reference_name
+            """,
+            {"names": tuple(invoices)},
+        )
+    }
+
+
+def pending_for_customer(customer: str) -> float:
+    """Total of the customer's draft (not yet submitted) Payment Entries."""
+    return flt(
+        frappe.db.sql(
+            """SELECT COALESCE(SUM(paid_amount), 0) FROM `tabPayment Entry`
+               WHERE docstatus = 0 AND party_type = 'Customer' AND party = %s""",
+            customer,
+        )[0][0]
+    )
 
 
 def van_allowed_modes() -> Optional[set[str]]:
@@ -285,6 +320,10 @@ def save(
             order_by="posting_date asc, creation asc",
         )
 
+    # Allocate only what isn't already covered by draft Payment Entries.
+    pending = pending_by_invoice([inv["name"] for inv in target_invoices])
+    for inv in target_invoices:
+        inv["outstanding_amount"] = max(flt(inv["outstanding_amount"]) - pending.get(inv["name"], 0.0), 0.0)
     allocate(doc, target_invoices, amount)
     doc.insert(ignore_permissions=False)
     # "Payment Entry status" applies to every payment the app makes: some
@@ -387,10 +426,14 @@ def outstanding(customer: str) -> list[dict]:
         order_by="posting_date asc",
         ignore_permissions=True,
     )
+    pending = pending_by_invoice([r["name"] for r in rows])
     for r in rows:
         r["posting_date"] = str(r["posting_date"]) if r.get("posting_date") else None
         r["due_date"] = str(r["due_date"]) if r.get("due_date") else None
-    return rows
+        # Collected but waiting for the office to submit the Payment Entry.
+        r["pending_amount"] = pending.get(r["name"], 0.0)
+        r["outstanding_amount"] = max(flt(r["outstanding_amount"]) - r["pending_amount"], 0.0)
+    return [r for r in rows if r["outstanding_amount"] > 0 or r["pending_amount"] > 0]
 
 
 @frappe.whitelist(methods=["GET"])

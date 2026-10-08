@@ -177,6 +177,9 @@ async function onEndVisit() {
         <span class="muted xsmall">Outstanding</span>
         <strong><SarSymbol :code="session.currency" />{{ fmt(customer.outstanding) }}</strong>
       </section>
+      <p v-if="(customer.pending ?? 0) > 0" class="muted xsmall pending-note">
+        <SarSymbol :code="session.currency" />{{ fmt(customer.pending ?? 0) }} collected, awaiting office approval
+      </p>
 
       <section class="actions-row">
         <button class="action-btn primary" @click="newInvoice">

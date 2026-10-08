@@ -60,8 +60,19 @@ def today_collection() -> dict:
         as_dict=True,
     )
     total = sum(float(r.get("amt") or 0) for r in rows)
+    # Collected today but still drafts, waiting for the office to submit.
+    pending = frappe.db.sql(
+        """
+        SELECT COALESCE(SUM(paid_amount), 0)
+        FROM `tabPayment Entry`
+        WHERE docstatus = 0 AND payment_type = 'Receive'
+          AND posting_date = %s AND owner = %s
+        """,
+        (today, user),
+    )[0][0]
     return {
         "amount": total,
+        "pending": float(pending or 0),
         "by_mode": [{"mode": r["mode_of_payment"], "amount": float(r["amt"] or 0), "count": int(r["n"] or 0)} for r in rows],
     }
 

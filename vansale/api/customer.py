@@ -375,6 +375,9 @@ def detail(name: str) -> dict:
         )[0][0]
         or 0
     )
+    from vansale.api.payment import pending_for_customer
+
+    pending = pending_for_customer(name)
     display_name, secondary_name = _display_names(doc)
     vat = _vat_field()
     return {
@@ -391,7 +394,9 @@ def detail(name: str) -> dict:
         "tax_id": doc.tax_id,
         "default_currency": doc.default_currency,
         "addresses": addresses,
-        "outstanding": float(outstanding or 0),
+        # Collected but awaiting office submit (draft Payment Entries).
+        "outstanding": max(float(outstanding or 0) - pending, 0.0),
+        "pending": pending,
         "modified": naive_site_to_utc_iso(doc.modified),
     }
 
@@ -673,6 +678,11 @@ def _build_statement_html(name: str, from_date: str | None, to_date: str | None)
     currency = frappe.db.get_value("Company", company, "default_currency") or cust.default_currency or ""
     esc = frappe.utils.escape_html
 
+    # Draft Payment Entries are not in the ledger yet; show them separately.
+    from vansale.api.payment import pending_for_customer
+
+    pending = pending_for_customer(name)
+
     def fmt(x: float) -> str:
         return f"{x:,.2f}"
 
@@ -725,6 +735,8 @@ def _build_statement_html(name: str, from_date: str | None, to_date: str | None)
     <tfoot>
       <tr><td colspan="5" style="text-align:right">Closing balance</td>
           <td style="text-align:right">{fmt(closing)}</td></tr>
+      {f"""<tr class="opening"><td colspan="5" style="text-align:right">Payments collected, awaiting office approval</td>
+          <td style="text-align:right">{fmt(-pending)}</td></tr>""" if pending else ""}
     </tfoot>
   </table>
 </body></html>"""
@@ -804,7 +816,11 @@ def summary(customer: str) -> dict:
     )
     if last_invoice:
         last_invoice["posting_date"] = naive_site_to_utc_iso(last_invoice.get("posting_date"))
+    from vansale.api.payment import pending_for_customer
+
+    pending = pending_for_customer(customer)
     return {
-        "outstanding": float(outstanding or 0),
+        "outstanding": max(float(outstanding or 0) - pending, 0.0),
+        "pending": pending,
         "last_invoice": last_invoice,
     }

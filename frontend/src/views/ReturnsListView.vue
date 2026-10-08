@@ -74,9 +74,9 @@ async function openPicker() {
   pickerLoading.value = true;
   pickerSearch.value = "";
   try {
-    // Fetch last 50 invoices — filter client-side to submitted & non-return
-    // so the picker only shows valid return_against targets.
-    const all = await listMine(50);
+    // Submitted sales with something left to return (fully returned ones are
+    // left out server-side).
+    const all = await listMine(50, undefined, true);
     pickerRows.value = all.filter((r) =>
       Number(r.docstatus) === 1 && Number(r.is_return) !== 1
       && String(r.status || "").toLowerCase() !== "cancelled",
@@ -103,11 +103,15 @@ function pickInvoice(name: string) {
     <header class="head-row">
       <div>
         <h2 class="title">Sales returns</h2>
-        <span class="muted xsmall">Credit notes issued against submitted invoices</span>
+        <span class="muted xsmall">Credit notes</span>
       </div>
       <div class="head-actions">
         <button class="primary new-ret-btn" @click="openPicker">
           <Icon name="plus" :size="16" /> New return
+        </button>
+        <button v-if="session.returnWithoutInvoice" class="ghost new-ret-btn"
+                @click="router.push({ name: 'return-new' })">
+          <Icon name="plus" :size="16" /> Bulk return
         </button>
         <button class="ghost icon-only" @click="load" :disabled="loading" title="Refresh">
           <Icon name="refresh" :size="18" />
@@ -211,6 +215,8 @@ function pickInvoice(name: string) {
   justify-content: space-between;
   align-items: flex-start;
   gap: 0.75rem;
+  flex-wrap: wrap;
+  row-gap: 0.5rem;
 }
 .title { margin: 0; font-size: var(--text-lg); letter-spacing: -0.01em; }
 
@@ -262,6 +268,7 @@ function pickInvoice(name: string) {
   display: inline-flex; align-items: center; gap: 0.3rem;
   padding: 0.5rem 0.85rem; min-height: 2.4rem;
   font-size: var(--text-sm); font-weight: 600;
+  white-space: nowrap;
 }
 
 .modal-overlay {

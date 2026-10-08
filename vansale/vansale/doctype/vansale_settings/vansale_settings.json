@@ -11,10 +11,12 @@
   "section_break_invoicing",
   "allow_uom_change",
   "use_customer_price",
+  "allow_return_without_invoice",
   "section_break_cash_sale",
   "cash_sale_posting",
   "column_break_cash_sale",
   "cash_payment_entry_status",
+  "allow_split_payment",
   "section_break_print",
   "invoice_print_format",
   "column_break_print",
@@ -74,6 +76,12 @@
    "label": "Use customer-specific price"
   },
   {
+   "default": "0",
+   "fieldname": "allow_return_without_invoice",
+   "fieldtype": "Check",
+   "label": "Allow return without invoice"
+  },
+  {
    "fieldname": "section_break_cash_sale",
    "fieldtype": "Section Break",
    "label": "Payments"
@@ -95,6 +103,12 @@
    "fieldtype": "Select",
    "label": "Payment Entry status",
    "options": "Submit\nDraft"
+  },
+  {
+   "default": "0",
+   "fieldname": "allow_split_payment",
+   "fieldtype": "Check",
+   "label": "Allow split payment (several modes)"
   },
   {
    "fieldname": "section_break_print",
@@ -178,7 +192,7 @@
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-10-07 19:11:38.646980",
+ "modified": "2026-10-07 22:13:40.664098",
  "modified_by": "Administrator",
  "module": "Vansale",
  "name": "Vansale Settings",

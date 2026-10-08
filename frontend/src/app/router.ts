@@ -117,6 +117,12 @@ const routes: RouteRecordRaw[] = [
     props: true,
   },
   {
+    path: "/return/new",
+    name: "return-new",
+    component: () => import("@/views/ReturnFormView.vue"),
+    meta: { requiresAuth: true, requiresPin: true },
+  },
+  {
     path: "/returns",
     name: "returns",
     component: () => import("@/views/ReturnsListView.vue"),

@@ -145,6 +145,10 @@ function onActivityClick(row: ActivityRow) {
           <Icon name="payment" :size="14" />
           <SarSymbol :code="currency" />{{ fmt(collection?.amount) }} collected
         </span>
+        <span v-if="(collection?.pending ?? 0) > 0" class="pill" data-tone="warning">
+          <Icon name="clock" :size="14" />
+          <SarSymbol :code="currency" />{{ fmt(collection?.pending) }} awaiting office approval
+        </span>
         <span v-if="(sales?.returned ?? 0) > 0" class="pill" data-tone="warning">
           <Icon name="refresh" :size="14" />
           <SarSymbol :code="currency" />{{ fmt(sales?.returned) }} returned

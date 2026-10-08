@@ -28,6 +28,8 @@
   "section_break_payments",
   "cash_sale_posting_mode",
   "cash_payment_entry_status_mode",
+  "split_payment_mode",
+  "return_without_invoice_mode",
   "column_break_payments",
   "allowed_modes_of_payment",
   "section_break_printing",
@@ -179,6 +181,20 @@
    "options": "Follow Global\nSubmit\nDraft"
   },
   {
+   "default": "Follow Global",
+   "fieldname": "split_payment_mode",
+   "fieldtype": "Select",
+   "label": "Split payment",
+   "options": "Follow Global\nEnabled\nDisabled"
+  },
+  {
+   "default": "Follow Global",
+   "fieldname": "return_without_invoice_mode",
+   "fieldtype": "Select",
+   "label": "Return without invoice",
+   "options": "Follow Global\nEnabled\nDisabled"
+  },
+  {
    "fieldname": "column_break_payments",
    "fieldtype": "Column Break"
   },
@@ -294,7 +310,7 @@
  ],
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-10-07 20:17:21.681691",
+ "modified": "2026-10-07 22:13:40.664098",
  "modified_by": "Administrator",
  "module": "Vansale",
  "name": "Vansale Configuration",

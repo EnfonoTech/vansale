@@ -15,7 +15,7 @@ from frappe import _
 from frappe.utils import cint, flt, getdate, nowdate
 
 from vansale.api.datetime_util import naive_site_to_utc_iso, parse_client_ts
-from vansale.api.sales_return import append_return_rows, resolve_return_reason, returned_qty_by_row
+from vansale.api.sales_return import resolve_return_reason, returned_qty_by_row
 from vansale.api.access import check_read, readable_doc
 from vansale.api.outbox import claim
 from vansale.api.payment import check_mode_allowed
@@ -195,6 +195,7 @@ def save(
     mode_of_payment: Optional[str] = None,    # used when payment_type == "cash"
     discount_amount: Optional[float] = None,  # invoice-level additional discount
     apply_discount_on: Optional[str] = None,  # "Grand Total" | "Net Total"
+    payments: Optional[list[dict[str, Any]]] = None,  # split cash: [{mode_of_payment, amount, reference_no}]
 ) -> dict:
     if not client_id:
         frappe.throw(_("client_id is required"))
@@ -235,11 +236,12 @@ def save(
     # Payment Entry against it on submit.
     pay_type = (payment_type or "").lower()
     pe_mode = pay_type == "cash" and _cash_via_payment_entry()
+    rows = _payment_rows(mode_of_payment, payments) if pay_type == "cash" else []
     if pay_type == "cash" and not pe_mode:
         doc.is_pos = 1
-        # payments row filled after insert so grand_total is known.
+        # payments rows filled after insert so grand_total is known.
     if pe_mode:
-        _set_cash_mode(doc, mode_of_payment or "Cash")
+        _set_cash_mode(doc, rows)
 
     # Tax template — resolved through the customer's Tax Category / Tax Rule
     # so a zero-rated or exempt customer is not charged standard VAT. Falls
@@ -268,24 +270,15 @@ def save(
     # get it too: it is the only place the chosen mode is stored, so editing
     # or submitting the draft later would otherwise fall back to "Cash".
     if pay_type == "cash" and not pe_mode:
-        mop = mode_of_payment or "Cash"
-        check_mode_allowed(mop)
-        account = _default_mop_account(mop, company)
-        if not account:
-            frappe.throw(_("No default account configured for Mode of Payment {0}").format(mop))
-        # clear any auto-added payments rows from Sales Invoice defaults
-        doc.set("payments", [])
-        doc.append("payments", {
-            "mode_of_payment": mop,
-            "account": account,
-            "amount": float(doc.grand_total or 0),
-        })
+        _fill_pos_payments(doc, rows)
         doc.save()
+    elif pe_mode:
+        _check_rows_total(doc, rows)
 
-    payment_entry = None
+    payment_entries: list[str] = []
     if submit:
         doc.submit()
-        payment_entry = _cash_payment_entry(doc)
+        payment_entries = _cash_payment_entry(doc)
 
     _record_outbox(client_id, doc.name, posting_ts, {
         "customer": customer,
@@ -304,7 +297,8 @@ def save(
         "docstatus": int(doc.docstatus or 0),
         "modified": naive_site_to_utc_iso(doc.modified),
         "idempotent_replay": False,
-        "payment_entry": payment_entry,
+        "payment_entry": payment_entries[0] if payment_entries else None,
+        "payment_entries": payment_entries,
     }
 
 
@@ -312,53 +306,127 @@ def _cash_via_payment_entry() -> bool:
     return cash_sale_settings()["posting"] == "Payment Entry"
 
 
-def _set_cash_mode(doc, mode_of_payment: str) -> None:
-    """Payment Entry posting: no POS payments table, so keep the chosen mode on
-    the invoice until submit creates the Payment Entry."""
-    from vansale.api.payment import _resolve_accounts, check_mode_allowed
+def _payment_rows(mode_of_payment: Optional[str], payments: Optional[list[dict[str, Any]]]) -> list[dict]:
+    """Cash payment rows: the split list when given, else one row for the whole
+    amount (amount None = whatever is left to pay). More than one mode needs
+    the "Split payment" setting."""
+    from vansale.api.me import split_payment_allowed
+    from vansale.api.payment import check_mode_allowed
 
-    check_mode_allowed(mode_of_payment)
-    _resolve_accounts(doc.company, mode_of_payment)  # fail now, not at submit
+    if not payments:
+        rows = [{"mode_of_payment": mode_of_payment or "Cash", "amount": None, "reference_no": None}]
+    else:
+        rows = []
+        for p in payments:
+            mode = (p.get("mode_of_payment") or "").strip()
+            if not mode:
+                continue
+            amount = flt(p.get("amount")) if p.get("amount") not in (None, "") else None
+            if amount is not None and amount < 0:
+                frappe.throw(_("Payment amount cannot be negative"))
+            if amount == 0:
+                continue
+            rows.append({"mode_of_payment": mode, "amount": amount, "reference_no": p.get("reference_no")})
+        if len(rows) > 1 and not split_payment_allowed():
+            frappe.throw(_("Paying with several modes is not enabled for your van"))
+        if not rows:
+            frappe.throw(_("Enter at least one payment amount, or choose Credit"))
+    for row in rows:
+        check_mode_allowed(row["mode_of_payment"])
+    return rows
+
+
+def _invoice_total(doc) -> float:
+    return flt(doc.rounded_total) or flt(doc.grand_total)
+
+
+def _check_rows_total(doc, rows: list[dict]) -> None:
+    paid = sum(flt(r["amount"]) for r in rows if r["amount"] is not None)
+    if paid > _invoice_total(doc) + 0.005:
+        frappe.throw(
+            _("Payments ({0}) are more than the invoice total ({1})").format(paid, _invoice_total(doc))
+        )
+
+
+def _fill_pos_payments(doc, rows: list[dict]) -> None:
+    """POS Invoice posting: one payments row per mode. A row without an amount
+    takes what's left; anything not paid stays outstanding (credit)."""
+    _check_rows_total(doc, rows)
+    total = _invoice_total(doc)
+    given = sum(flt(r["amount"]) for r in rows if r["amount"] is not None)
+    doc.set("payments", [])
+    for row in rows:
+        mop = row["mode_of_payment"]
+        account = _default_mop_account(mop, doc.company)
+        if not account:
+            frappe.throw(_("No default account configured for Mode of Payment {0}").format(mop))
+        amount = row["amount"] if row["amount"] is not None else max(total - given, 0)
+        doc.append("payments", {"mode_of_payment": mop, "account": account, "amount": amount})
+
+
+def _set_cash_mode(doc, rows: list[dict]) -> None:
+    """Payment Entry posting: no POS payments table, so keep the chosen
+    mode(s) on the invoice until submit creates the Payment Entries."""
+    from vansale.api.payment import _resolve_accounts
+
+    for row in rows:
+        _resolve_accounts(doc.company, row["mode_of_payment"])  # fail now, not at submit
     doc.is_pos = 0
     doc.set("payments", [])
     if doc.meta.has_field("custom_vansale_payment_mode"):
-        doc.custom_vansale_payment_mode = mode_of_payment
+        doc.custom_vansale_payment_mode = rows[0]["mode_of_payment"]
+    if doc.meta.has_field("custom_vansale_payments"):
+        split = len(rows) > 1 or rows[0]["amount"] is not None
+        doc.custom_vansale_payments = frappe.as_json(rows) if split else None
 
 
-def _cash_payment_entry(inv) -> Optional[str]:
-    """After submit: Payment Entry for a cash sale in "Payment Entry" posting.
+def _stored_rows(inv) -> list[dict]:
+    if inv.get("custom_vansale_payments"):
+        return frappe.parse_json(inv.custom_vansale_payments)
+    if inv.get("custom_vansale_payment_mode"):
+        return [{"mode_of_payment": inv.custom_vansale_payment_mode, "amount": None, "reference_no": None}]
+    return []
 
-    Covers the invoice's outstanding amount with the mode stored on it, and is
-    submitted or left as a draft per the "Payment Entry status" setting. Runs
-    in the invoice's transaction, so a failure rolls the sale back too.
+
+def _cash_payment_entry(inv) -> list[str]:
+    """After submit: Payment Entries for a cash sale in "Payment Entry" posting.
+
+    One per payment row (amount None = what's left), never more than the
+    outstanding; submitted or left as drafts per the "Payment Entry status"
+    setting. Runs in the invoice's transaction, so a failure rolls the sale
+    back too.
     """
-    mode = inv.get("custom_vansale_payment_mode")
-    amount = flt(inv.outstanding_amount)
-    if not mode or amount <= 0:
-        return None
     from vansale.api.payment import build_payment_entry, submit_if_configured
 
-    pe = build_payment_entry(
-        inv.company,
-        inv.customer,
-        amount,
-        mode,
-        inv.posting_date,
-        # Bank-type modes need a reference; the invoice is the natural one.
-        reference_no=inv.name,
-        reference_date=inv.posting_date,
-        remarks=_("Cash sale {0}").format(inv.name),
-    )
-    pe.append("references", {
-        "reference_doctype": "Sales Invoice",
-        "reference_name": inv.name,
-        "total_amount": flt(inv.grand_total),
-        "outstanding_amount": amount,
-        "allocated_amount": amount,
-    })
-    pe.insert()
-    submit_if_configured(pe)
-    return pe.name
+    names: list[str] = []
+    remaining = flt(inv.outstanding_amount)
+    for row in _stored_rows(inv):
+        amount = min(flt(row["amount"]) if row.get("amount") is not None else remaining, remaining)
+        if amount <= 0:
+            continue
+        pe = build_payment_entry(
+            inv.company,
+            inv.customer,
+            amount,
+            row["mode_of_payment"],
+            inv.posting_date,
+            # Bank-type modes need a reference; default to the invoice.
+            reference_no=row.get("reference_no") or inv.name,
+            reference_date=inv.posting_date,
+            remarks=_("Cash sale {0}").format(inv.name),
+        )
+        pe.append("references", {
+            "reference_doctype": "Sales Invoice",
+            "reference_name": inv.name,
+            "total_amount": flt(inv.grand_total),
+            "outstanding_amount": remaining,
+            "allocated_amount": amount,
+        })
+        pe.insert()
+        submit_if_configured(pe)
+        names.append(pe.name)
+        remaining -= amount
+    return names
 
 
 def _append_items(doc, items: list[dict[str, Any]], set_warehouse: Optional[str]) -> None:
@@ -434,6 +502,7 @@ def update_draft(
     payment_type: Optional[str] = None,
     mode_of_payment: Optional[str] = None,
     warehouse: Optional[str] = None,
+    payments: Optional[list[dict[str, Any]]] = None,
 ) -> dict:
     """In-place update a draft Sales Invoice.
 
@@ -471,15 +540,18 @@ def update_draft(
     # after save, same as `save()`).
     pay_type = (payment_type or "").lower()
     pe_mode = pay_type == "cash" and _cash_via_payment_entry()
+    rows = _payment_rows(mode_of_payment, payments) if pay_type == "cash" else []
     if pe_mode:
-        _set_cash_mode(doc, mode_of_payment or "Cash")
+        _set_cash_mode(doc, rows)
     elif pay_type == "cash":
         doc.is_pos = 1
     elif pay_type == "credit":
         doc.is_pos = 0
         doc.set("payments", [])
-    if pay_type != "cash" and doc.meta.has_field("custom_vansale_payment_mode"):
-        doc.custom_vansale_payment_mode = None
+    if pay_type != "cash":
+        for field in ("custom_vansale_payment_mode", "custom_vansale_payments"):
+            if doc.meta.has_field(field):
+                doc.set(field, None)
 
     # Rebuild items table. Clearing + appending keeps the child-row
     # docnames consistent with Frappe's expectations on save().
@@ -501,28 +573,21 @@ def update_draft(
     doc.save(ignore_permissions=False)
 
     if pay_type == "cash" and not pe_mode:
-        mop = mode_of_payment or "Cash"
-        check_mode_allowed(mop)
-        account = _default_mop_account(mop, doc.company)
-        if not account:
-            frappe.throw(_("No default account configured for Mode of Payment {0}").format(mop))
-        doc.set("payments", [])
-        doc.append("payments", {
-            "mode_of_payment": mop,
-            "account": account,
-            "amount": float(doc.grand_total or 0),
-        })
+        _fill_pos_payments(doc, rows)
         doc.flags.ignore_version = True
         doc.save()
+    elif pe_mode:
+        _check_rows_total(doc, rows)
 
-    payment_entry = None
+    payment_entries: list[str] = []
     if submit:
         doc.submit()
-        payment_entry = _cash_payment_entry(doc)
+        payment_entries = _cash_payment_entry(doc)
 
     frappe.db.commit()
     return {
-        "payment_entry": payment_entry,
+        "payment_entry": payment_entries[0] if payment_entries else None,
+        "payment_entries": payment_entries,
         "name": doc.name,
         "grand_total": float(doc.grand_total or 0),
         "outstanding_amount": float(doc.outstanding_amount or 0),
@@ -580,10 +645,11 @@ def submit_draft(name: str, mode_of_payment: Optional[str] = None) -> dict:
         doc.save()
 
     doc.submit()
-    payment_entry = _cash_payment_entry(doc)
+    payment_entries = _cash_payment_entry(doc)
     frappe.db.commit()
     return {
-        "payment_entry": payment_entry,
+        "payment_entry": payment_entries[0] if payment_entries else None,
+        "payment_entries": payment_entries,
         "name": doc.name,
         "grand_total": flt(doc.grand_total),
         "outstanding_amount": flt(doc.outstanding_amount),
@@ -603,6 +669,7 @@ def return_against(
     reason: Optional[str] = None,
     note: Optional[str] = None,
     submit: int = 1,
+    refund: Optional[dict] = None,
 ) -> dict:
     """Create a Sales Return (Credit Note) against an existing submitted invoice.
 
@@ -636,45 +703,19 @@ def return_against(
             "idempotent_replay": True,
         }
 
+    from vansale.api.sales_return import _set_reason, build_return_against, refund_credit_note
+
     original = readable_doc("Sales Invoice", original_name)
-    if original.docstatus != 1:
-        frappe.throw(_("Original invoice must be submitted"))
-    if int(original.is_return or 0):
-        frappe.throw(_("Cannot return against a credit note"))
-
     posting = parse_client_ts(posting_ts) if posting_ts else frappe.utils.now_datetime()
-
-    doc = frappe.new_doc("Sales Invoice")
-    doc.customer = original.customer
-    doc.company = original.company
-    doc.currency = original.currency
-    doc.selling_price_list = original.selling_price_list
-    doc.price_list_currency = original.price_list_currency
-    doc.plc_conversion_rate = original.plc_conversion_rate
-    doc.conversion_rate = original.conversion_rate
-    doc.is_return = 1
-    doc.return_against = original.name
-    doc.update_stock = int(original.update_stock or 0)
-    doc.set_warehouse = original.set_warehouse
-    doc.set_posting_time = 1
-    doc.posting_date = posting.date()
-    doc.posting_time = posting.strftime("%H:%M:%S")
-    extra = (note or "").strip()
-    doc.remarks = f"{reason_text} — {extra}" if extra and extra != reason_text else reason_text
-    if frappe.get_meta("Sales Invoice").has_field("custom_return_reason"):
-        doc.custom_return_reason = reason_option
+    doc = build_return_against(original, items, posting)
+    _set_reason(doc, reason_option, reason_text, note)
     doc.custom_client_id = client_id
 
-    append_return_rows(doc, original, items)
-
-    # Keep sales person tagging on returns for reporting consistency.
-    sp = current_user_sales_person()
-    if sp:
-        doc.append("sales_team", {"sales_person": sp, "allocated_percentage": 100})
-
     doc.insert(ignore_permissions=False)
+    refund_entry = None
     if submit:
         doc.submit()
+        refund_entry = refund_credit_note(doc, refund)
 
     _record_outbox(client_id, doc.name, posting_ts, {
         "return_against": original.name,
@@ -691,6 +732,7 @@ def return_against(
         "modified": naive_site_to_utc_iso(doc.modified),
         "idempotent_replay": False,
         "is_return": 1,
+        "refund_entry": refund_entry,
     }
 
 
@@ -699,6 +741,7 @@ def list_mine(
     limit: int = 50,
     customer: Optional[str] = None,
     is_return: Optional[int] = None,
+    returnable: int = 0,
 ) -> list[dict]:
     """List the current user's Sales Invoices.
 
@@ -713,6 +756,9 @@ def list_mine(
         filters["customer"] = customer
     if is_return is not None:
         filters["is_return"] = int(is_return)
+    if cint(returnable):
+        # Return picker: submitted sales with something left to return.
+        filters.update({"docstatus": 1, "is_return": 0})
     rows = frappe.get_all(
         "Sales Invoice",
         filters=filters,
@@ -731,8 +777,13 @@ def list_mine(
             "modified",
         ],
         order_by="posting_date desc, posting_time desc",
-        limit=int(limit),
+        limit=int(limit) * (2 if cint(returnable) else 1),
     )
+    if cint(returnable):
+        from vansale.api.sales_return import fully_returned
+
+        done = fully_returned([r["name"] for r in rows])
+        rows = [r for r in rows if r["name"] not in done][: int(limit)]
     for r in rows:
         r["modified"] = naive_site_to_utc_iso(r.get("modified"))
     return rows
@@ -770,6 +821,10 @@ def detail(name: str) -> dict:
         "is_return": int(doc.is_return or 0),
         "is_pos": int(doc.is_pos or 0),
         "payment_type": "cash" if (doc.is_pos or doc.get("custom_vansale_payment_mode")) else "credit",
+        "payments": (
+            [{"mode_of_payment": p.mode_of_payment, "amount": flt(p.amount)} for p in doc.payments]
+            if doc.get("payments") else _stored_rows(doc)
+        ),
         "mode_of_payment": (
             doc.payments[0].mode_of_payment if doc.get("payments") else doc.get("custom_vansale_payment_mode")
         ),

@@ -222,6 +222,9 @@ async function submit() {
             <div class="amt">
               <strong><SarSymbol :code="session.currency" />{{ fmt(r.outstanding_amount) }}</strong>
               <span class="muted xsmall">of {{ fmt(r.grand_total) }}</span>
+              <span v-if="Number(r.pending_amount) > 0" class="muted xsmall">
+                {{ fmt(Number(r.pending_amount)) }} awaiting office
+              </span>
             </div>
           </button>
         </li>

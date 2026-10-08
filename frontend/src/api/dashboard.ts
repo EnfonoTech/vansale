@@ -3,6 +3,8 @@ import { apiCall } from "./client";
 export interface TodaySales { amount: number; count: number; returned: number }
 export interface TodayCollection {
   amount: number;
+  /** Collected today but still draft Payment Entries (awaiting office). */
+  pending?: number;
   by_mode: Array<{ mode: string; amount: number; count: number }>;
 }
 export interface MonthSummary { from: string; to: string; sales: number; collections: number }

@@ -58,6 +58,8 @@ def global_flags() -> dict:
         "cash_payment_entry_status": "Submit",
         "invoice_print_format": None,
         "receipt_print_format": None,
+        "allow_split_payment": False,
+        "allow_return_without_invoice": False,
         "direct_print": False,
         "print_after_submit": False,
         "print_copies": 1,
@@ -80,7 +82,7 @@ def global_flags() -> dict:
         ):
             if row.get(key):
                 flags[key] = row[key]
-        for key in ("direct_print", "print_after_submit"):
+        for key in ("direct_print", "print_after_submit", "allow_split_payment", "allow_return_without_invoice"):
             if key in row:
                 flags[key] = bool(int(row.get(key) or 0))
         if row.get("print_copies"):

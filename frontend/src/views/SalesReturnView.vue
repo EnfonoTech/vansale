@@ -8,11 +8,13 @@
  * Sales Invoice with `is_return=1`, negative qty, `return_against=<orig>`.
  * Stock flows back; the customer's receivable drops by the credit amount.
  */
-import { computed, onMounted, reactive, ref } from "vue";
+import { computed, onMounted, reactive, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import {
   detail,
   returnAgainst,
+  returnPreview,
+  type ReturnTotals,
   type InvoiceDetail,
   type InvoiceDetailItem,
 } from "@/api/invoice";
@@ -21,6 +23,7 @@ import { useSessionStore } from "@/stores/session";
 import { useToastStore } from "@/stores/toasts";
 import Icon from "@/components/Icon.vue";
 import SarSymbol from "@/components/SarSymbol.vue";
+import RefundSection, { type RefundState } from "@/components/RefundSection.vue";
 
 interface ReturnRowState {
   include: boolean;
@@ -84,16 +87,53 @@ const selectedCount = computed(() =>
   Object.values(rows).filter((r) => r.include && r.qty > 0).length,
 );
 
-const estTotal = computed(() => {
-  if (!orig.value) return 0;
-  return orig.value.items.reduce((sum, it, i) => {
-    const r = rows[i];
-    if (!r?.include || r.qty <= 0) return sum;
-    // proportional line amount
-    const per = it.qty > 0 ? it.amount / it.qty : 0;
-    return sum + per * r.qty;
-  }, 0);
-});
+// Net / VAT / total as ERPNext will post them — calculated by the server
+// (dry run, nothing saved) whenever the selection changes.
+const totals = ref<ReturnTotals | null>(null);
+const refund = ref<RefundState>({ on: false, mode: "", amount: null, reference: "" });
+// Blank = the full credit; otherwise a partial refund, never more than the credit.
+function refundAmountError(): string | null {
+  const a = refund.value.amount;
+  if (!refund.value.on || !totals.value?.refundable || a == null) return null;
+  if (!(a > 0)) return "Refund amount must be more than 0";
+  if (a > totals.value.grand_total + 0.005) return "Refund amount can't be more than the credit";
+  return null;
+}
+function refundPayload() {
+  if (!refund.value.on || !totals.value?.refundable || !refund.value.mode) return undefined;
+  return {
+    mode_of_payment: refund.value.mode,
+    amount: refund.value.amount == null ? undefined : Number(refund.value.amount),
+    reference_no: refund.value.reference || undefined,
+  };
+}
+
+let previewTimer: number | undefined;
+let previewSeq = 0;
+function selectedLines() {
+  if (!orig.value) return [];
+  return orig.value.items
+    .map((it, i) => ({ it, r: rows[i] }))
+    .filter(({ r }) => r?.include && r.qty > 0)
+    .map(({ it, r }) => ({ sales_invoice_item: it.name, item_code: it.item_code, qty: r.qty }));
+}
+watch(
+  () => JSON.stringify(selectedLines()),
+  () => {
+    window.clearTimeout(previewTimer);
+    previewTimer = window.setTimeout(async () => {
+      const seq = ++previewSeq;
+      const items = selectedLines();
+      if (!orig.value || !items.length) { totals.value = null; return; }
+      try {
+        const t = await returnPreview({ original_invoice: orig.value.name, items });
+        if (seq === previewSeq) totals.value = t;
+      } catch {
+        if (seq === previewSeq) totals.value = null;
+      }
+    }, 350);
+  },
+)
 
 function toggleAll(value: boolean) {
   // Fully returned lines have nothing left to select.
@@ -124,6 +164,8 @@ async function submit() {
     toasts.warn("Choose a return reason");
     return;
   }
+  const refundErr = refundAmountError();
+  if (refundErr) { toasts.warn(refundErr); return; }
   busy.value = true;
   try {
     const res = await returnAgainst({
@@ -140,6 +182,7 @@ async function submit() {
       reason: reason.value,
       note: remarks.value || undefined,
       submit: 1,
+      refund: refundPayload(),
     });
     toasts.success(`Credit Note ${res.name} · ${session.currency} ${Math.abs(res.grand_total).toFixed(2)}`);
     if (session.printBehaviour?.after_submit) {
@@ -229,7 +272,7 @@ async function submit() {
       </section>
 
       <label class="field">
-        <span class="label">Notes (optional)</span>
+        <span class="label">Reason *</span>
         <div class="reasons">
           <button
             v-for="r in RETURN_REASONS"
@@ -252,12 +295,25 @@ async function submit() {
           <span>Lines selected</span>
           <strong>{{ selectedCount }}</strong>
         </div>
-        <div class="tot-row grand">
-          <span>Estimated credit (net)</span>
-          <strong><SarSymbol :code="session.currency" />{{ fmt(estTotal) }}</strong>
-        </div>
-        <p class="muted xsmall">Final VAT breakup computed on save.</p>
+        <template v-if="totals">
+          <div class="tot-row">
+            <span>Net</span>
+            <span><SarSymbol :code="session.currency" />{{ fmt(totals.net_total) }}</span>
+          </div>
+          <div class="tot-row">
+            <span>VAT</span>
+            <span><SarSymbol :code="session.currency" />{{ fmt(totals.tax) }}</span>
+          </div>
+          <div class="tot-row grand">
+            <span>Credit total</span>
+            <strong><SarSymbol :code="session.currency" />{{ fmt(totals.grand_total) }}</strong>
+          </div>
+        </template>
+        <p v-else class="muted xsmall">Calculating…</p>
       </section>
+
+      <RefundSection v-model="refund" :totals="totals" :currency="session.currency"
+                     :precision="session.currencyPrecision" />
 
       <button class="submit danger" :disabled="busy || selectedCount === 0 || !reason" @click="submit">
         <Icon name="receipt" :size="18" />

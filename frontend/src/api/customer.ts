@@ -46,6 +46,8 @@ export interface CustomerAddress {
 
 export interface CustomerDetail extends CustomerRow {
   customer_type?: string;
+  /** Collected but awaiting office submit (draft Payment Entries). */
+  pending?: number;
   addresses: CustomerAddress[];
   outstanding: number;
 }

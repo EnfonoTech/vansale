@@ -100,6 +100,8 @@ export const useSessionStore = defineStore("session", {
     printFormats: (s) => s.defaults?.print_formats ?? null,
     printBehaviour: (s) => s.defaults?.print ?? null,
     customerForm: (s) => s.defaults?.customer_form ?? null,
+    splitPayment: (s) => Boolean(s.defaults?.split_payment),
+    returnWithoutInvoice: (s) => Boolean(s.defaults?.return_without_invoice),
   },
   actions: {
     setLogin(payload: { user: string; fullName: string; email: string; language?: string }) {

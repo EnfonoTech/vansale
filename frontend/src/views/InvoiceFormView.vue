@@ -65,6 +65,34 @@ const paymentType = ref<"cash" | "credit">("cash");
 const modeOfPayment = ref<string>("Cash");
 // Modes with an account for this company (server-filtered), not a fixed list.
 const mops = ref<ModeOfPayment[]>([]);
+
+/**
+ * Split cash payment ("Split payment" setting): several modes on one sale,
+ * e.g. Cash 60 + Card 40. A row left blank takes what's left; anything not
+ * covered stays on credit.
+ */
+interface PayRow { mode: string; amount: number | null; reference: string }
+const payRows = ref<PayRow[]>([]);
+const useSplit = computed(() => session.splitPayment && paymentType.value === "cash");
+const needsReference = (mode: string) => Boolean(mops.value.find((m) => m.name === mode)?.needs_reference);
+
+function addPayRow() {
+  const used = new Set(payRows.value.map((r) => r.mode));
+  const next = mops.value.find((m) => !used.has(m.name))?.name ?? modeOfPayment.value;
+  payRows.value.push({ mode: next, amount: null, reference: "" });
+}
+function removePayRow(i: number) {
+  payRows.value.splice(i, 1);
+}
+// As in the desk payment popup: tapping an empty amount fills what's left
+// (total − the other rows).
+function fillRest(i: number) {
+  const row = payRows.value[i];
+  if (row.amount != null && (row.amount as unknown) !== "" && Number(row.amount) !== 0) return;
+  const others = payRows.value.reduce((s, r, j) => s + (j !== i ? Number(r.amount) || 0 : 0), 0);
+  row.amount = round(Math.max(grandTotal.value - others, 0));
+}
+
 const discountAmount = ref<number | null>(null);
 
 const busy = ref(false);
@@ -170,6 +198,28 @@ const totals = computed(() =>
 );
 const taxTotal = computed(() => totals.value.tax);
 const grandTotal = computed(() => totals.value.grand);
+
+// Split payment summary: entered amounts, plus one blank row taking the rest.
+const splitPaid = computed(() => {
+  const given = payRows.value.reduce((s, r) => s + (r.amount != null ? Number(r.amount) || 0 : 0), 0);
+  const blank = payRows.value.some((r) => r.amount == null || (r.amount as unknown) === "");
+  return round(blank ? Math.max(grandTotal.value, given) : given);
+});
+const splitCredit = computed(() => round(grandTotal.value - splitPaid.value));
+
+// Single mode (split off): amount next to the mode, the full total by default
+// (follows the total until the driver edits it); less = rest on credit.
+const singleAmount = ref<number | null>(null);
+const singleAmountModel = computed<number | string>({
+  get: () => (singleAmount.value == null ? round(grandTotal.value) : singleAmount.value),
+  set: (v) => {
+    const n = Number(v);
+    singleAmount.value = (v as unknown) === "" || !Number.isFinite(n) ? null : n;
+  },
+});
+const singleCredit = computed(() =>
+  singleAmount.value == null ? 0 : round(Math.max(grandTotal.value - singleAmount.value, 0)),
+);
 const netOfTax = computed(() => totals.value.netOfTax);
 
 /**
@@ -245,6 +295,7 @@ async function loadModesOfPayment() {
   if (mops.value.length && !mops.value.some((m) => m.name === modeOfPayment.value)) {
     modeOfPayment.value = (mops.value.find((m) => m.type === "Cash") ?? mops.value[0]).name;
   }
+  if (!payRows.value.length) payRows.value = [{ mode: modeOfPayment.value, amount: null, reference: "" }];
 }
 
 async function loadAll() {
@@ -275,6 +326,18 @@ async function prefillFromDraft(name: string) {
     // saving with that default turned an unpaid credit draft into a paid one.
     paymentType.value = doc.payment_type ?? (doc.is_pos ? "cash" : "credit");
     if (doc.mode_of_payment) modeOfPayment.value = doc.mode_of_payment;
+    // A single partial payment on a draft: show its amount.
+    if (doc.payments?.length === 1 && doc.payments[0].amount != null
+        && Math.abs(Number(doc.payments[0].amount) - Number(doc.grand_total)) > 0.005) {
+      singleAmount.value = Number(doc.payments[0].amount);
+    }
+    if (doc.payments?.length) {
+      payRows.value = doc.payments.map((p) => ({
+        mode: p.mode_of_payment,
+        amount: p.amount ?? null,
+        reference: p.reference_no ?? "",
+      }));
+    }
     // Rebuild line rows. We skip UOM re-fetching since the doc already has
     // rate/price_list_rate frozen; operator can still change qty/rate inline.
     lines.value = doc.items.map<Line>((it) => ({
@@ -395,6 +458,13 @@ async function doSave(submit: 0 | 1) {
   if (lines.value.length === 0) { toasts.warn("Add at least one item"); return; }
   const zeroQty = lines.value.find((l) => !(Number(l.qty) > 0));
   if (zeroQty) { toasts.warn(`Enter a quantity for ${zeroQty.item_name || zeroQty.item_code}`); return; }
+  if (useSplit.value) {
+    if (!payRows.value.length) { toasts.warn("Add a payment, or choose Credit"); return; }
+    if (splitCredit.value < -0.005) { toasts.warn("Payments are more than the invoice total"); return; }
+  } else if (paymentType.value === "cash" && singleAmount.value != null) {
+    if (singleAmount.value <= 0) { toasts.warn("Enter the amount paid, or choose Credit"); return; }
+    if (singleAmount.value > grandTotal.value + 0.005) { toasts.warn("Amount is more than the invoice total"); return; }
+  }
   const flag = submit === 1;
   if (flag) busy.value = true; else savingDraft.value = true;
   try {
@@ -476,6 +546,16 @@ async function doSave(submit: 0 | 1) {
       submit,
       payment_type: paymentType.value,
       mode_of_payment: paymentType.value === "cash" ? modeOfPayment.value : undefined,
+      payments: useSplit.value
+        ? payRows.value.map((r) => ({
+            mode_of_payment: r.mode,
+            amount: r.amount == null || (r.amount as unknown) === "" ? null : Number(r.amount),
+            reference_no: r.reference || null,
+          }))
+        : paymentType.value === "cash" && singleAmount.value != null
+          // Partial payment in one mode; untouched = full amount (server pays the exact total).
+          ? [{ mode_of_payment: modeOfPayment.value, amount: singleAmount.value, reference_no: null }]
+          : undefined,
       // Doc-level discount is now pre-distributed into item-level
       // discount_amount, so we don't also send the doc discount field.
       discount_amount: undefined,
@@ -495,6 +575,7 @@ async function doSave(submit: 0 | 1) {
           submit: payload.submit,
           payment_type: payload.payment_type,
           mode_of_payment: payload.mode_of_payment,
+          payments: payload.payments,
           discount_amount: payload.discount_amount,
           apply_discount_on: payload.apply_discount_on,
         })
@@ -585,13 +666,50 @@ onMounted(loadAll);
           <Icon name="clock" :size="16" /> Credit
         </button>
       </div>
-      <label v-if="paymentType === 'cash'" class="field">
-        <span class="tiny">Mode of Payment</span>
-        <select v-model="modeOfPayment">
-          <option v-for="m in mops" :key="m.name" :value="m.name">{{ m.name }}</option>
-          <option v-if="!mops.length" :value="modeOfPayment">{{ modeOfPayment }}</option>
-        </select>
-      </label>
+      <div v-if="useSplit" class="pay-rows">
+        <div v-for="(r, i) in payRows" :key="i" class="pay-row">
+          <select v-model="r.mode">
+            <option v-for="m in mops" :key="m.name" :value="m.name">{{ m.name }}</option>
+          </select>
+          <input type="number" min="0" step="any" inputmode="decimal" v-model.number="r.amount"
+                 placeholder="Tap for rest" @focus="fillRest(i)" />
+          <button v-if="payRows.length > 1" class="icon-only small" type="button" @click="removePayRow(i)" aria-label="Remove">
+            <Icon name="x" :size="16" />
+          </button>
+          <input v-if="needsReference(r.mode)" class="pay-ref" type="text" v-model="r.reference"
+                 placeholder="Reference no. (optional)" />
+        </div>
+        <button type="button" class="link-btn" @click="addPayRow">
+          <Icon name="plus" :size="14" /> Add payment mode
+        </button>
+        <div class="tot-row small">
+          <span>Paid</span>
+          <span class="tabular"><SarSymbol :code="session.currency" />{{ money(splitPaid) }}</span>
+        </div>
+        <div v-if="splitCredit > 0" class="tot-row small muted">
+          <span>On credit</span>
+          <span class="tabular"><SarSymbol :code="session.currency" />{{ money(splitCredit) }}</span>
+        </div>
+      </div>
+      <div v-else-if="paymentType === 'cash'" class="stack-sm">
+        <div class="mode-amount">
+          <label class="field">
+            <span class="tiny">Mode of Payment</span>
+            <select v-model="modeOfPayment">
+              <option v-for="m in mops" :key="m.name" :value="m.name">{{ m.name }}</option>
+              <option v-if="!mops.length" :value="modeOfPayment">{{ modeOfPayment }}</option>
+            </select>
+          </label>
+          <label class="field">
+            <span class="tiny">Amount</span>
+            <input type="number" min="0" step="any" inputmode="decimal" v-model.number="singleAmountModel" />
+          </label>
+        </div>
+        <div v-if="singleCredit > 0" class="tot-row small muted pay-credit">
+          <span>On credit</span>
+          <span class="tabular"><SarSymbol :code="session.currency" />{{ money(singleCredit) }}</span>
+        </div>
+      </div>
     </section>
 
     <!-- Lines -->
@@ -778,6 +896,13 @@ onMounted(loadAll);
 }
 
 .seg { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; }
+.pay-rows { display: flex; flex-direction: column; gap: 0.5rem; }
+.mode-amount { display: grid; grid-template-columns: 1fr 8rem; gap: 0.5rem; }
+.stack-sm { display: flex; flex-direction: column; gap: 0.4rem; }
+.pay-credit { display: flex; justify-content: space-between; align-items: center; }
+.pay-row { display: grid; grid-template-columns: 1fr 7rem auto; gap: 0.4rem; align-items: center; }
+.pay-ref { grid-column: 1 / -1; }
+.pay-rows .tot-row { display: flex; justify-content: space-between; align-items: center; }
 .seg-btn {
   all: unset; cursor: pointer;
   padding: 0.55rem 0.75rem; border-radius: var(--radius-sm);

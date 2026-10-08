@@ -190,6 +190,8 @@ def config_defaults() -> dict:
         "use_customer_price": use_customer_price,
         "currency_precision": rate_precision(),
         "cash_sale_posting": cash_sale_settings(user)["posting"],
+        "split_payment": split_payment_allowed(user),
+        "return_without_invoice": return_without_invoice_allowed(user),
         "print_formats": print_formats(user),
         "print": print_behaviour(user),
         "customer_form": customer_form_config(),
@@ -330,6 +332,21 @@ def cash_sale_settings(user: str | None = None) -> dict:
             "cash_payment_entry_status_mode", "cash_payment_entry_status", "Submit", user
         ),
     }
+
+
+def split_payment_allowed(user: str | None = None) -> bool:
+    """Whether a cash sale may be paid with several modes: van → Vansale Settings (default off)."""
+    return _resolve_mode(
+        _van_value("split_payment_mode", user), default=global_flags().get("allow_split_payment", False)
+    )
+
+
+def return_without_invoice_allowed(user: str | None = None) -> bool:
+    """Whether a return may be made without an original invoice: van → Vansale Settings (default off)."""
+    return _resolve_mode(
+        _van_value("return_without_invoice_mode", user),
+        default=global_flags().get("allow_return_without_invoice", False),
+    )
 
 
 def print_formats(user: str | None = None) -> dict:

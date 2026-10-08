@@ -27,8 +27,16 @@ export interface InvoicePayload {
   submit?: 0 | 1;
   payment_type?: "cash" | "credit";
   mode_of_payment?: string;
+  /** Split cash payment (setting): a row without amount takes what's left. */
+  payments?: PaymentRow[];
   discount_amount?: number;
   apply_discount_on?: "Grand Total" | "Net Total";
+}
+
+export interface PaymentRow {
+  mode_of_payment: string;
+  amount?: number | null;
+  reference_no?: string | null;
 }
 
 export interface SavedInvoice {
@@ -42,10 +50,16 @@ export interface SavedInvoice {
 }
 
 /** List sales invoices for the current user. */
-export async function listMine(limit = 50, customer?: string): Promise<Array<Record<string, unknown>>> {
+export async function listMine(
+  limit = 50,
+  customer?: string,
+  returnable = false,
+): Promise<Array<Record<string, unknown>>> {
   const qs = new URLSearchParams();
   qs.set("limit", String(limit));
   if (customer) qs.set("customer", customer);
+  // Return picker: submitted sales with something left to return.
+  if (returnable) qs.set("returnable", "1");
   return apiCall("GET", `vansale.api.invoice.list_mine?${qs.toString()}`);
 }
 
@@ -117,6 +131,7 @@ export interface InvoiceDetail {
   /** Cash or credit, whichever way the cash sale is posted (POS or Payment Entry). */
   payment_type?: "cash" | "credit";
   mode_of_payment?: string | null;
+  payments?: PaymentRow[];
   grand_total: number;
   net_total: number;
   total_taxes_and_charges: number;
@@ -179,6 +194,7 @@ export interface UpdateDraftPayload {
   submit?: 0 | 1;
   payment_type?: "cash" | "credit";
   mode_of_payment?: string;
+  payments?: PaymentRow[];
   warehouse?: string;
 }
 
@@ -243,6 +259,7 @@ export interface ReturnPayload {
   /** Optional free-text detail, appended to the credit note's remarks. */
   note?: string;
   submit?: 0 | 1;
+  refund?: RefundPayload;
 }
 
 export interface SavedReturn extends SavedInvoice {
@@ -301,4 +318,71 @@ export async function save(payload: InvoicePayload): Promise<SavedInvoice> {
   void sync.refresh();
   void sync.requestDrain();
   return { name: `QUEUED:${clientId.slice(0, 8)}`, grand_total: 0, status: "Queued", queued: true, clientId };
+}
+
+export interface ReturnWithoutInvoiceLine {
+  item_code: string;
+  qty: number;              // positive — server negates
+  uom?: string;
+  rate?: number | null;     // blank → the server's default price
+}
+
+/** Credit note without an original invoice ("Return without invoice" setting).
+ *  Online only, like returns against an invoice. */
+export async function returnWithoutInvoice(payload: {
+  customer: string;
+  items: ReturnWithoutInvoiceLine[];
+  reason: string;
+  note?: string;
+  /** ZATCA reference invoices chosen by the user (required on ZATCA sites). */
+  references?: string[];
+  refund?: RefundPayload;
+}): Promise<SavedReturn & { references?: string[] }> {
+  const clientId = genUuid();
+  const res = await apiCall<SavedReturn & { references?: string[] }>(
+    "POST",
+    "vansale.api.sales_return.save_without_invoice",
+    { client_id: clientId, posting_ts: new Date().toISOString(), submit: 1, ...payload },
+  );
+  void useSyncStore().refresh();
+  return { ...res, clientId };
+}
+
+export interface ReturnTotals {
+  net_total: number;
+  tax: number;
+  grand_total: number;
+  /** Credit keeps its own balance → can be refunded now (bulk, or a paid invoice). */
+  refundable?: boolean;
+  original_outstanding?: number | null;
+}
+
+/** Pay the customer back for the credit now (Payment Entry "Pay"). */
+export interface RefundPayload {
+  mode_of_payment: string;
+  amount?: number;
+  reference_no?: string;
+}
+
+/** Net / VAT / total of a return before saving (server builds + calculates, never saves). */
+export async function returnPreview(payload: {
+  items: Array<{ item_code: string; qty: number; uom?: string; rate?: number | null; sales_invoice_item?: string }>;
+  original_invoice?: string;
+  customer?: string;
+}): Promise<ReturnTotals> {
+  return apiCall<ReturnTotals>("POST", "vansale.api.sales_return.preview", payload);
+}
+
+export interface ReferenceOptions {
+  /** False when the site has no ZATCA reference field. */
+  enabled: boolean;
+  defaults: string[];
+  never_sold: string[];
+  invoices: Array<{ name: string; posting_date: string; grand_total: number }>;
+}
+
+/** Bulk return: default ZATCA references for the items + the customer's invoices to pick from. */
+export async function referenceOptions(customer: string, itemCodes: string[]): Promise<ReferenceOptions> {
+  const qs = new URLSearchParams({ customer, items: JSON.stringify(itemCodes) });
+  return apiCall<ReferenceOptions>("GET", `vansale.api.sales_return.reference_options?${qs.toString()}`);
 }

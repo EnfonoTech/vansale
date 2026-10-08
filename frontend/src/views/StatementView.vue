@@ -26,8 +26,13 @@ const html = ref("");
 const loading = ref(false);
 const err = ref("");
 const iframe = ref<HTMLIFrameElement | null>(null);
-const fromDate = ref("");
-const toDate = ref("");
+// Pre-filled with the server's default period (last 90 days) so the shown
+// range is visible; local dates, not UTC.
+const isoLocal = (d: Date) =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+const today = new Date();
+const fromDate = ref(isoLocal(new Date(today.getFullYear(), today.getMonth(), today.getDate() - 90)));
+const toDate = ref(isoLocal(today));
 const downloading = ref(false);
 const printing = ref(false);
 
