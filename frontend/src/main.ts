@@ -59,10 +59,11 @@ if (isNative()) {
   })();
 }
 
-// Service worker registered only on web, and only in production.
+// Service worker registered only on web, and only in production. It is the
+// app's own (vansale/pwa.py), scoped to /vansale — not the site-wide /sw.js,
+// which on some sites is another app's (POS Awesome) and blocked installing.
 if (!isNative() && "serviceWorker" in navigator && import.meta.env.PROD) {
-  // sw.js is served by Frappe (wired in Phase 2 via hooks.website_route_rules).
-  void navigator.serviceWorker.register("/sw.js", { scope: "/" }).catch(() => {
-    /* first-run failure is fine; dev has no SW */
+  void navigator.serviceWorker.register("/vansale/sw.js", { scope: "/vansale" }).catch(() => {
+    /* not fatal: the app works without it, it just can't be installed */
   });
 }

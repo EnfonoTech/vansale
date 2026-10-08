@@ -71,7 +71,9 @@ export async function listMine(search?: string, limit = 50): Promise<CustomerRow
   }
   try {
     const rows = await apiCall<CustomerRow[]>("GET", `vansale.api.customer.list_mine?${qs.toString()}`);
-    if (!search) void _writeCache(rows).catch(() => {});
+    // Fewer rows than asked for = the user's whole list, so the cache is
+    // replaced: customers no longer theirs must not linger offline.
+    if (!search) void _writeCache(rows, rows.length < limit).catch(() => {});
     return rows;
   } catch (err) {
     if (err instanceof NetworkError) return await _listFromCache(search, limit);
@@ -103,9 +105,10 @@ async function _listFromCache(search: string | undefined, limit: number): Promis
   return filtered.slice(0, limit);
 }
 
-async function _writeCache(rows: CustomerRow[]): Promise<void> {
+async function _writeCache(rows: CustomerRow[], complete = false): Promise<void> {
   const d = await db();
   const tx = d.transaction("customer_cache", "readwrite");
+  if (complete) await tx.store.clear();
   for (const r of rows) {
     const entry: CachedCustomer = {
       name: r.name,
@@ -245,7 +248,7 @@ export async function refreshCache(): Promise<CustomerRow[]> {
     "GET",
     `vansale.api.customer.list_mine?limit=200`,
   );
-  await _writeCache(rows);
+  await _writeCache(rows, rows.length < 200);
   return rows;
 }
 

@@ -1,6 +1,6 @@
 """Printing for the app.
 
-`html`: the print format as desk's /printview renders it (format HTML, Print
+`get_html`: the print format as desk's /printview renders it (format HTML, Print
 Style and Frappe's print.bundle.css), so the in-app preview and web print
 look the same as printing from desk.
 
@@ -29,8 +29,12 @@ def _printable(doctype: str, name: str):
 
 
 @frappe.whitelist(methods=["GET"])
-def html(doctype: str, name: str, format: str | None = None, no_letterhead: int = 0) -> dict:
-    """Body + styles of the print format, with what /printview adds around them."""
+def get_html(doctype: str, name: str, format: str | None = None, no_letterhead: int = 0) -> dict:
+    """Body + styles of the print format, with what /printview adds around them.
+
+    Not named `html`: Frappe's nginx config rewrites any path ending in
+    ".html" (`/api/method/vansale.api.printing.html` → `…printing`), so
+    behind nginx the call hit the module and failed with 417."""
     from frappe.utils.jinja_globals import bundled_asset, is_rtl
     from frappe.www.printview import get_html_and_style
 

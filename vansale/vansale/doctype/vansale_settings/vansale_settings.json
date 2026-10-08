@@ -28,6 +28,10 @@
   "print_after_submit",
   "column_break_print_behaviour",
   "print_copies",
+  "section_break_install",
+  "pwa_app_name",
+  "column_break_install",
+  "pwa_icon",
   "section_break_access",
   "office_roles",
   "section_break_customer",
@@ -174,6 +178,25 @@
    "non_negative": 1
   },
   {
+   "fieldname": "section_break_install",
+   "fieldtype": "Section Break",
+   "label": "Install on phone (web app)"
+  },
+  {
+   "fieldname": "pwa_app_name",
+   "fieldtype": "Data",
+   "label": "App name"
+  },
+  {
+   "fieldname": "column_break_install",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "pwa_icon",
+   "fieldtype": "Attach Image",
+   "label": "App icon"
+  },
+  {
    "fieldname": "section_break_access",
    "fieldtype": "Section Break",
    "label": "Access"
@@ -207,7 +230,7 @@
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-10-08 13:00:00.000000",
+ "modified": "2026-10-08 19:00:00.000000",
  "modified_by": "Administrator",
  "module": "Vansale",
  "name": "Vansale Settings",

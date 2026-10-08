@@ -1,7 +1,7 @@
 /**
  * Print helpers for native + web.
  *
- * The app's `vansale.api.printing.html` returns the print format the way
+ * The app's `vansale.api.printing.get_html` returns the print format the way
  * desk's /printview renders it: format HTML, Print Style and Frappe's
  * print.bundle.css (+ text direction), so in-app preview / web print match
  * desk printing.
@@ -58,7 +58,7 @@ export async function fetchPrintHtml(
   if (noLetterhead) qs.set("no_letterhead", "1");
   // The app's endpoint also returns the print CSS desk's /printview loads;
   // without it tables, grid and fonts rendered differently from desk.
-  const res = await apiCall<PrintResponse>("GET", `vansale.api.printing.html?${qs.toString()}`);
+  const res = await apiCall<PrintResponse>("GET", `vansale.api.printing.get_html?${qs.toString()}`);
   if (!res.html) {
     throw new Error(`Print format "${printFormat}" not found`);
   }

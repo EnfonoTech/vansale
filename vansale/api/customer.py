@@ -214,15 +214,14 @@ def _outstanding_by_customer(customers: list[str]) -> dict[str, float]:
 def list_mine(limit: int = 50, search: Optional[str] = None) -> list[dict]:
     filters: dict = {"disabled": 0}
 
-    # Van users see the union of customers linked to their Sales Person
-    # (Sales Team / custom_sales_person) and customers they created. Office
-    # users (Vansale Settings "Office roles", default System / Van Manager)
-    # see all. Computed up front because get_list's or_filters are AND-ed
-    # with filters; search stays an AND-layer over that set.
+    # Van users see only customers linked to their Sales Person (Sales Team /
+    # custom_sales_person) — not unlinked ones, even ones they created (the
+    # create form links new customers to them). Office users (Vansale
+    # Settings "Office roles", default System / Van Manager) see all.
+    # Computed up front because get_list's or_filters are AND-ed with
+    # filters; search stays an AND-layer over that set.
     if not is_office_user(default_roles={"System Manager", "Van Manager"}):
-        allowed = _sales_person_customers(current_user_sales_person()) | set(
-            frappe.get_all("Customer", {"owner": frappe.session.user}, pluck="name")
-        )
+        allowed = _sales_person_customers(current_user_sales_person())
         if not allowed:
             return []
         filters["name"] = ["in", list(allowed)]

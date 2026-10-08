@@ -20,6 +20,9 @@ website_route_rules = [
     {"from_route": "/vansale/<path:app_path>", "to_route": "vansale"},
 ]
 
+# Install files for the web app (manifest, service worker, icons) under /vansale.
+page_renderer = ["vansale.pwa.VansalePWARenderer"]
+
 # Fixtures exported on `bench export-fixtures --app vansale`.
 fixtures = [
     {
