@@ -28,7 +28,9 @@
   "section_break_payments",
   "cash_sale_posting_mode",
   "cash_payment_entry_status_mode",
+  "collection_payment_entry_status_mode",
   "split_payment_mode",
+  "advance_payment_mode",
   "return_without_invoice_mode",
   "column_break_payments",
   "allowed_modes_of_payment",
@@ -177,7 +179,14 @@
    "default": "Follow Global",
    "fieldname": "cash_payment_entry_status_mode",
    "fieldtype": "Select",
-   "label": "Payment Entry status",
+   "label": "Cash sale / refund status",
+   "options": "Follow Global\nSubmit\nDraft"
+  },
+  {
+   "default": "Follow Global",
+   "fieldname": "collection_payment_entry_status_mode",
+   "fieldtype": "Select",
+   "label": "Payment collection status",
    "options": "Follow Global\nSubmit\nDraft"
   },
   {
@@ -185,6 +194,13 @@
    "fieldname": "split_payment_mode",
    "fieldtype": "Select",
    "label": "Split payment",
+   "options": "Follow Global\nEnabled\nDisabled"
+  },
+  {
+   "default": "Follow Global",
+   "fieldname": "advance_payment_mode",
+   "fieldtype": "Select",
+   "label": "Advance payment",
    "options": "Follow Global\nEnabled\nDisabled"
   },
   {
@@ -310,7 +326,7 @@
  ],
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-10-07 22:13:40.664098",
+ "modified": "2026-10-08 13:00:00.000000",
  "modified_by": "Administrator",
  "module": "Vansale",
  "name": "Vansale Configuration",

@@ -13,6 +13,8 @@ export interface PaymentPayload {
   invoice_name?: string;            // legacy single-invoice
   invoice_names?: string[];         // multi-pick (Phase E)
   remarks?: string;
+  /** 1 = advance: nothing allocated, the amount stays as customer credit. */
+  advance?: 0 | 1;
 }
 
 export interface SavedPayment {

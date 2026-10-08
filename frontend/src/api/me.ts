@@ -34,6 +34,7 @@ export interface ConfigDefaults {
   cash_sale_posting?: string;
   /** Several payment modes on one cash sale (setting). */
   split_payment?: boolean;
+  advance_payment?: boolean;
   /** Returns without an original invoice allowed (setting). */
   return_without_invoice?: boolean;
   /** Print formats chosen in Vansale Settings / the van. */

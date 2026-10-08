@@ -11,7 +11,7 @@ from typing import Optional
 
 import frappe
 from frappe import _
-from frappe.utils import flt
+from frappe.utils import cint, flt
 
 from vansale.api.access import check_read, readable_doc
 from vansale.api.me import is_office_user
@@ -133,15 +133,26 @@ def pending_by_invoice(invoices: list[str]) -> dict[str, float]:
     }
 
 
+def pending_by_customer(customers: list[str]) -> dict[str, float]:
+    """Total of each customer's draft (not yet submitted) receipts. Draft
+    refunds ("Pay") are not collections, so they are left out."""
+    if not customers:
+        return {}
+    return {
+        r[0]: flt(r[1])
+        for r in frappe.db.sql(
+            """SELECT party, SUM(paid_amount) FROM `tabPayment Entry`
+               WHERE docstatus = 0 AND party_type = 'Customer' AND payment_type = 'Receive'
+                 AND party IN %(names)s
+               GROUP BY party""",
+            {"names": tuple(customers)},
+        )
+    }
+
+
 def pending_for_customer(customer: str) -> float:
-    """Total of the customer's draft (not yet submitted) Payment Entries."""
-    return flt(
-        frappe.db.sql(
-            """SELECT COALESCE(SUM(paid_amount), 0) FROM `tabPayment Entry`
-               WHERE docstatus = 0 AND party_type = 'Customer' AND party = %s""",
-            customer,
-        )[0][0]
-    )
+    """Total of the customer's draft (not yet submitted) receipts."""
+    return pending_by_customer([customer]).get(customer, 0.0)
 
 
 def van_allowed_modes() -> Optional[set[str]]:
@@ -176,17 +187,19 @@ def _needs_reference(company: str, mode_of_payment: str) -> bool:
     return bool(account) and frappe.db.get_value("Account", account, "account_type") == "Bank"
 
 
-def submit_if_configured(pe) -> None:
-    """Submit per the "Payment Entry status" setting (else leave a draft for
-    the office), with a clear message when the user may not submit."""
+def submit_if_configured(pe, status: str | None = None, setting: str = "Cash sale / refund status") -> None:
+    """Submit per the Payment Entry status setting (else leave a draft for
+    the office), with a clear message when the user may not submit.
+
+    `status` defaults to the cash-sale / refund status; Payment Collection
+    passes its own, and `setting` names it in the message."""
     from vansale.api.me import cash_sale_settings
 
-    if cash_sale_settings()["payment_entry_status"] != "Submit":
+    if (status or cash_sale_settings()["payment_entry_status"]) != "Submit":
         return
     if not frappe.has_permission("Payment Entry", "submit", doc=pe):
         frappe.throw(
-            _("You are not allowed to submit Payment Entries. Ask the office to set "
-              "Payment Entry status to Draft or to give your role submit permission."),
+            _("No permission to submit Payment Entry. Set \"{0}\" to Draft.").format(_(setting)),
             frappe.PermissionError,
         )
     pe.submit()
@@ -228,9 +241,13 @@ def save(
     posting_ts: Optional[str] = None,
     remarks: Optional[str] = None,
     submit: int = 1,
+    advance: int = 0,
 ) -> dict:
     """
     Allocation rules (PDF §2d):
+      - `advance` (setting "Allow advance payment") → no allocation at all;
+                                          the whole amount stays as the
+                                          customer's advance / credit
       - `invoice_names` list provided   → allocate FIFO across the picked
                                           invoices in the given order
       - `invoice_name` single provided  → allocate against that invoice only
@@ -250,6 +267,12 @@ def save(
         frappe.throw(_("Invalid amount"))
     if amount <= 0:
         frappe.throw(_("Amount must be positive"))
+    advance = cint(advance)
+    if advance:
+        from vansale.api.me import advance_payment_allowed
+
+        if not advance_payment_allowed():
+            frappe.throw(_("Advance payments are not enabled for your van"), frappe.PermissionError)
 
     existing = claim(client_id, "payment", "Payment Entry")
     if existing:
@@ -287,7 +310,9 @@ def save(
 
     # Build the list of invoices to allocate against (FIFO order).
     target_invoices: list[dict] = []
-    if invoice_names:
+    if advance:
+        pass  # advance: nothing allocated
+    elif invoice_names:
         # Explicit multi-pick — respect caller order.
         for n in invoice_names:
             inv = frappe.db.get_value(
@@ -326,16 +351,21 @@ def save(
         inv["outstanding_amount"] = max(flt(inv["outstanding_amount"]) - pending.get(inv["name"], 0.0), 0.0)
     allocate(doc, target_invoices, amount)
     doc.insert(ignore_permissions=False)
-    # "Payment Entry status" applies to every payment the app makes: some
-    # sites post at once, others leave drafts for the office to submit.
+    # Collections have their own Draft / Submit setting (default: same as
+    # the cash sale): some sites post at once, others leave drafts for the office.
     if submit:
-        submit_if_configured(doc)
+        from vansale.api.me import collection_payment_entry_status
+
+        submit_if_configured(
+            doc, collection_payment_entry_status(), setting="Payment collection status"
+        )
 
     _record_outbox(client_id, doc.name, posting_ts, {
         "customer": customer,
         "amount": amount,
         "mode_of_payment": mode_of_payment,
         "invoice_name": invoice_name,
+        "advance": advance,
     })
     frappe.db.commit()
 

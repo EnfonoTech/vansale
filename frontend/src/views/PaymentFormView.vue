@@ -27,6 +27,10 @@ const remarks = ref("");
 const busy = ref(false);
 const loadingOutstanding = ref(false);
 const outstandingError = ref("");
+// "Allow advance payment" setting: take the money without allocating it to
+// invoices (it stays as the customer's credit). Off → auto-allocate as before.
+const advance = ref(false);
+watch(advance, (on) => { if (on) clearPicks(); });
 
 onMounted(async () => {
   customers.value = await listCustomers(undefined, 200);
@@ -126,8 +130,9 @@ async function submit() {
       paid_amount: n,
       mode_of_payment: mode.value as "Cash" | "Bank" | string,
       reference_no: reference.value || undefined,
-      invoice_names: hasPicks.value ? selectedList.value : undefined,
+      invoice_names: hasPicks.value && !advance.value ? selectedList.value : undefined,
       remarks: remarks.value || undefined,
+      advance: advance.value ? 1 : undefined,
     });
     toasts.success(
       res.queued
@@ -169,6 +174,22 @@ async function submit() {
       </label>
     </section>
 
+    <section v-if="session.advancePayment && customer" class="card stack">
+      <span class="label">Payment for</span>
+      <div class="seg">
+        <button type="button" class="seg-btn" :data-active="!advance" @click="advance = false">
+          <Icon name="receipt" :size="16" /> Invoices
+        </button>
+        <button type="button" class="seg-btn" :data-active="advance" @click="advance = true">
+          <Icon name="clock" :size="16" /> Advance
+        </button>
+      </div>
+      <p v-if="advance" class="hint">
+        Not allocated to any invoice — the amount stays as the customer's advance.
+      </p>
+    </section>
+
+    <template v-if="!advance">
     <section v-if="loadingOutstanding" class="card stack">
       <p class="hint"><Icon name="clock" :size="14" /> Loading outstanding invoices…</p>
     </section>
@@ -237,6 +258,7 @@ async function submit() {
         No outstanding invoices for this customer.
       </p>
     </section>
+    </template>
 
     <section class="card stack">
       <label class="field">
@@ -282,6 +304,15 @@ async function submit() {
 <style scoped>
 .field { display: flex; flex-direction: column; gap: 0.3rem; }
 .label { font-size: var(--text-sm); color: var(--text-muted); font-weight: 500; }
+.seg { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; }
+.seg-btn {
+  all: unset; cursor: pointer;
+  padding: 0.55rem 0.75rem; border-radius: var(--radius-sm);
+  background: var(--surface-muted); text-align: center;
+  font-weight: 500; display: inline-flex; justify-content: center; align-items: center; gap: 0.35rem;
+  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+}
+.seg-btn[data-active="true"] { background: var(--primary); color: var(--on-primary, white); }
 
 .row-head { display: flex; justify-content: space-between; align-items: center; }
 .hint {

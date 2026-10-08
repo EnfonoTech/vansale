@@ -191,6 +191,7 @@ def config_defaults() -> dict:
         "currency_precision": rate_precision(),
         "cash_sale_posting": cash_sale_settings(user)["posting"],
         "split_payment": split_payment_allowed(user),
+        "advance_payment": advance_payment_allowed(user),
         "return_without_invoice": return_without_invoice_allowed(user),
         "print_formats": print_formats(user),
         "print": print_behaviour(user),
@@ -332,6 +333,26 @@ def cash_sale_settings(user: str | None = None) -> dict:
             "cash_payment_entry_status_mode", "cash_payment_entry_status", "Submit", user
         ),
     }
+
+
+def collection_payment_entry_status(user: str | None = None) -> str:
+    """Draft / Submit for Payment Entries from Payment Collection: van →
+    Vansale Settings; "Same as cash sale" (the default) keeps the cash-sale
+    status, as before the two were separate."""
+    status = _van_or_global(
+        "collection_payment_entry_status_mode", "collection_payment_entry_status", "Same as cash sale", user
+    )
+    if status in ("Submit", "Draft"):
+        return status
+    return cash_sale_settings(user)["payment_entry_status"]
+
+
+def advance_payment_allowed(user: str | None = None) -> bool:
+    """Whether a collection may be taken as an advance (left unallocated):
+    van → Vansale Settings (default off)."""
+    return _resolve_mode(
+        _van_value("advance_payment_mode", user), default=global_flags().get("allow_advance_payment", False)
+    )
 
 
 def split_payment_allowed(user: str | None = None) -> bool:

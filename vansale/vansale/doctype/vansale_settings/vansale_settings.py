@@ -56,6 +56,9 @@ def global_flags() -> dict:
         # Cash sale = POS invoice unless a site chooses Payment Entry.
         "cash_sale_posting": "POS Invoice",
         "cash_payment_entry_status": "Submit",
+        # Collections follow the cash-sale status unless set on their own.
+        "collection_payment_entry_status": "Same as cash sale",
+        "allow_advance_payment": False,
         "invoice_print_format": None,
         "receipt_print_format": None,
         "allow_split_payment": False,
@@ -77,12 +80,19 @@ def global_flags() -> dict:
         for key in (
             "cash_sale_posting",
             "cash_payment_entry_status",
+            "collection_payment_entry_status",
             "invoice_print_format",
             "receipt_print_format",
         ):
             if row.get(key):
                 flags[key] = row[key]
-        for key in ("direct_print", "print_after_submit", "allow_split_payment", "allow_return_without_invoice"):
+        for key in (
+            "direct_print",
+            "print_after_submit",
+            "allow_split_payment",
+            "allow_return_without_invoice",
+            "allow_advance_payment",
+        ):
             if key in row:
                 flags[key] = bool(int(row.get(key) or 0))
         if row.get("print_copies"):

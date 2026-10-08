@@ -7,6 +7,7 @@ from typing import Optional
 
 import frappe
 from frappe import _
+from frappe.utils import flt
 
 from vansale.api.access import check_read
 from vansale.api.outbox import claim
@@ -189,6 +190,26 @@ def _vat_field() -> Optional[str]:
     ) else None
 
 
+def _outstanding_by_customer(customers: list[str]) -> dict[str, float]:
+    """Outstanding per customer as the customer screen shows it: submitted
+    invoices' balance less receipts awaiting office submit."""
+    if not customers:
+        return {}
+    from vansale.api.payment import pending_by_customer
+
+    pending = pending_by_customer(customers)
+    owed = dict(
+        frappe.db.sql(
+            """SELECT customer, SUM(outstanding_amount) FROM `tabSales Invoice`
+               WHERE docstatus = 1 AND customer IN %(names)s
+               GROUP BY customer""",
+            {"names": tuple(customers)},
+        )
+    )
+    precision = frappe.get_precision("Sales Invoice", "outstanding_amount") or 2
+    return {c: flt(max(flt(owed.get(c)) - pending.get(c, 0.0), 0.0), precision) for c in customers}
+
+
 @frappe.whitelist(methods=["GET"])
 def list_mine(limit: int = 50, search: Optional[str] = None) -> list[dict]:
     filters: dict = {"disabled": 0}
@@ -225,8 +246,10 @@ def list_mine(limit: int = 50, search: Optional[str] = None) -> list[dict]:
         limit=int(limit),
         order_by="modified desc",
     )
+    outstanding = _outstanding_by_customer([r.name for r in rows])
     for r in rows:
         r["modified"] = naive_site_to_utc_iso(r.get("modified"))
+        r["outstanding"] = outstanding.get(r.name, 0.0)
         # Stable keys for the app whatever the site calls these fields.
         r["customer_name_2"] = r.get(name_2) if name_2 else None
         r["vat_number"] = (r.get(vat) if vat else None) or r.get("tax_id")
@@ -589,6 +612,109 @@ def create(
     }
 
 
+# Statement labels: English with the Arabic underneath (KSA statements).
+_AR = {
+    "Statement of Account": "كشف حساب",
+    "From Date": "من تاريخ",
+    "To Date": "إلى تاريخ",
+    "Prepared By": "أعدّ بواسطة",
+    "Statement Date": "تاريخ الكشف",
+    "Customer Name": "اسم العميل",
+    "Customer No.": "رقم العميل",
+    "Mobile": "الجوال",
+    "Customer VAT": "الرقم الضريبي للعميل",
+    "Customer Address": "عنوان العميل",
+    "Date": "التاريخ",
+    "Voucher Type": "نوع المستند",
+    "Voucher No": "رقم المستند",
+    "Debit": "مدين",
+    "Credit": "دائن",
+    "Balance": "الرصيد",
+    "Opening Balance": "الرصيد الافتتاحي",
+    "Closing Balance": "الرصيد الختامي",
+    "Account Summary": "ملخص الحساب",
+    "Invoices": "الفواتير",
+    "Collections": "التحصيلات",
+    "Credit Notes": "إشعارات دائنة",
+    "Adjustments": "تسويات",
+    "Sales Invoice": "فاتورة مبيعات",
+    "Credit Note": "إشعار دائن",
+    "Receipt": "سند قبض",
+    "Refund": "سند صرف",
+    "Journal Entry": "قيد يومية",
+    "Collected, awaiting office approval": "تحصيلات بانتظار اعتماد المكتب",
+    "No transactions in this period.": "لا توجد حركات في هذه الفترة.",
+}
+
+# ERPNext's "Ignore System Generated Credit / Debit Notes" (General Ledger):
+# the Journal Entries reconciliation creates between a credit note and an
+# invoice net to zero for the customer and only clutter the statement.
+_NOT_SYSTEM_NOTE = """
+    AND NOT (voucher_type = 'Journal Entry' AND voucher_no IN (
+        SELECT name FROM `tabJournal Entry`
+        WHERE docstatus = 1 AND is_system_generated = 1
+          AND voucher_type IN ('Credit Note', 'Debit Note')))
+"""
+
+
+def _statement_letter_head(company: str, cust) -> tuple[str, str]:
+    """(header, footer) HTML of the company's default Letter Head, else the
+    site's default one; ("", "") when there is none."""
+    name = frappe.db.get_value("Company", company, "default_letter_head") if company else None
+    filters = {"name": name, "disabled": 0} if name else {"is_default": 1, "disabled": 0}
+    lh = frappe.db.get_value("Letter Head", filters, ["content", "footer"], as_dict=True)
+    if not lh and name:
+        lh = frappe.db.get_value("Letter Head", {"is_default": 1, "disabled": 0}, ["content", "footer"], as_dict=True)
+    if not lh:
+        return "", ""
+
+    def render(src: str | None) -> str:
+        if not src:
+            return ""
+        try:
+            # Letter heads may use Jinja ({{ doc.… }}), as in desk printing.
+            return frappe.render_template(src, {"doc": cust.as_dict()})
+        except Exception:
+            return src
+
+    return _inline_public_images(render(lh.content)), _inline_public_images(render(lh.footer))
+
+
+def _inline_public_images(html: str) -> str:
+    """Embed the site's public /files images as data URIs, so the letter
+    head shows in the PDF renderer and the APK's WebView whatever host name
+    the server is reached by."""
+    import base64
+    import mimetypes
+    import os
+    from urllib.parse import unquote
+
+    def embed(m: "re.Match") -> str:
+        path = frappe.get_site_path("public", unquote(m.group(2)).lstrip("/"))
+        mime = mimetypes.guess_type(path)[0]
+        if not mime or not mime.startswith("image/") or not os.path.isfile(path):
+            return m.group(0)
+        if os.path.getsize(path) > 2 * 1024 * 1024:
+            return m.group(0)
+        with open(path, "rb") as f:
+            data = base64.b64encode(f.read()).decode()
+        return f"{m.group(1)}data:{mime};base64,{data}{m.group(3)}"
+
+    return re.sub(r"""(src=["'])(/files/[^"']+)(["'])""", embed, html)
+
+
+def _statement_address(cust) -> str:
+    from frappe.contacts.doctype.address.address import get_default_address
+
+    name = cust.get("customer_primary_address") or get_default_address("Customer", cust.name)
+    if not name:
+        return ""
+    a = frappe.db.get_value(
+        "Address", name, ["address_line1", "address_line2", "city", "state", "pincode"], as_dict=True
+    )
+    return ", ".join(str(v).strip() for v in (a or {}).values() if v and str(v).strip())
+
+
 def _build_statement_html(name: str, from_date: str | None, to_date: str | None) -> str:
     """Shared statement-HTML builder for both the download and JSON endpoints.
 
@@ -596,6 +722,8 @@ def _build_statement_html(name: str, from_date: str | None, to_date: str | None)
     returns raw HTML bytes that our `apiCall` helper can't parse through `res.json()`.
     Keeping a single source of truth avoids the layouts drifting apart.
     """
+    from frappe.utils import formatdate, get_fullname, getdate, scrub_urls
+
     if not name:
         frappe.throw(_("Customer name required"))
     check_read("Customer", name)
@@ -603,6 +731,8 @@ def _build_statement_html(name: str, from_date: str | None, to_date: str | None)
 
     to_date = to_date or str(frappe.utils.today())
     from_date = from_date or frappe.utils.add_days(to_date, -90)
+    if getdate(from_date) > getdate(to_date):
+        frappe.throw(_("From Date must be before To Date"))
 
     # Built from GL Entry, the ledger the books use, so opening and closing
     # match Accounts Receivable. Listing Sales Invoices as debits and Payment
@@ -612,11 +742,12 @@ def _build_statement_html(name: str, from_date: str | None, to_date: str | None)
 
     company = _user_company() or ""
     opening = frappe.db.sql(
-        """
+        f"""
         SELECT COALESCE(SUM(debit - credit), 0) AS bal
         FROM `tabGL Entry`
         WHERE party_type = 'Customer' AND party = %s AND company = %s
           AND posting_date < %s AND is_cancelled = 0
+          {_NOT_SYSTEM_NOTE}
         """,
         (name, company, from_date),
         as_dict=True,
@@ -624,26 +755,27 @@ def _build_statement_html(name: str, from_date: str | None, to_date: str | None)
     opening_balance = float(opening[0]["bal"]) if opening else 0.0
 
     entries = frappe.db.sql(
-        """
+        f"""
         SELECT posting_date, voucher_type, voucher_no,
                SUM(debit) AS debit, SUM(credit) AS credit, MIN(creation) AS created
         FROM `tabGL Entry`
         WHERE party_type = 'Customer' AND party = %s AND company = %s
           AND posting_date BETWEEN %s AND %s AND is_cancelled = 0
+          {_NOT_SYSTEM_NOTE}
         GROUP BY posting_date, voucher_type, voucher_no
         ORDER BY posting_date ASC, created ASC
         """,
         (name, company, from_date, to_date),
         as_dict=True,
     )
-    modes = dict(
-        frappe.get_all(
+    payments = {
+        r.name: r
+        for r in frappe.get_all(
             "Payment Entry",
             filters={"name": ["in", [e.voucher_no for e in entries if e.voucher_type == "Payment Entry"] or [""]]},
-            fields=["name", "mode_of_payment"],
-            as_list=True,
+            fields=["name", "mode_of_payment", "payment_type"],
         )
-    )
+    }
     returns = set(
         frappe.get_all(
             "Sales Invoice",
@@ -652,28 +784,42 @@ def _build_statement_html(name: str, from_date: str | None, to_date: str | None)
         )
     )
 
+    # Account summary: opening + invoices − credit notes − collections
+    # (+ adjustments) = closing. A cash (POS) sale's payment and a POS
+    # return's refund sit inside the invoice, so they count as collections.
+    totals = {"invoices": 0.0, "credit_notes": 0.0, "collections": 0.0, "adjustments": 0.0}
     rows: list[dict] = []
     for e in entries:
+        debit, credit = float(e.debit or 0), float(e.credit or 0)
+        mode = None
         if e.voucher_type == "Payment Entry":
-            desc = f"Payment — {modes.get(e.voucher_no) or ''}".strip(" —")
-        elif e.voucher_no in returns:
-            desc = "Credit Note"
+            pe = payments.get(e.voucher_no) or {}
+            label = "Refund" if pe.get("payment_type") == "Pay" else "Receipt"
+            mode = pe.get("mode_of_payment")
+            totals["collections"] += credit - debit
+        elif e.voucher_type == "Sales Invoice" and e.voucher_no in returns:
+            label = "Credit Note"
+            totals["credit_notes"] += credit
+            totals["collections"] -= debit
+        elif e.voucher_type == "Sales Invoice":
+            label = "Sales Invoice"
+            totals["invoices"] += debit
+            totals["collections"] += credit
         else:
-            desc = e.voucher_type
+            label = e.voucher_type
+            totals["adjustments"] += debit - credit
         rows.append({
-            "date": e.posting_date,
-            "ref": e.voucher_no,
-            "desc": desc,
-            "debit": float(e.debit or 0),
-            "credit": float(e.credit or 0),
+            "date": e.posting_date, "ref": e.voucher_no, "label": label, "mode": mode,
+            "debit": debit, "credit": credit,
         })
 
-    # Running balance.
     running = opening_balance
     for r in rows:
         running = running + r["debit"] - r["credit"]
         r["balance"] = running
     closing = running
+    total_debit = sum(r["debit"] for r in rows)
+    total_credit = sum(r["credit"] for r in rows)
 
     currency = frappe.db.get_value("Company", company, "default_currency") or cust.default_currency or ""
     esc = frappe.utils.escape_html
@@ -686,62 +832,147 @@ def _build_statement_html(name: str, from_date: str | None, to_date: str | None)
     def fmt(x: float) -> str:
         return f"{x:,.2f}"
 
-    inv_rows_html = "".join(
-        f"<tr><td>{r['date']}</td><td>{esc(r['ref'])}</td><td>{esc(r['desc'])}</td>"
-        f"<td style='text-align:right'>{fmt(r['debit']) if r['debit'] else ''}</td>"
-        f"<td style='text-align:right'>{fmt(r['credit']) if r['credit'] else ''}</td>"
-        f"<td style='text-align:right'>{fmt(r['balance'])}</td></tr>"
+    def d(x) -> str:
+        return formatdate(x, "dd-MM-yyyy")
+
+    def bi(label: str) -> str:
+        """English label with its Arabic underneath."""
+        ar = _AR.get(label)
+        return f"{esc(label)}" + (f"<span class='ar' dir='rtl'>{ar}</span>" if ar else "")
+
+    def amount(x: float) -> str:
+        return fmt(x) if x else ""
+
+    lh_header, lh_footer = _statement_letter_head(company, cust)
+    display_name, other_name = _display_names(cust)
+    vat = _vat_field()
+    vat_no = (cust.get(vat) if vat else None) or cust.tax_id
+    address = _statement_address(cust)
+
+    left = [
+        ("From Date", d(from_date)),
+        ("To Date", d(to_date)),
+        ("Prepared By", esc(get_fullname(frappe.session.user))),
+        ("Statement Date", d(frappe.utils.today())),
+    ]
+    right = [("Customer Name", esc(display_name) + (f"<br><span dir='auto'>{esc(other_name)}</span>" if other_name else ""))]
+    # The ID only when it is not just the name again (Badria's names carry
+    # stray spaces / tabs, so compare trimmed).
+    if cust.name.strip() not in {(n or "").strip() for n in (cust.customer_name, display_name, other_name)}:
+        right.append(("Customer No.", esc(cust.name)))
+    if cust.mobile_no:
+        right.append(("Mobile", esc(cust.mobile_no)))
+    right.append(("Customer VAT", esc(vat_no or "")))
+    right.append(("Customer Address", esc(address)))
+
+    def mode_html(mode: str | None) -> str:
+        return f"<span class='mode'>{esc(mode)}</span>" if mode else ""
+
+    def info(pairs) -> str:
+        return "".join(f"<tr><th>{bi(k)}</th><td>{v}</td></tr>" for k, v in pairs)
+
+    body_rows = "".join(
+        f"<tr><td class='c nw'>{d(r['date'])}</td>"
+        f"<td class='c'>{bi(r['label'])}{mode_html(r['mode'])}</td>"
+        f"<td class='c'>{esc(r['ref'])}</td>"
+        f"<td class='n'>{amount(r['debit'])}</td><td class='n'>{amount(r['credit'])}</td>"
+        f"<td class='n'>{fmt(r['balance'])}</td></tr>"
         for r in rows
+    ) or f"<tr><td colspan='6' class='c empty'>{bi('No transactions in this period.')}</td></tr>"
+
+    summary_cols = [
+        ("Opening Balance", opening_balance),
+        ("Invoices", totals["invoices"]),
+        ("Collections", totals["collections"]),
+        ("Credit Notes", totals["credit_notes"]),
+    ]
+    if abs(totals["adjustments"]) >= 0.005:
+        summary_cols.append(("Adjustments", totals["adjustments"]))
+    summary_cols.append(("Closing Balance", closing))
+
+    pending_html = (
+        f"<table class='pending'><tr><td>{bi('Collected, awaiting office approval')}</td>"
+        f"<td class='n'><strong>{esc(currency)} {fmt(pending)}</strong></td></tr></table>"
+        if pending
+        else ""
     )
-    if not rows:
-        inv_rows_html = "<tr><td colspan='6' style='text-align:center;color:#888;padding:1rem'>No transactions in this period.</td></tr>"
+    letter_head_html = f"<div class='letterhead'>{lh_header}</div>" if lh_header else (
+        f"<div class='letterhead plain'>{esc(company)}</div>"
+    )
 
     html = f"""<!doctype html>
-<html><head><meta charset="utf-8"><title>Statement — {esc(cust.customer_name)}</title>
+<html><head><meta charset="utf-8"><title>Statement — {esc(display_name)}</title>
 <style>
-  body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif; padding: 2rem; color: #111; }}
-  h1 {{ font-size: 1.3rem; margin: 0 0 0.2rem; }}
-  .meta {{ color: #555; font-size: 0.9rem; margin-bottom: 1rem; }}
-  table {{ width: 100%; border-collapse: collapse; font-size: 0.9rem; }}
-  th, td {{ padding: 0.4rem 0.5rem; border-bottom: 1px solid #ddd; }}
-  th {{ background: #f5f5f5; text-align: left; }}
-  tfoot td {{ font-weight: 700; border-top: 2px solid #111; border-bottom: none; }}
-  .opening {{ color: #555; font-style: italic; }}
-  @media print {{ body {{ padding: 1rem; }} .no-print {{ display: none; }} }}
+  @page {{ size: A4; margin: 12mm 10mm; }}
+  body {{ font-family: Arial, Tahoma, 'Segoe UI', sans-serif; padding: 1.2rem; color: #111; font-size: 12px; }}
+  .letterhead {{ margin-bottom: 0.6rem; }}
+  .letterhead img {{ max-width: 100%; height: auto !important; }}
+  .letterhead.plain {{ font-size: 1.3rem; font-weight: 700; text-align: center; }}
+  h1 {{ text-align: center; font-size: 1.25rem; margin: 0.6rem 0 0.8rem; }}
+  .ar {{ display: block; font-size: 0.85em; font-weight: 400; color: #444; }}
+  .info {{ display: table; width: 100%; table-layout: fixed; margin-bottom: 0.9rem; }}
+  .info > div {{ display: table-cell; vertical-align: top; width: 50%; }}
+  .info table {{ border-collapse: collapse; width: 100%; }}
+  .info th {{ text-align: left; width: 9.5rem; padding: 0.2rem 0.4rem 0.2rem 0; vertical-align: top; font-weight: 700; }}
+  .info td {{ padding: 0.2rem 0.4rem; vertical-align: top; }}
+  table.ledger, table.summary {{ width: 100%; border-collapse: collapse; }}
+  .ledger th, .ledger td, .summary th, .summary td {{ border: 1px solid #555; padding: 0.3rem 0.4rem; }}
+  .ledger thead th, .summary thead th {{ background: #f0f0f0; text-align: center; }}
+  .ledger thead {{ display: table-header-group; }}
+  .ledger tr {{ page-break-inside: avoid; }}
+  .c {{ text-align: center; }}
+  .nw {{ white-space: nowrap; }}
+  .n {{ text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }}
+  .mode {{ display: block; font-size: 0.85em; color: #555; }}
+  .ledger tr.edge td {{ background: #fafafa; font-weight: 700; }}
+  .empty {{ color: #777; padding: 0.8rem; }}
+  .summary-title {{ text-align: center; font-weight: 700; margin: 1rem 0 0.3rem; }}
+  .summary-title .ar {{ display: inline; margin-left: 0.4rem; }}
+  .summary td {{ text-align: center; font-weight: 600; }}
+  .currency {{ text-align: right; color: #555; font-size: 0.9em; margin: 0 0 0.2rem; }}
+  .pending {{ width: 100%; border: 1px dashed #999; margin-top: 0.6rem; }}
+  .pending td {{ padding: 0.4rem 0.6rem; }}
+  .footer {{ margin-top: 1rem; }}
+  @media print {{ body {{ padding: 0; }} .no-print {{ display: none; }} }}
   .no-print {{ text-align: right; margin-bottom: 1rem; }}
   .no-print button {{ padding: 0.4rem 0.9rem; border-radius: 6px; border: 1px solid #2563eb; background: #2563eb; color: white; cursor: pointer; }}
 </style></head>
 <body>
   <div class="no-print"><button onclick="window.print()">Print</button></div>
-  <h1>{esc(cust.customer_name)} — Statement</h1>
-  <div class="meta">
-    Period: <strong>{from_date}</strong> to <strong>{to_date}</strong><br/>
-    Company: {esc(company)} · Currency: {esc(currency)}<br/>
-    {f'Tax ID: {esc(cust.tax_id)}<br/>' if cust.tax_id else ''}
-    {f'Mobile: {esc(cust.mobile_no)}<br/>' if cust.mobile_no else ''}
+  {letter_head_html}
+  <h1>Statement of Account - <span dir="rtl">{_AR['Statement of Account']}</span></h1>
+  <div class="info">
+    <div><table>{info(left)}</table></div>
+    <div><table>{info(right)}</table></div>
   </div>
-  <table>
-    <thead>
-      <tr><th>Date</th><th>Reference</th><th>Description</th>
-          <th style="text-align:right">Debit</th>
-          <th style="text-align:right">Credit</th>
-          <th style="text-align:right">Balance</th></tr>
-    </thead>
+  <p class="currency">{esc(currency)}</p>
+  <table class="ledger">
+    <thead><tr>
+      <th style="width:12%">{bi('Date')}</th><th style="width:17%">{bi('Voucher Type')}</th>
+      <th style="width:23%">{bi('Voucher No')}</th><th style="width:16%">{bi('Debit')}</th>
+      <th style="width:16%">{bi('Credit')}</th><th style="width:16%">{bi('Balance')}</th>
+    </tr></thead>
     <tbody>
-      <tr class="opening"><td colspan="5">Opening balance</td>
-          <td style="text-align:right">{fmt(opening_balance)}</td></tr>
-      {inv_rows_html}
+      <tr class="edge"><td colspan="3" class="c">{bi('Opening Balance')}</td><td></td><td></td>
+          <td class="n">{fmt(opening_balance)}</td></tr>
+      {body_rows}
+      <tr class="edge"><td colspan="3" class="c">{bi('Closing Balance')}</td>
+          <td class="n">{fmt(total_debit)}</td><td class="n">{fmt(total_credit)}</td>
+          <td class="n">{fmt(closing)}</td></tr>
     </tbody>
-    <tfoot>
-      <tr><td colspan="5" style="text-align:right">Closing balance</td>
-          <td style="text-align:right">{fmt(closing)}</td></tr>
-      {f"""<tr class="opening"><td colspan="5" style="text-align:right">Payments collected, awaiting office approval</td>
-          <td style="text-align:right">{fmt(-pending)}</td></tr>""" if pending else ""}
-    </tfoot>
   </table>
+  {pending_html}
+  <div class="summary-title">Account Summary <span class="ar" dir="rtl">{_AR['Account Summary']}</span></div>
+  <table class="summary">
+    <thead><tr>{"".join(f"<th>{bi(k)}</th>" for k, _v in summary_cols)}</tr></thead>
+    <tbody><tr>{"".join(f"<td>{fmt(v)}</td>" for _k, v in summary_cols)}</tr></tbody>
+  </table>
+  {f'<div class="footer">{lh_footer}</div>' if lh_footer else ''}
 </body></html>"""
 
-    return html
+    # Absolute URLs, so the letter head image loads in the APK's WebView
+    # (it runs on https://localhost) and in the PDF renderer.
+    return scrub_urls(html)
 
 
 @frappe.whitelist(methods=["GET"])

@@ -22,6 +22,8 @@ export interface CustomerRow {
   display_name?: string;
   /** The other name, when different from display_name. */
   secondary_name?: string | null;
+  /** Submitted invoices' balance less receipts awaiting office submit. */
+  outstanding?: number;
 }
 
 /** Name to show for a customer row (older cached rows lack display_name). */

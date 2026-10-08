@@ -14,9 +14,11 @@
   "allow_return_without_invoice",
   "section_break_cash_sale",
   "cash_sale_posting",
-  "column_break_cash_sale",
   "cash_payment_entry_status",
+  "column_break_cash_sale",
+  "collection_payment_entry_status",
   "allow_split_payment",
+  "allow_advance_payment",
   "section_break_print",
   "invoice_print_format",
   "column_break_print",
@@ -94,21 +96,34 @@
    "options": "POS Invoice\nPayment Entry"
   },
   {
+   "default": "Submit",
+   "fieldname": "cash_payment_entry_status",
+   "fieldtype": "Select",
+   "label": "Cash sale / refund status",
+   "options": "Submit\nDraft"
+  },
+  {
    "fieldname": "column_break_cash_sale",
    "fieldtype": "Column Break"
   },
   {
-   "default": "Submit",
-   "fieldname": "cash_payment_entry_status",
+   "default": "Same as cash sale",
+   "fieldname": "collection_payment_entry_status",
    "fieldtype": "Select",
-   "label": "Payment Entry status",
-   "options": "Submit\nDraft"
+   "label": "Payment collection status",
+   "options": "Same as cash sale\nSubmit\nDraft"
   },
   {
    "default": "0",
    "fieldname": "allow_split_payment",
    "fieldtype": "Check",
    "label": "Allow split payment (several modes)"
+  },
+  {
+   "default": "0",
+   "fieldname": "allow_advance_payment",
+   "fieldtype": "Check",
+   "label": "Allow advance payment (no invoice allocation)"
   },
   {
    "fieldname": "section_break_print",
@@ -192,7 +207,7 @@
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-10-07 22:13:40.664098",
+ "modified": "2026-10-08 13:00:00.000000",
  "modified_by": "Administrator",
  "module": "Vansale",
  "name": "Vansale Settings",

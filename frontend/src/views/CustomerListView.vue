@@ -21,8 +21,12 @@ import { listMine, fromCache, refreshCache, customerLabel, type CustomerRow } fr
 import { isOnline, useOnline } from "@/app/online";
 import { NetworkError } from "@/app/frappe";
 import Icon from "@/components/Icon.vue";
+import SarSymbol from "@/components/SarSymbol.vue";
+import { useSessionStore } from "@/stores/session";
 
 const router = useRouter();
+const session = useSessionStore();
+const money = (n: number) => (Number(n) || 0).toFixed(session.currencyPrecision);
 const online = useOnline();
 const rows = ref<CustomerRow[]>([]);
 const search = ref("");
@@ -168,6 +172,10 @@ const totalCount = computed(() => rows.value.length);
               </template>
             </span>
           </span>
+          <!-- Older cached rows have no outstanding; show nothing then. -->
+          <span v-if="c.outstanding != null" class="due" :class="{ zero: c.outstanding <= 0 }">
+            <SarSymbol :code="session.currency" />{{ money(c.outstanding) }}
+          </span>
           <Icon name="chevron-right" :size="16" class="chev" />
         </button>
       </li>
@@ -258,7 +266,8 @@ const totalCount = computed(() => rows.value.length);
 .row-btn {
   all: unset;
   display: grid;
-  grid-template-columns: auto 1fr auto;
+  grid-template-columns: auto 1fr auto auto;
+  column-gap: 0.5rem;
   align-items: center;
   width: 100%;
   padding: 0.7rem 0.85rem 0.7rem 0;
@@ -272,7 +281,7 @@ const totalCount = computed(() => rows.value.length);
 .accent {
   width: 3px;
   height: 2rem;
-  margin-inline-end: 0.75rem;
+  margin-inline-end: 0.25rem;
   border-radius: 0 2px 2px 0;
   background: transparent;
   transition: background var(--dur-fast) var(--ease);
@@ -315,6 +324,14 @@ const totalCount = computed(() => rows.value.length);
 .meta-item.mono { font-variant-numeric: tabular-nums; }
 .sep { color: var(--text-faint); }
 
+.due {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  color: var(--warning);
+}
+.due.zero { font-weight: 400; color: var(--text-faint); }
 .chev { color: var(--text-faint); }
 
 .footnote {

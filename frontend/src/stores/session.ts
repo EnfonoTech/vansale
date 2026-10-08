@@ -101,6 +101,7 @@ export const useSessionStore = defineStore("session", {
     printBehaviour: (s) => s.defaults?.print ?? null,
     customerForm: (s) => s.defaults?.customer_form ?? null,
     splitPayment: (s) => Boolean(s.defaults?.split_payment),
+    advancePayment: (s) => Boolean(s.defaults?.advance_payment),
     returnWithoutInvoice: (s) => Boolean(s.defaults?.return_without_invoice),
   },
   actions: {
