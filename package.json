@@ -1,0 +1,9 @@
+{
+  "name": "vansale",
+  "private": true,
+  "description": "Builds the Van Sale web app (frontend/) during `bench build`.",
+  "scripts": {
+    "build": "cd frontend && npm_config_loglevel=error npx --yes pnpm@9 install --frozen-lockfile --reporter=silent && CUSTOMER_BUILD_TARGET=web npm_config_loglevel=error npx --yes pnpm@9 exec vite build --logLevel warn"
+  },
+  "license": "MIT"
+}

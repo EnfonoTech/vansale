@@ -19,6 +19,7 @@
 
 import { Preferences } from "@capacitor/preferences";
 import { absoluteUrl, apiBase, isNative } from "./platform";
+import { arrayBufferToBase64 } from "@/offline/_base64";
 
 const CRED_KEY = "vansale.credentials";
 
@@ -287,10 +288,7 @@ export async function saveBlobToDevice(blob: Blob, rawName: string): Promise<voi
 
   if (isNative()) {
     try {
-      const [{ Filesystem, Directory }, { arrayBufferToBase64 }] = await Promise.all([
-        import("@capacitor/filesystem"),
-        import("@/offline/_base64"),
-      ]);
+      const { Filesystem, Directory } = await import("@capacitor/filesystem");
       const buf = await blob.arrayBuffer();
       const res = await Filesystem.writeFile({
         path: safeName,

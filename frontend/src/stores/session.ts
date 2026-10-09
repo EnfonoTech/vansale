@@ -9,6 +9,7 @@
  * See fatehhr lesson §5.3: PIN session window stored as `pinVerifiedAt`.
  */
 import { defineStore } from "pinia";
+import { isOnline } from "@/app/online";
 import type { ConfigDefaults } from "@/api/me";
 
 const LS_KEY = "vansale.session";
@@ -145,7 +146,6 @@ export const useSessionStore = defineStore("session", {
      */
     async refreshDefaults(): Promise<void> {
       if (!this.user) return;
-      const { isOnline } = await import("@/app/online");
       if (!isOnline()) return;
       try {
         const { configDefaults } = await import("@/api/me");

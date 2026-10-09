@@ -18,6 +18,8 @@ venv/
 
 # Node
 node_modules/
+# Root package.json only holds the bench build hook; bench's `yarn install` leaves this behind.
+/yarn.lock
 .npm/
 .pnpm-store/
 
