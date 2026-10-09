@@ -383,7 +383,7 @@ def print_formats(user: str | None = None) -> dict:
 
 
 def print_behaviour(user: str | None = None) -> dict:
-    """Print button / after-submit behaviour and copies: van → Vansale Settings."""
+    """Print button / after-submit behaviour, copies and the PDF button: van → Vansale Settings."""
     flags = global_flags()
     return {
         "direct": _resolve_mode(_van_value("direct_print_mode", user), default=flags.get("direct_print", False)),
@@ -391,6 +391,7 @@ def print_behaviour(user: str | None = None) -> dict:
             _van_value("print_after_submit_mode", user), default=flags.get("print_after_submit", False)
         ),
         "copies": max(1, int(_van_value("print_copies", user) or flags.get("print_copies") or 1)),
+        "pdf_button": _resolve_mode(_van_value("pdf_button_mode", user), default=flags.get("show_pdf_button", True)),
     }
 
 

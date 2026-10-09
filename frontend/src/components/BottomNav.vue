@@ -70,7 +70,9 @@ function go(tab: Tab) {
   inset-inline: 0;
   bottom: 0;
   z-index: 20;
-  padding: 0.4rem 0.35rem calc(0.4rem + var(--safe-bottom));
+  padding-block: 0.4rem calc(0.4rem + var(--safe-bottom));
+  /* Tabs stay grouped under the page column on wide screens. */
+  padding-inline: max(0.35rem, calc((100% - var(--max-content)) / 2));
   background: color-mix(in srgb, var(--surface) 94%, transparent);
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);

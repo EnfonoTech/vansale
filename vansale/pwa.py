@@ -96,7 +96,9 @@ def _manifest() -> dict:
         "start_url": SCOPE,
         "scope": SCOPE,
         "display": "standalone",
-        "orientation": "portrait",
+        # Phones and tablets, either way up (a portrait lock kept tablets
+        # from turning to landscape once installed).
+        "orientation": "any",
         "background_color": BACKGROUND,
         "theme_color": theme_color(),
         "icons": icons,

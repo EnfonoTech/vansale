@@ -226,7 +226,7 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="stack">
+  <div class="stack form-split">
     <section class="card stack">
       <span class="label">Customer</span>
       <SearchSelect
@@ -240,7 +240,7 @@ onMounted(async () => {
 
     <section class="card stack">
       <h3 style="margin:0">Items returned</h3>
-      <div v-if="lines.length === 0" class="muted small">Add items from the list below.</div>
+      <div v-if="lines.length === 0" class="muted small">Add items from the item list.</div>
       <ul v-else class="lines">
         <li v-for="(l, i) in lines" :key="i" class="line">
           <div class="line-head">
@@ -310,7 +310,7 @@ onMounted(async () => {
       </select>
     </section>
 
-    <section class="card stack">
+    <section class="card stack split-side">
       <div class="search-bar">
         <Icon name="search" :size="18" class="search-ic" />
         <input v-model="itemSearch" placeholder="Search item code / name" @input="searchItems" />
@@ -390,4 +390,27 @@ onMounted(async () => {
 }
 .reason-chip.is-on { background: var(--primary-soft); border-color: var(--primary); color: var(--primary); }
 .submit { min-height: 3.25rem; font-size: var(--text-base); }
+
+/* Landscape tablet: the catalog sits beside the form and stays in view, so
+   adding items doesn't mean scrolling past the lines. Phones keep one column
+   in the same order. */
+@media (min-width: 1100px) {
+  .form-split {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 24rem);
+    column-gap: 1rem;
+    row-gap: 0;
+    align-items: start;
+  }
+  .form-split > * { grid-column: 1; margin-bottom: 0.75rem; }
+  .form-split > .split-side {
+    grid-column: 2;
+    grid-row: 1 / span 12;
+    position: sticky;
+    top: calc(var(--top-bar-height) + 1rem);
+  }
+  .split-side .catalog {
+    max-height: calc(100vh - var(--top-bar-height) - var(--bottom-nav-height) - 12rem);
+  }
+}
 </style>

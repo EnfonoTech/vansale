@@ -98,7 +98,7 @@ function gotoRoute() {
 </script>
 
 <template>
-  <div class="app-root">
+  <div class="app-root" :class="{ 'app-root--wide': route.meta.wide }">
     <TopAppBar v-if="isChrome" />
     <main class="app-main" :class="{ 'app-main--chrome': isChrome }">
       <RouterView v-slot="{ Component }">
@@ -142,6 +142,9 @@ function gotoRoute() {
   padding: 1rem;
   padding-inline: 1rem;
 }
+/* Two-column screens (route meta `wide`): page, top bar and tabs all take
+   the wider column. */
+.app-root--wide { --max-content: var(--max-content-wide); }
 .app-main--chrome {
   padding-bottom: calc(var(--bottom-nav-height) + 1rem + var(--safe-bottom));
 }

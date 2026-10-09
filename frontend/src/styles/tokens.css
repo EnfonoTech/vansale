@@ -90,7 +90,17 @@
   --bottom-nav-height: 4rem;
   --top-bar-height: 3.25rem;
   --max-content: 32rem;
+  /* Screens that split into two columns on a landscape tablet (invoice, return). */
+  --max-content-wide: 32rem;
   --safe-bottom: env(safe-area-inset-bottom, 0);
+}
+
+/* Tablets: use the screen instead of a phone-width column. */
+@media (min-width: 768px) {
+  :root { --max-content: 46rem; --max-content-wide: 46rem; }
+}
+@media (min-width: 1100px) {
+  :root { --max-content: 60rem; --max-content-wide: 76rem; }
 }
 
 /* Arabic font switch when the root or a subtree opts into rtl. */

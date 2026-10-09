@@ -9,11 +9,12 @@
  * (TopAppBar), and print uses `window.print()` inside an iframe so the
  * host chrome doesn't hijack it.
  */
-import { computed, onMounted, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { useRoute } from "vue-router";
 import { statement, fetchStatementPdf, downloadStatementPdf } from "@/api/customer";
 import { ApiError, NetworkError } from "@/app/frappe";
 import { hasNativePrint, printPdfNative } from "@/app/native-print";
+import { useSessionStore } from "@/stores/session";
 import { useToastStore } from "@/stores/toasts";
 import Icon from "@/components/Icon.vue";
 
@@ -25,7 +26,31 @@ const customerName = computed(() => String(route.params.name ?? ""));
 const html = ref("");
 const loading = ref(false);
 const err = ref("");
+const session = useSessionStore();
 const iframe = ref<HTMLIFrameElement | null>(null);
+
+// The statement is an A4 page: lay it out at A4 width and shrink it to the
+// screen, so a phone shows the printed page instead of a squeezed one.
+const A4_PX = 794;
+const preview = ref<HTMLElement | null>(null);
+const scale = ref(1);
+const pageHeight = ref(0);
+let resizeObs: ResizeObserver | null = null;
+
+function fitPreview() {
+  const box = preview.value;
+  if (box) scale.value = Math.min(1, box.clientWidth / A4_PX);
+}
+function onFrameLoad() {
+  const doc = iframe.value?.contentDocument;
+  pageHeight.value = doc ? doc.documentElement.scrollHeight : 0;
+  fitPreview();
+  if (!resizeObs && preview.value && "ResizeObserver" in window) {
+    resizeObs = new ResizeObserver(fitPreview);
+    resizeObs.observe(preview.value);
+  }
+}
+onBeforeUnmount(() => resizeObs?.disconnect());
 // Pre-filled with the server's default period (last 90 days) so the shown
 // range is visible; local dates, not UTC.
 const isoLocal = (d: Date) =>
@@ -132,18 +157,16 @@ onMounted(load);
 <template>
   <div class="stack">
     <section class="card filter-card">
-      <div class="date-range">
-        <label class="field">
-          <span class="label">From</span>
-          <input type="date" v-model="fromDate" />
-        </label>
-        <label class="field">
-          <span class="label">To</span>
-          <input type="date" v-model="toDate" />
-        </label>
-      </div>
-      <button type="button" class="ghost small" :disabled="loading" @click="load">
-        <Icon name="refresh" :size="14" /> Apply
+      <label class="field">
+        <span class="label">From</span>
+        <input type="date" v-model="fromDate" />
+      </label>
+      <label class="field">
+        <span class="label">To</span>
+        <input type="date" v-model="toDate" />
+      </label>
+      <button type="button" class="apply" aria-label="Apply" :disabled="loading" @click="load">
+        <Icon name="refresh" :size="16" /> <span class="apply-text">Apply</span>
       </button>
     </section>
 
@@ -152,7 +175,7 @@ onMounted(load);
 
     <template v-if="!loading && html">
       <div class="toolbar">
-        <button type="button" class="ghost" :disabled="downloading" @click="saveAsPdf">
+        <button v-if="session.showPdfButton" type="button" class="ghost" :disabled="downloading" @click="saveAsPdf">
           <Icon name="receipt" :size="16" />
           <span>{{ downloading ? "Saving…" : "PDF" }}</span>
         </button>
@@ -164,13 +187,21 @@ onMounted(load);
         `srcdoc` renders fully isolated from the host CSS (scoped styles,
         variables, media queries). Height is set once the iframe loads.
       -->
-      <iframe
-        ref="iframe"
-        class="statement-frame"
-        :srcdoc="html"
-        sandbox="allow-same-origin allow-modals allow-popups"
-        title="Customer statement"
-      />
+      <div
+        ref="preview"
+        class="statement-preview"
+        :style="pageHeight ? { height: `${Math.ceil(pageHeight * scale)}px` } : undefined"
+      >
+        <iframe
+          ref="iframe"
+          class="statement-frame"
+          :style="{ width: `${A4_PX}px`, height: pageHeight ? `${pageHeight}px` : '70vh', transform: `scale(${scale})` }"
+          @load="onFrameLoad"
+          :srcdoc="html"
+          sandbox="allow-same-origin allow-modals allow-popups"
+          title="Customer statement"
+        />
+      </div>
     </template>
   </div>
 </template>
@@ -181,28 +212,40 @@ onMounted(load);
   justify-content: flex-end;
   gap: 0.5rem;
 }
+/* From | To | Apply on one line, Apply level with the date boxes. */
 .filter-card {
-  display: flex;
-  align-items: flex-end;
-  gap: 0.6rem;
-  padding: 0.85rem;
-  flex-wrap: wrap;
-}
-.date-range {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  align-items: end;
   gap: 0.5rem;
-  flex: 1;
-  min-width: 12rem;
+  padding: 0.85rem;
 }
-.field { display: flex; flex-direction: column; gap: 0.2rem; flex: 1; }
+.field { display: flex; flex-direction: column; gap: 0.25rem; min-width: 0; }
 .label { font-size: var(--text-xs); color: var(--text-muted); font-weight: 500; }
-.field input { min-height: 2.4rem; }
-.statement-frame {
-  width: 100%;
-  min-height: 70vh;
+.field input, .apply { height: 2.75rem; box-sizing: border-box; }
+.field input { min-width: 0; padding-inline: 0.6rem; }
+.apply {
+  background: var(--primary-soft);
+  color: var(--primary);
+  padding: 0 0.9rem;
+  min-height: 0;
+}
+@media (max-width: 380px) {
+  .apply-text { display: none; }
+  .apply { padding: 0 0.8rem; }
+}
+.statement-preview {
+  overflow: hidden;
+  min-height: 12rem;
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  background: var(--surface);
+  background: #fff;
   box-shadow: var(--shadow-sm);
+}
+.statement-frame {
+  display: block;
+  border: 0;
+  background: #fff;
+  transform-origin: top left;
 }
 </style>

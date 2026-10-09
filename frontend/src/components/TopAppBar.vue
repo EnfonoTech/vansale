@@ -179,7 +179,8 @@ function onSyncTap() {
   top: 0;
   z-index: 10;
   height: var(--top-bar-height);
-  padding: 0 0.75rem;
+  /* Contents line up with the page column on wide screens. */
+  padding: 0 max(0.75rem, calc((100% - var(--max-content)) / 2));
   display: flex;
   align-items: center;
   gap: 0.5rem;

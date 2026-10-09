@@ -932,12 +932,9 @@ def _build_statement_html(name: str, from_date: str | None, to_date: str | None)
   .pending {{ width: 100%; border: 1px dashed #999; margin-top: 0.6rem; }}
   .pending td {{ padding: 0.4rem 0.6rem; }}
   .footer {{ margin-top: 1rem; }}
-  @media print {{ body {{ padding: 0; }} .no-print {{ display: none; }} }}
-  .no-print {{ text-align: right; margin-bottom: 1rem; }}
-  .no-print button {{ padding: 0.4rem 0.9rem; border-radius: 6px; border: 1px solid #2563eb; background: #2563eb; color: white; cursor: pointer; }}
+  @media print {{ body {{ padding: 0; }} }}
 </style></head>
 <body>
-  <div class="no-print"><button onclick="window.print()">Print</button></div>
   {letter_head_html}
   <h1>Statement of Account - <span dir="rtl">{_AR['Statement of Account']}</span></h1>
   <div class="info">

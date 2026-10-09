@@ -99,6 +99,8 @@ export const useSessionStore = defineStore("session", {
     /** Configured print formats (null → the app's own defaults). */
     printFormats: (s) => s.defaults?.print_formats ?? null,
     printBehaviour: (s) => s.defaults?.print ?? null,
+    /** "Show PDF button" setting (van → global); shown unless turned off. */
+    showPdfButton: (s) => s.defaults?.print?.pdf_button !== false,
     customerForm: (s) => s.defaults?.customer_form ?? null,
     splitPayment: (s) => Boolean(s.defaults?.split_payment),
     advancePayment: (s) => Boolean(s.defaults?.advance_payment),

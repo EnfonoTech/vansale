@@ -96,7 +96,7 @@ onMounted(load);
       <div class="toolbar">
         <span class="eyebrow">{{ doctype }} · {{ name }}</span>
         <div class="toolbar-actions">
-          <button type="button" class="ghost" :disabled="downloading" @click="doDownload">
+          <button v-if="session.showPdfButton" type="button" class="ghost" :disabled="downloading" @click="doDownload">
             <Icon name="receipt" :size="16" />
             <span>{{ downloading ? "Saving…" : "PDF" }}</span>
           </button>

@@ -7,32 +7,44 @@
  "doctype": "DocType",
  "engine": "InnoDB",
  "field_order": [
+  "tab_break_van",
   "van_code",
   "van_name",
   "column_break_company",
   "company",
   "branch",
+  "section_break_users",
+  "user",
+  "section_break_resources",
+  "warehouse",
+  "column_break_resources",
+  "cost_center",
+  "section_break_series",
+  "doc_prefix",
+  "naming_series_table",
+  "tab_break_settings",
   "section_break_modules",
   "route_mode",
-  "column_break_modules",
   "pin_mode",
+  "column_break_modules",
   "uom_change_mode",
+  "column_break_modules_2",
+  "require_location",
   "section_break_pricing",
   "selling_price_list",
-  "column_break_pricing",
   "customer_price_mode",
-  "section_break_new_customer",
+  "column_break_pricing",
   "default_customer_group",
-  "column_break_new_customer",
   "default_territory",
   "section_break_payments",
   "cash_sale_posting_mode",
   "cash_payment_entry_status_mode",
   "collection_payment_entry_status_mode",
+  "column_break_payments",
   "split_payment_mode",
   "advance_payment_mode",
   "return_without_invoice_mode",
-  "column_break_payments",
+  "column_break_payments_2",
   "allowed_modes_of_payment",
   "section_break_printing",
   "invoice_print_format",
@@ -40,33 +52,30 @@
   "column_break_printing",
   "direct_print_mode",
   "print_after_submit_mode",
-  "print_copies",
-  "section_break_visits",
-  "require_location",
-  "section_break_series",
-  "doc_prefix",
-  "naming_series_table",
-  "section_break_resources",
-  "warehouse",
-  "cost_center",
-  "section_break_users",
-  "user"
+  "column_break_printing_2",
+  "pdf_button_mode",
+  "print_copies"
  ],
  "fields": [
   {
+   "fieldname": "tab_break_van",
+   "fieldtype": "Tab Break",
+   "label": "Van"
+  },
+  {
+   "description": "Unique identifier for this van (e.g. VAN-RIYADH-01)",
    "fieldname": "van_code",
    "fieldtype": "Data",
+   "in_list_view": 1,
    "label": "Van Code",
    "reqd": 1,
-   "unique": 1,
-   "in_list_view": 1,
-   "description": "Unique identifier for this van (e.g. VAN-RIYADH-01)"
+   "unique": 1
   },
   {
    "fieldname": "van_name",
    "fieldtype": "Data",
-   "label": "Van Name",
-   "in_list_view": 1
+   "in_list_view": 1,
+   "label": "Van Name"
   },
   {
    "fieldname": "column_break_company",
@@ -75,10 +84,10 @@
   {
    "fieldname": "company",
    "fieldtype": "Link",
+   "in_list_view": 1,
    "label": "Company",
    "options": "Company",
-   "reqd": 1,
-   "in_list_view": 1
+   "reqd": 1
   },
   {
    "fieldname": "branch",
@@ -87,53 +96,115 @@
    "options": "Branch"
   },
   {
-   "fieldname": "section_break_modules",
+   "fieldname": "section_break_users",
    "fieldtype": "Section Break",
-   "label": "Modules"
+   "label": "Users"
   },
   {
+   "description": "Users assigned here are auto-granted the Van User role + scoped User Permissions. ⚠️ After adding a user, open their User doc and set a password — without one, they cannot log in to the PWA.",
+   "fieldname": "user",
+   "fieldtype": "Table",
+   "label": "User",
+   "options": "Vansale Configuration User"
+  },
+  {
+   "fieldname": "section_break_resources",
+   "fieldtype": "Section Break",
+   "label": "Warehouses & Cost Centers"
+  },
+  {
+   "description": "First row is the user's default warehouse. Add additional rows if the van can draw from multiple warehouses.",
+   "fieldname": "warehouse",
+   "fieldtype": "Table",
+   "label": "Warehouse",
+   "options": "Vansale Configuration Warehouse"
+  },
+  {
+   "fieldname": "column_break_resources",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "First row is the user's default cost center. Tax templates will use the company's default cost center automatically.",
+   "fieldname": "cost_center",
+   "fieldtype": "Table",
+   "label": "Cost Center",
+   "options": "Vansale Configuration Cost Center"
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "section_break_series",
+   "fieldtype": "Section Break",
+   "label": "Document Numbering"
+  },
+  {
+   "description": "Per-van number prefix, e.g. VAN1- (trailing dash added if you omit it). Leaving it blank means this van uses the site's normal series. Saving generates one series per document type below.",
+   "fieldname": "doc_prefix",
+   "fieldtype": "Data",
+   "label": "Document Prefix"
+  },
+  {
+   "description": "Generated from the prefix on save. Read-only: each row must keep its per-doctype abbreviation or Frappe shares one counter between document types.",
+   "fieldname": "naming_series_table",
+   "fieldtype": "Table",
+   "label": "Naming Series",
+   "options": "Vansale Naming Series",
+   "read_only": 1
+  },
+  {
+   "fieldname": "tab_break_settings",
+   "fieldtype": "Tab Break",
+   "label": "Settings"
+  },
+  {
+   "fieldname": "section_break_modules",
+   "fieldtype": "Section Break",
+   "label": "General"
+  },
+  {
+   "default": "Follow Global",
    "fieldname": "route_mode",
    "fieldtype": "Select",
    "label": "Route planning",
-   "options": "Follow Global\nEnabled\nDisabled",
+   "options": "Follow Global\nEnabled\nDisabled"
+  },
+  {
    "default": "Follow Global",
-   "description": "Enabled: app shows Today's Route in the bottom bar and home. Disabled: that slot becomes Van Stock. Follow Global uses Vansale Settings."
+   "fieldname": "pin_mode",
+   "fieldtype": "Select",
+   "label": "PIN unlock",
+   "options": "Follow Global\nEnabled\nDisabled"
   },
   {
    "fieldname": "column_break_modules",
    "fieldtype": "Column Break"
   },
   {
-   "fieldname": "pin_mode",
-   "fieldtype": "Select",
-   "label": "PIN unlock",
-   "options": "Follow Global\nEnabled\nDisabled",
    "default": "Follow Global",
-   "description": "Applies to every user on this van unless their Assigned Users row overrides it."
-  },
-  {
    "fieldname": "uom_change_mode",
    "fieldtype": "Select",
    "label": "UOM change on invoice",
-   "options": "Follow Global\nEnabled\nDisabled",
-   "default": "Follow Global",
-   "description": "Enabled: driver may switch a line to another of the item's UOMs. Disabled: lines sell in the item's stock UOM only."
+   "options": "Follow Global\nEnabled\nDisabled"
+  },
+  {
+   "fieldname": "column_break_modules_2",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "0",
+   "fieldname": "require_location",
+   "fieldtype": "Check",
+   "label": "Capture location on visit end"
   },
   {
    "fieldname": "section_break_pricing",
    "fieldtype": "Section Break",
-   "label": "Pricing"
+   "label": "Pricing & New Customers"
   },
   {
    "fieldname": "selling_price_list",
    "fieldtype": "Link",
    "label": "Selling Price List",
-   "options": "Price List",
-   "description": "Van-level selling price list. Takes effect when a customer has no Customer-specific default price list. Falls back to Customer Group → Selling Settings when unset."
-  },
-  {
-   "fieldname": "column_break_pricing",
-   "fieldtype": "Column Break"
+   "options": "Price List"
   },
   {
    "default": "Follow Global",
@@ -143,19 +214,14 @@
    "options": "Follow Global\nEnabled\nDisabled"
   },
   {
-   "fieldname": "section_break_new_customer",
-   "fieldtype": "Section Break",
-   "label": "New Customers"
+   "fieldname": "column_break_pricing",
+   "fieldtype": "Column Break"
   },
   {
    "fieldname": "default_customer_group",
    "fieldtype": "Link",
    "label": "Default customer group",
    "options": "Customer Group"
-  },
-  {
-   "fieldname": "column_break_new_customer",
-   "fieldtype": "Column Break"
   },
   {
    "fieldname": "default_territory",
@@ -190,6 +256,10 @@
    "options": "Follow Global\nSubmit\nDraft"
   },
   {
+   "fieldname": "column_break_payments",
+   "fieldtype": "Column Break"
+  },
+  {
    "default": "Follow Global",
    "fieldname": "split_payment_mode",
    "fieldtype": "Select",
@@ -211,7 +281,7 @@
    "options": "Follow Global\nEnabled\nDisabled"
   },
   {
-   "fieldname": "column_break_payments",
+   "fieldname": "column_break_payments_2",
    "fieldtype": "Column Break"
   },
   {
@@ -256,77 +326,26 @@
    "options": "Follow Global\nEnabled\nDisabled"
   },
   {
+   "fieldname": "column_break_printing_2",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "Follow Global",
+   "fieldname": "pdf_button_mode",
+   "fieldtype": "Select",
+   "label": "PDF button",
+   "options": "Follow Global\nEnabled\nDisabled"
+  },
+  {
    "fieldname": "print_copies",
    "fieldtype": "Int",
    "label": "Copies (0 = global)",
    "non_negative": 1
-  },
-  {
-   "fieldname": "section_break_visits",
-   "fieldtype": "Section Break",
-   "label": "Visits"
-  },
-  {
-   "fieldname": "require_location",
-   "fieldtype": "Check",
-   "label": "Capture location on visit end",
-   "default": "0",
-   "description": "If enabled, the app asks for GPS permission and tags end-visit with lat/lng. Off by default."
-  },
-  {
-   "fieldname": "section_break_series",
-   "fieldtype": "Section Break",
-   "label": "Document Numbering"
-  },
-  {
-   "fieldname": "doc_prefix",
-   "fieldtype": "Data",
-   "label": "Document Prefix",
-   "description": "Per-van number prefix, e.g. VAN1- (trailing dash added if you omit it). Leaving it blank means this van uses the site's normal series. Saving generates one series per document type below."
-  },
-  {
-   "fieldname": "naming_series_table",
-   "fieldtype": "Table",
-   "label": "Naming Series",
-   "options": "Vansale Naming Series",
-   "read_only": 1,
-   "description": "Generated from the prefix on save. Read-only: each row must keep its per-doctype abbreviation or Frappe shares one counter between document types."
-  },
-  {
-   "fieldname": "section_break_resources",
-   "fieldtype": "Section Break",
-   "label": "Warehouses & Cost Centers"
-  },
-  {
-   "fieldname": "warehouse",
-   "fieldtype": "Table",
-   "label": "Warehouse",
-   "options": "Vansale Configuration Warehouse",
-   "description": "First row is the user's default warehouse. Add additional rows if the van can draw from multiple warehouses."
-  },
-  {
-   "fieldname": "cost_center",
-   "fieldtype": "Table",
-   "label": "Cost Center",
-   "options": "Vansale Configuration Cost Center",
-   "description": "First row is the user's default cost center. Tax templates will use the company's default cost center automatically."
-  },
-  {
-   "fieldname": "section_break_users",
-   "fieldtype": "Section Break",
-   "label": "Assigned Users"
-  },
-  {
-   "fieldname": "user",
-   "fieldtype": "Table",
-   "label": "User",
-   "options": "Vansale Configuration User",
-   "description": "Users assigned here are auto-granted the Van User role + scoped User Permissions. ⚠️ After adding a user, open their User doc and set a password — without one, they cannot log in to the PWA."
   }
  ],
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-10-08 13:00:00.000000",
+ "modified": "2026-10-09 13:10:00.000000",
  "modified_by": "Administrator",
  "module": "Vansale",
  "name": "Vansale Configuration",

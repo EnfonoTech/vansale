@@ -65,6 +65,8 @@ def global_flags() -> dict:
         "allow_return_without_invoice": False,
         "direct_print": False,
         "print_after_submit": False,
+        # PDF (save to device) button on print screens; on unless a site hides it.
+        "show_pdf_button": True,
         "print_copies": 1,
     }
     try:
@@ -92,6 +94,7 @@ def global_flags() -> dict:
             "allow_split_payment",
             "allow_return_without_invoice",
             "allow_advance_payment",
+            "show_pdf_button",
         ):
             if key in row:
                 flags[key] = bool(int(row.get(key) or 0))

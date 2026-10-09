@@ -618,7 +618,7 @@ onMounted(loadAll);
 </script>
 
 <template>
-  <div class="stack">
+  <div class="stack form-split">
     <!-- Customer -->
     <section class="card stack">
       <div class="row-head">
@@ -772,7 +772,7 @@ onMounted(loadAll);
     </section>
 
     <!-- Catalog -->
-    <section class="card stack">
+    <section class="card stack split-side">
       <h3 style="margin:0">Catalog</h3>
       <div class="search-bar">
         <Icon name="search" :size="18" class="search-ic" />
@@ -987,5 +987,28 @@ onMounted(loadAll);
   border-radius: var(--radius-pill);
   padding: 0.05rem 0.35rem;
   margin-inline-start: 0.25rem;
+}
+
+/* Landscape tablet: the catalog sits beside the form and stays in view, so
+   adding items doesn't mean scrolling past the lines. Phones keep one column
+   in the same order. */
+@media (min-width: 1100px) {
+  .form-split {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 24rem);
+    column-gap: 1rem;
+    row-gap: 0;
+    align-items: start;
+  }
+  .form-split > * { grid-column: 1; margin-bottom: 0.75rem; }
+  .form-split > .split-side {
+    grid-column: 2;
+    grid-row: 1 / span 12;
+    position: sticky;
+    top: calc(var(--top-bar-height) + 1rem);
+  }
+  .split-side .catalog {
+    max-height: calc(100vh - var(--top-bar-height) - var(--bottom-nav-height) - 12rem);
+  }
 }
 </style>

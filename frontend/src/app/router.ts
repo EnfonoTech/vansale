@@ -93,7 +93,7 @@ const routes: RouteRecordRaw[] = [
     path: "/invoice/new",
     name: "invoice-new",
     component: () => import("@/views/InvoiceFormView.vue"),
-    meta: { requiresAuth: true, requiresPin: true },
+    meta: { requiresAuth: true, requiresPin: true, wide: true },
   },
   {
     path: "/invoice/:name",
@@ -106,7 +106,7 @@ const routes: RouteRecordRaw[] = [
     path: "/invoice/:name/edit",
     name: "invoice-edit",
     component: () => import("@/views/InvoiceFormView.vue"),
-    meta: { requiresAuth: true, requiresPin: true },
+    meta: { requiresAuth: true, requiresPin: true, wide: true },
     props: true,
   },
   {
@@ -120,7 +120,7 @@ const routes: RouteRecordRaw[] = [
     path: "/return/new",
     name: "return-new",
     component: () => import("@/views/ReturnFormView.vue"),
-    meta: { requiresAuth: true, requiresPin: true },
+    meta: { requiresAuth: true, requiresPin: true, wide: true },
   },
   {
     path: "/returns",

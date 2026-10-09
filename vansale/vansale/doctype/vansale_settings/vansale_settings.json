@@ -26,6 +26,7 @@
   "section_break_print_behaviour",
   "direct_print",
   "print_after_submit",
+  "show_pdf_button",
   "column_break_print_behaviour",
   "print_copies",
   "section_break_install",
@@ -167,6 +168,12 @@
    "label": "Print after submit"
   },
   {
+   "default": "1",
+   "fieldname": "show_pdf_button",
+   "fieldtype": "Check",
+   "label": "Show PDF button"
+  },
+  {
    "fieldname": "column_break_print_behaviour",
    "fieldtype": "Column Break"
   },
@@ -230,7 +237,7 @@
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-10-08 19:00:00.000000",
+ "modified": "2026-10-09 12:00:00.000000",
  "modified_by": "Administrator",
  "module": "Vansale",
  "name": "Vansale Settings",
