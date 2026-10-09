@@ -379,7 +379,7 @@ def save(
 
 
 @frappe.whitelist(methods=["GET"])
-def list_mine(limit: int = 50, customer: Optional[str] = None) -> list[dict]:
+def list_mine(limit: int = 50, customer: Optional[str] = None, search: Optional[str] = None) -> list[dict]:
     """Payment Entries visible to this user.
 
     Van users see Payment Entries they created (owner = session.user) —
@@ -395,9 +395,17 @@ def list_mine(limit: int = 50, customer: Optional[str] = None) -> list[dict]:
         filters["party"] = customer
     if not is_admin:
         filters["owner"] = frappe.session.user
+    # Search box: entry number, customer, reference no. or mode.
+    s = (search or "").strip()
+    or_filters = (
+        {f: ["like", f"%{s}%"] for f in ("name", "party", "party_name", "reference_no", "mode_of_payment")}
+        if s
+        else None
+    )
     rows = frappe.get_all(
         "Payment Entry",
         filters=filters,
+        or_filters=or_filters,
         fields=[
             "name", "party", "party_name", "paid_amount", "mode_of_payment",
             "posting_date", "modified", "docstatus", "status", "payment_type",

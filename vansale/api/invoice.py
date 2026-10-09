@@ -15,7 +15,7 @@ from frappe import _
 from frappe.utils import cint, flt, getdate, nowdate
 
 from vansale.api.datetime_util import naive_site_to_utc_iso, parse_client_ts
-from vansale.api.sales_return import resolve_return_reason, returned_qty_by_row
+from vansale.api.sales_return import refund_owed, resolve_return_reason, return_uoms, returned_qty_by_row
 from vansale.api.access import check_read, readable_doc
 from vansale.api.outbox import claim
 from vansale.api.payment import check_mode_allowed
@@ -742,6 +742,7 @@ def list_mine(
     customer: Optional[str] = None,
     is_return: Optional[int] = None,
     returnable: int = 0,
+    search: Optional[str] = None,
 ) -> list[dict]:
     """List the current user's Sales Invoices.
 
@@ -759,9 +760,17 @@ def list_mine(
     if cint(returnable):
         # Return picker: submitted sales with something left to return.
         filters.update({"docstatus": 1, "is_return": 0})
+    # Search box: invoice number, customer ID or name (beyond the latest page).
+    s = (search or "").strip()
+    or_filters = (
+        {"name": ["like", f"%{s}%"], "customer": ["like", f"%{s}%"], "customer_name": ["like", f"%{s}%"]}
+        if s
+        else None
+    )
     rows = frappe.get_all(
         "Sales Invoice",
         filters=filters,
+        or_filters=or_filters,
         fields=[
             "name",
             "customer",
@@ -792,7 +801,10 @@ def list_mine(
 @frappe.whitelist(methods=["GET"])
 def detail(name: str) -> dict:
     doc = readable_doc("Sales Invoice", name)
-    returned = returned_qty_by_row(doc) if doc.docstatus == 1 and not doc.is_return else {}
+    returnable = doc.docstatus == 1 and not doc.is_return
+    # Stock units returned per row, and the units a row may be returned in.
+    returned = returned_qty_by_row(doc) if returnable else {}
+    units = return_uoms(doc) if returnable else {}
     taxes = [
         {
             "description": t.description,
@@ -833,6 +845,8 @@ def detail(name: str) -> dict:
         "total_taxes_and_charges": float(doc.total_taxes_and_charges or 0),
         "discount_amount": float(doc.discount_amount or 0),
         "outstanding_amount": float(doc.outstanding_amount or 0),
+        # Credit note: what may still be paid back (open credit less draft refunds).
+        "refundable_amount": refund_owed(doc) if doc.is_return else 0.0,
         "paid_amount": float((doc.grand_total or 0) - (doc.outstanding_amount or 0)),
         "status": doc.status,
         "docstatus": int(doc.docstatus or 0),
@@ -843,7 +857,10 @@ def detail(name: str) -> dict:
                 "item_code": i.item_code,
                 "item_name": i.item_name,
                 "qty": float(i.qty or 0),
-                "returned_qty": returned.get(i.name, 0.0),
+                "returned_qty": returned.get(i.name, 0.0) / (float(i.conversion_factor or 1) or 1),
+                "returned_stock_qty": returned.get(i.name, 0.0),
+                "stock_qty": float(i.stock_qty or 0) or float(i.qty or 0) * float(i.conversion_factor or 1),
+                "return_uoms": units.get(i.name, []),
                 "rate": float(i.rate or 0),
                 "price_list_rate": float(i.price_list_rate or 0),
                 "discount_percentage": float(i.discount_percentage or 0),

@@ -8,6 +8,7 @@ import { useSessionStore } from "@/stores/session";
 import { useToastStore } from "@/stores/toasts";
 import Icon from "@/components/Icon.vue";
 import SarSymbol from "@/components/SarSymbol.vue";
+import SearchSelect from "@/components/SearchSelect.vue";
 
 const router = useRouter();
 const route = useRoute();
@@ -44,6 +45,25 @@ onMounted(async () => {
 });
 
 watch(customer, loadOutstanding);
+
+// Searchable customer picker (name, second name, VAT), as on the invoice.
+const customerOptions = computed(() =>
+  customers.value.map((c) => ({
+    value: c.name,
+    label: customerLabel(c),
+    sub: [c.secondary_name, c.vat_number ? `VAT ${c.vat_number}` : ""].filter(Boolean).join(" · "),
+  })),
+);
+
+async function onCustomerSearch(term: string) {
+  try {
+    const found = await listCustomers(term || undefined, 50);
+    const seen = new Set(customers.value.map((c) => c.name));
+    for (const c of found) if (!seen.has(c.name)) customers.value.push(c);
+  } catch {
+    /* offline — local filter over the loaded page */
+  }
+}
 
 async function loadOutstanding() {
   selected.value = new Set();
@@ -163,15 +183,14 @@ async function submit() {
 <template>
   <div class="stack">
     <section class="card stack">
-      <label class="field">
-        <span class="label">Customer</span>
-        <select v-model="customer">
-          <option value="" disabled>Select customer…</option>
-          <option v-for="c in customers" :key="c.name" :value="c.name">
-            {{ customerLabel(c) }}
-          </option>
-        </select>
-      </label>
+      <span class="label">Customer</span>
+      <SearchSelect
+        v-model="customer"
+        :options="customerOptions"
+        placeholder="Search customer by name or code"
+        remote
+        @search="onCustomerSearch"
+      />
     </section>
 
     <section v-if="session.advancePayment && customer" class="card stack">
@@ -327,7 +346,7 @@ async function submit() {
 }
 .inv-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0.4rem; }
 .inv-row {
-  all: unset; cursor: pointer; width: 100%;
+  all: unset; box-sizing: border-box; cursor: pointer; width: 100%;
   display: flex; justify-content: space-between; align-items: center; gap: 0.5rem;
   padding: 0.55rem 0.75rem;
   border-radius: var(--radius-sm);

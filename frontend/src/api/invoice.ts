@@ -54,10 +54,12 @@ export async function listMine(
   limit = 50,
   customer?: string,
   returnable = false,
+  search?: string,
 ): Promise<Array<Record<string, unknown>>> {
   const qs = new URLSearchParams();
   qs.set("limit", String(limit));
   if (customer) qs.set("customer", customer);
+  if (search) qs.set("search", search);
   // Return picker: submitted sales with something left to return.
   if (returnable) qs.set("returnable", "1");
   return apiCall("GET", `vansale.api.invoice.list_mine?${qs.toString()}`);
@@ -77,11 +79,12 @@ export interface ReturnRow {
 }
 
 /** List sales returns (credit notes) — always includes `return_against`. */
-export async function listReturns(limit = 50, customer?: string): Promise<ReturnRow[]> {
+export async function listReturns(limit = 50, customer?: string, search?: string): Promise<ReturnRow[]> {
   const qs = new URLSearchParams();
   qs.set("limit", String(limit));
   qs.set("is_return", "1");
   if (customer) qs.set("customer", customer);
+  if (search) qs.set("search", search);
   return apiCall<ReturnRow[]>("GET", `vansale.api.invoice.list_mine?${qs.toString()}`);
 }
 
@@ -95,8 +98,13 @@ export interface InvoiceDetailTax {
 export interface InvoiceDetailItem {
   /** Invoice row name (Sales Invoice Item). */
   name?: string;
-  /** Qty already returned on submitted credit notes. */
+  /** Qty already returned on submitted credit notes (in this row's UOM). */
   returned_qty?: number;
+  /** Same, in stock units (returns may use a smaller UOM). */
+  returned_stock_qty?: number;
+  stock_qty?: number;
+  /** Units this row may be returned in: the sold UOM first, then smaller ones. */
+  return_uoms?: Array<{ uom: string; conversion_factor: number }>;
   item_code: string;
   item_name: string;
   qty: number;
@@ -137,6 +145,8 @@ export interface InvoiceDetail {
   total_taxes_and_charges: number;
   discount_amount: number;
   outstanding_amount: number;
+  /** Credit note: what may still be paid back (open credit less draft refunds). */
+  refundable_amount?: number;
   paid_amount: number;
   status: string;
   docstatus: number;
@@ -385,4 +395,18 @@ export interface ReferenceOptions {
 export async function referenceOptions(customer: string, itemCodes: string[]): Promise<ReferenceOptions> {
   const qs = new URLSearchParams({ customer, items: JSON.stringify(itemCodes) });
   return apiCall<ReferenceOptions>("GET", `vansale.api.sales_return.reference_options?${qs.toString()}`);
+}
+
+/** Pay out a credit note later (a return kept as customer credit). Online only. */
+export async function refundCreditNote(payload: {
+  credit_note: string;
+  mode_of_payment: string;
+  amount?: number;
+  reference_no?: string;
+}): Promise<{ payment_entry: string; docstatus?: number; idempotent_replay?: boolean }> {
+  return apiCall("POST", "vansale.api.sales_return.refund", {
+    client_id: genUuid(),
+    posting_ts: new Date().toISOString(),
+    ...payload,
+  });
 }

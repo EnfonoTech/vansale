@@ -27,10 +27,15 @@ export interface SavedPayment {
   clientId: string;
 }
 
-export async function listMine(limit = 50, customer?: string): Promise<Array<Record<string, unknown>>> {
+export async function listMine(
+  limit = 50,
+  customer?: string,
+  search?: string,
+): Promise<Array<Record<string, unknown>>> {
   const qs = new URLSearchParams();
   qs.set("limit", String(limit));
   if (customer) qs.set("customer", customer);
+  if (search) qs.set("search", search);
   return apiCall("GET", `vansale.api.payment.list_mine?${qs.toString()}`);
 }
 

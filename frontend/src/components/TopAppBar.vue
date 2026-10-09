@@ -26,7 +26,9 @@ const TITLES: Record<string, string> = {
   "invoice-return": "Sales return",
   returns: "Returns",
   "return-new": "Bulk return",
+  payments: "Payments",
   "payment-new": "Collect payment",
+  "payment-detail": "Payment",
   "route-today": "Today's route",
   "van-stock": "Van stock",
   "sync-errors": "Sync errors",
@@ -73,6 +75,8 @@ const PARENTS: Record<string, (r: RouteLike) => RouteTarget> = {
     params: { name: String(r.params?.name ?? "") },
   }),
   "payment-new": () => ({ name: "dashboard" }),
+  payments: () => ({ name: "dashboard" }),
+  "payment-detail": () => ({ name: "payments" }),
   "return-new": () => ({ name: "returns" }),
   "sync-errors": () => ({ name: "more" }),
   "print-view": (r) => {

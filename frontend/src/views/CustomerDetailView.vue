@@ -298,7 +298,7 @@ button.address {
 
 .inv-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0; }
 .inv-row {
-  all: unset; cursor: pointer; width: 100%;
+  all: unset; box-sizing: border-box; cursor: pointer; width: 100%;
   display: flex; justify-content: space-between; align-items: center;
   padding: 0.55rem 0.25rem;
   border-top: 1px solid var(--border);

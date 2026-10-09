@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { onMounted, ref, computed } from "vue";
 import { useRoute, useRouter } from "vue-router";
-import { detail, submitDraft, deleteDraft, type InvoiceDetail } from "@/api/invoice";
+import { detail, submitDraft, deleteDraft, refundCreditNote, type InvoiceDetail } from "@/api/invoice";
+import { modesOfPayment, type ModeOfPayment } from "@/api/payment";
 import { useSessionStore } from "@/stores/session";
 import { useToastStore } from "@/stores/toasts";
 import { useConfirmStore } from "@/stores/confirm";
@@ -85,6 +86,61 @@ function tone(status: string | undefined): string {
   if (s === "unpaid" || s === "partly paid") return "warning";
   if (s === "draft") return "info";
   return "info";
+}
+
+// Refund a credit note later: the return kept the money as customer credit.
+const canRefund = computed(
+  () => !!inv.value && inv.value.is_return && inv.value.docstatus === 1 && (inv.value.refundable_amount ?? 0) > 0.005,
+);
+const refundOpen = ref(false);
+const refundMops = ref<ModeOfPayment[]>([]);
+const refundMode = ref("");
+const refundAmount = ref<number | null>(null);
+const refundRef = ref("");
+const refundAmountModel = computed<number | string>({
+  get: () => (refundAmount.value == null ? inv.value?.refundable_amount ?? 0 : refundAmount.value),
+  set: (v) => {
+    const n = Number(v);
+    refundAmount.value = (v as unknown) === "" || !Number.isFinite(n) ? null : n;
+  },
+});
+const refundNeedsRef = computed(() => Boolean(refundMops.value.find((m) => m.name === refundMode.value)?.needs_reference));
+
+async function openRefund() {
+  refundOpen.value = true;
+  if (refundMops.value.length) return;
+  try {
+    refundMops.value = await modesOfPayment();
+  } catch {
+    refundMops.value = [];
+  }
+  if (!refundMode.value && refundMops.value.length) {
+    refundMode.value = (refundMops.value.find((m) => m.type === "Cash") ?? refundMops.value[0]).name;
+  }
+}
+
+async function doRefund() {
+  if (!inv.value || !refundMode.value) return;
+  const max = inv.value.refundable_amount ?? 0;
+  const a = refundAmount.value;
+  if (a != null && !(a > 0)) { toasts.warn("Refund amount must be more than 0"); return; }
+  if (a != null && a > max + 0.005) { toasts.warn("Refund amount can't be more than the credit"); return; }
+  busy.value = true;
+  try {
+    const res = await refundCreditNote({
+      credit_note: inv.value.name,
+      mode_of_payment: refundMode.value,
+      amount: a ?? undefined,
+      reference_no: refundRef.value || undefined,
+    });
+    toasts.success(`Refund ${res.payment_entry}${res.docstatus === 0 ? " · draft, awaiting office" : ""}`);
+    const autoprint = session.printBehaviour?.after_submit ? { autoprint: "1" } : undefined;
+    void router.push({ name: "payment-detail", params: { name: res.payment_entry }, query: autoprint });
+  } catch (e) {
+    toasts.error(e instanceof ApiError ? e.serverMessage ?? e.message : e instanceof Error ? e.message : String(e));
+  } finally {
+    busy.value = false;
+  }
 }
 
 function payHere() {
@@ -189,7 +245,7 @@ async function deleteInvoice() {
       <section class="hero card stack">
         <div class="hero-head">
           <div>
-            <span class="muted xsmall">Invoice</span>
+            <span class="muted xsmall">{{ inv.is_return ? "Credit note" : "Invoice" }}</span>
             <h2 class="inv-name">{{ inv.name }}</h2>
             <span class="muted small">{{ inv.posting_date }} · {{ inv.customer_name }}</span>
           </div>
@@ -231,6 +287,9 @@ async function deleteInvoice() {
             >
               <Icon name="payment" :size="16" /> Collect
             </button>
+            <button v-if="canRefund && !refundOpen" class="primary" @click="openRefund">
+              <Icon name="payment" :size="16" /> Refund
+            </button>
             <button class="ghost" @click="printInvoice">
               <Icon name="receipt" :size="16" /> Print
             </button>
@@ -242,6 +301,34 @@ async function deleteInvoice() {
               <Icon name="x" :size="16" /> Return
             </button>
           </template>
+        </div>
+      </section>
+
+      <!-- Pay the customer back for this credit note (kept as credit at the return). -->
+      <section v-if="canRefund && refundOpen" class="card stack">
+        <div class="refund-head">
+          <h3 class="section-h">Refund to customer</h3>
+          <span class="muted xsmall">Credit left <SarSymbol :code="session.currency" />{{ fmt(inv.refundable_amount ?? 0) }}</span>
+        </div>
+        <div class="refund-grid">
+          <label class="field">
+            <span class="tiny">Mode of Payment</span>
+            <select v-model="refundMode">
+              <option v-for="m in refundMops" :key="m.name" :value="m.name">{{ m.name }}</option>
+            </select>
+          </label>
+          <label class="field">
+            <span class="tiny">Amount</span>
+            <input type="number" min="0" step="any" inputmode="decimal" v-model.number="refundAmountModel" />
+          </label>
+          <input v-if="refundNeedsRef" class="full" type="text" v-model="refundRef" placeholder="Reference no. (optional)" />
+        </div>
+        <div class="row actions">
+          <button class="ghost" :disabled="busy" @click="refundOpen = false">Cancel</button>
+          <button class="primary" :disabled="busy || !refundMode" @click="doRefund">
+            <Icon name="payment" :size="16" />
+            {{ busy ? "Refunding…" : `Refund ${fmt(refundAmount ?? inv.refundable_amount ?? 0)}` }}
+          </button>
         </div>
       </section>
 
@@ -342,6 +429,11 @@ async function deleteInvoice() {
 .hero-total .big { display: block; font-size: var(--text-2xl); font-variant-numeric: tabular-nums; }
 .hero-sub { text-align: right; }
 .warn { color: var(--warning); }
+.refund-head { display: flex; justify-content: space-between; align-items: baseline; gap: 0.5rem; }
+.refund-grid { display: grid; grid-template-columns: 1fr 8rem; gap: 0.5rem; }
+.refund-grid .full { grid-column: 1 / -1; }
+.field { display: flex; flex-direction: column; gap: 0.3rem; }
+.tiny { font-size: var(--text-xs); color: var(--text-muted); }
 .actions { display: flex; gap: 0.5rem; flex-wrap: wrap; }
 .actions button { flex: 1 1 7rem; min-height: 2.75rem; justify-content: center; }
 .danger-ghost { color: var(--danger); }

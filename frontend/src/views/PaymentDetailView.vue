@@ -124,6 +124,9 @@ onMounted(async () => {
   await load();
   await autoPrint();
 });
+
+// A "Pay" entry is a refund to the customer (a credit note paid back).
+const isRefund = computed(() => doc.value?.payment_type === "Pay");
 </script>
 
 <template>
@@ -146,7 +149,7 @@ onMounted(async () => {
           <span class="pill" :data-tone="tone(doc.status)">{{ doc.status }}</span>
         </div>
         <div class="hero-total">
-          <span class="muted xsmall">Amount collected</span>
+          <span class="muted xsmall">{{ isRefund ? "Amount refunded" : "Amount collected" }}</span>
           <strong class="big"><SarSymbol :code="session.currency" />{{ fmt(doc.paid_amount) }}</strong>
         </div>
         <div class="row actions">
@@ -185,17 +188,17 @@ onMounted(async () => {
       </section>
 
       <section v-if="doc.references.length" class="card stack">
-        <h3 class="section-h">Invoices covered</h3>
+        <h3 class="section-h">{{ isRefund ? "Credit notes refunded" : "Invoices covered" }}</h3>
         <ul class="ref-list">
           <li v-for="r in doc.references" :key="r.reference_name">
             <button class="ref-row" type="button" @click="openInvoice(r.reference_name)">
               <div class="ref-name">
                 <strong>{{ r.reference_name }}</strong>
-                <span class="muted xsmall">of <SarSymbol :code="session.currency" />{{ fmt(r.total_amount) }}</span>
+                <span class="muted xsmall">of <SarSymbol :code="session.currency" />{{ fmt(Math.abs(r.total_amount)) }}</span>
               </div>
               <div class="ref-amt">
-                <strong><SarSymbol :code="session.currency" />{{ fmt(r.allocated_amount) }}</strong>
-                <span class="muted xsmall">allocated</span>
+                <strong><SarSymbol :code="session.currency" />{{ fmt(Math.abs(r.allocated_amount)) }}</strong>
+                <span class="muted xsmall">{{ isRefund ? "refunded" : "allocated" }}</span>
               </div>
             </button>
           </li>
@@ -226,7 +229,7 @@ onMounted(async () => {
 
 .ref-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0.4rem; }
 .ref-row {
-  all: unset; cursor: pointer; width: 100%;
+  all: unset; box-sizing: border-box; cursor: pointer; width: 100%;
   display: flex; justify-content: space-between; align-items: center; gap: 0.5rem;
   padding: 0.55rem 0.75rem;
   border-radius: var(--radius-sm);

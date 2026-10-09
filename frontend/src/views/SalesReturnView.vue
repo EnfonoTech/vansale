@@ -27,8 +27,11 @@ import RefundSection, { type RefundState } from "@/components/RefundSection.vue"
 
 interface ReturnRowState {
   include: boolean;
-  qty: number;              // positive qty being returned
-  maxQty: number;           // cap: original qty minus earlier returns
+  qty: number;              // positive qty being returned, in `uom`
+  maxQty: number;           // cap in `uom`: what is left after earlier returns
+  uom: string;              // the sold UOM or a smaller one (sold a carton, return pieces)
+  cf: number;               // conversion factor of `uom`
+  leftStock: number;        // stock units left to return on this row
 }
 
 const route = useRoute();
@@ -71,13 +74,36 @@ onMounted(async () => {
       return;
     }
     orig.value.items.forEach((it, i) => {
-      const left = Math.max(0, it.qty - (it.returned_qty ?? 0));
-      rows[i] = { include: false, qty: left, maxQty: left };
+      const cf = it.conversion_factor || 1;
+      const stockQty = it.stock_qty ?? it.qty * cf;
+      const leftStock = Math.max(0, stockQty - (it.returned_stock_qty ?? (it.returned_qty ?? 0) * cf));
+      const left = qtyIn(leftStock, cf);
+      rows[i] = { include: false, qty: left, maxQty: left, uom: it.uom ?? "", cf, leftStock };
     });
   } catch (e) {
     err.value = e instanceof Error ? e.message : String(e);
   }
 });
+
+// Whole units of `cf` left (3 decimals, never rounding up past what's left).
+function qtyIn(stock: number, cf: number): number {
+  return Math.floor((stock / (cf || 1)) * 1000 + 1e-6) / 1000;
+}
+
+const ratePrecision = computed(() => session.currencyPrecision);
+/** The sale's rate converted to the row's chosen unit (as the server does). */
+function rateIn(it: InvoiceDetailItem, cf: number): number {
+  const p = 10 ** ratePrecision.value;
+  return Math.round(((it.rate || 0) / (it.conversion_factor || 1)) * cf * p) / p;
+}
+
+function onUomChange(i: number, it: InvoiceDetailItem) {
+  const r = rows[i];
+  const u = it.return_uoms?.find((x) => x.uom === r.uom);
+  r.cf = u?.conversion_factor || it.conversion_factor || 1;
+  r.maxQty = qtyIn(r.leftStock, r.cf);
+  r.qty = r.maxQty;
+}
 
 function fmt(n: number): string {
   return new Intl.NumberFormat(undefined, { maximumFractionDigits: 2, minimumFractionDigits: 2 }).format(n);
@@ -115,7 +141,7 @@ function selectedLines() {
   return orig.value.items
     .map((it, i) => ({ it, r: rows[i] }))
     .filter(({ r }) => r?.include && r.qty > 0)
-    .map(({ it, r }) => ({ sales_invoice_item: it.name, item_code: it.item_code, qty: r.qty }));
+    .map(({ it, r }) => ({ sales_invoice_item: it.name, item_code: it.item_code, qty: r.qty, uom: r.uom || undefined }));
 }
 watch(
   () => JSON.stringify(selectedLines()),
@@ -175,8 +201,8 @@ async function submit() {
         sales_invoice_item: it.name,
         item_code: it.item_code,
         qty: r.qty,
-        rate: it.rate,
-        uom: it.uom ?? undefined,
+        rate: rateIn(it, r.cf),
+        uom: r.uom || it.uom || undefined,
         warehouse: it.warehouse ?? undefined,
       })),
       reason: reason.value,
@@ -249,7 +275,13 @@ async function submit() {
               </div>
               <strong class="line-amt"><SarSymbol :code="session.currency" />{{ fmt(it.amount) }}</strong>
             </label>
-            <div v-if="rows[i]?.include" class="line-grid">
+            <div v-if="rows[i]?.include" class="line-grid" :class="{ 'has-uom': (it.return_uoms?.length ?? 0) > 1 }">
+              <label v-if="(it.return_uoms?.length ?? 0) > 1">
+                <span class="tiny">Unit</span>
+                <select v-model="rows[i].uom" @change="onUomChange(i, it)">
+                  <option v-for="u in it.return_uoms" :key="u.uom" :value="u.uom">{{ u.uom }}</option>
+                </select>
+              </label>
               <label>
                 <span class="tiny">Return qty</span>
                 <input
@@ -263,7 +295,10 @@ async function submit() {
                 />
               </label>
               <div class="cap">
-                <span class="tiny">Max {{ fmt(rows[i].maxQty) }}</span>
+                <span class="tiny">Max {{ fmt(rows[i].maxQty) }} {{ rows[i].uom }}</span>
+                <span v-if="rows[i].uom !== it.uom" class="tiny">
+                  <SarSymbol :code="session.currency" />{{ fmt(rateIn(it, rows[i].cf)) }} / {{ rows[i].uom }}
+                </span>
                 <span v-if="it.returned_qty" class="tiny muted">Returned {{ fmt(it.returned_qty) }}</span>
               </div>
             </div>
@@ -347,7 +382,8 @@ async function submit() {
 .truncate { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 .line-grid { display: grid; grid-template-columns: 1fr auto; align-items: end; gap: 0.5rem; }
-.cap { padding-bottom: 0.5rem; }
+.line-grid.has-uom { grid-template-columns: minmax(0, 7rem) 1fr auto; }
+.cap { padding-bottom: 0.5rem; display: flex; flex-direction: column; align-items: flex-end; }
 
 .tiny { font-size: var(--text-xs); color: var(--text-muted); }
 .label { font-size: var(--text-sm); color: var(--text-muted); font-weight: 500; }

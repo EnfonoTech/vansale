@@ -930,7 +930,7 @@ onMounted(loadAll);
 
 .catalog { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0.4rem; max-height: 22rem; overflow-y: auto; padding-right: 0.25rem; }
 .cat-item {
-  all: unset; width: 100%; cursor: pointer;
+  all: unset; box-sizing: border-box; width: 100%; cursor: pointer;
   padding: 0.55rem 0.75rem;
   border-radius: var(--radius-sm);
   background: var(--surface-muted);

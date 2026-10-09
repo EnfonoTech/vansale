@@ -229,19 +229,38 @@ def user_to_sales_person(user: str | None) -> str | None:
     )
 
 
+def is_salesman(user: str | None = None) -> bool:
+    """A van driver / salesman: has the Van User role, sits on a Vansale
+    Configuration, or is linked to a Sales Person (how sites like Badria link
+    salesmen without a van row)."""
+    user = user or frappe.session.user
+    if user == "Administrator":
+        return False
+    return (
+        "Van User" in frappe.get_roles(user)
+        or bool(frappe.db.exists("Vansale Configuration User", {"user": user}))
+        or bool(user_to_sales_person(user))
+    )
+
+
 def is_office_user(user: str | None = None, default_roles: frozenset[str] | set[str] = frozenset()) -> bool:
     """Whether `user` sees everyone's data (office staff, not a driver).
 
-    Vansale Settings "Office roles" when set; otherwise `default_roles`, the
-    caller's previous hard-coded set, so sites that haven't set it behave as
-    before. A site whose drivers hold manager roles (Badria: Accounts / Stock
-    Manager through a Role Profile) lists only its real office roles.
+    Vansale Settings "Office roles" decides when set. Without it, a salesman
+    is never office staff, whatever manager roles a role profile gave them
+    (Badria's drivers hold Accounts / Stock Manager, which made them see every
+    salesman's payments); other users fall back to the caller's `default_roles`.
     """
-    roles = set(frappe.get_roles(user or frappe.session.user))
+    user = user or frappe.session.user
+    roles = set(frappe.get_roles(user))
     configured = set(
         frappe.get_all("Vansale Office Role", filters={"parenttype": "Vansale Settings"}, pluck="role")
     )
-    return bool(roles & (configured or set(default_roles)))
+    if configured:
+        return bool(roles & configured)
+    if is_salesman(user):
+        return False
+    return bool(roles & set(default_roles))
 
 
 # Second customer name fields seen on sites, most common first.

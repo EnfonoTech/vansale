@@ -7,10 +7,11 @@
  * `return_against` field). Tapping the original invoice link dives into
  * the regular InvoiceDetailView.
  */
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import { listReturns, listMine, type ReturnRow } from "@/api/invoice";
 import { useSessionStore } from "@/stores/session";
+import ListSearch from "@/components/ListSearch.vue";
 import Icon from "@/components/Icon.vue";
 import SarSymbol from "@/components/SarSymbol.vue";
 
@@ -41,11 +42,19 @@ const filteredPicker = computed(() => {
   });
 });
 
+// Searches on the server (credit note #, customer), beyond the latest page.
+const search = ref("");
+let searchTimer: number | undefined;
+watch(search, () => {
+  window.clearTimeout(searchTimer);
+  searchTimer = window.setTimeout(load, 300);
+});
+
 async function load() {
   loading.value = true;
   err.value = "";
   try {
-    rows.value = await listReturns(80);
+    rows.value = await listReturns(80, undefined, search.value.trim() || undefined);
   } catch (e) {
     err.value = e instanceof Error ? e.message : String(e);
   } finally {
@@ -119,6 +128,8 @@ function pickInvoice(name: string) {
       </div>
     </header>
 
+    <ListSearch v-model="search" placeholder="Search returns" />
+
     <p v-if="err" class="error">{{ err }}</p>
 
     <div v-if="loading && rows.length === 0" class="stack">
@@ -127,6 +138,11 @@ function pickInvoice(name: string) {
       <div class="skeleton" style="height:4rem" />
     </div>
 
+    <div v-else-if="rows.length === 0 && search.trim()" class="empty">
+      <Icon name="search" :size="32" class="empty-icon" />
+      <strong>No matches</strong>
+      <span class="muted">Nothing found for “{{ search.trim() }}”.</span>
+    </div>
     <div v-else-if="rows.length === 0" class="empty">
       <Icon name="receipt" :size="32" class="empty-icon" />
       <strong>No returns yet</strong>
@@ -303,7 +319,7 @@ function pickInvoice(name: string) {
   display: flex; flex-direction: column; gap: 0.35rem;
 }
 .picker-row {
-  all: unset; cursor: pointer; width: 100%;
+  all: unset; box-sizing: border-box; cursor: pointer; width: 100%;
   display: flex; justify-content: space-between; align-items: center; gap: 0.5rem;
   padding: 0.55rem 0.7rem;
   border-radius: var(--radius-sm);

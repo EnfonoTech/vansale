@@ -28,9 +28,14 @@ RETURN_REASONS = (
 )
 
 
-def returned_qty_by_row(original) -> dict[str, float]:
-    """Qty already returned per original invoice row (submitted returns).
+def _stock_qty(line) -> float:
+    return flt(line.stock_qty) or flt(line.qty) * (flt(line.conversion_factor) or 1)
 
+
+def returned_qty_by_row(original) -> dict[str, float]:
+    """Stock qty already returned per original invoice row (submitted returns).
+
+    In stock units because a line sold in cartons may be returned in pieces.
     Returns made before rows were linked (`sales_invoice_item` empty) are
     counted against that item's rows in invoice order.
     """
@@ -38,7 +43,7 @@ def returned_qty_by_row(original) -> dict[str, float]:
     unlinked: dict[str, float] = {}
     for r in frappe.db.sql(
         """
-        SELECT sii.sales_invoice_item, sii.item_code, -sii.qty AS qty
+        SELECT sii.sales_invoice_item, sii.item_code, -sii.stock_qty AS qty
         FROM `tabSales Invoice Item` sii
         JOIN `tabSales Invoice` si ON si.name = sii.parent
         WHERE si.return_against = %s AND si.is_return = 1 AND si.docstatus = 1
@@ -51,7 +56,7 @@ def returned_qty_by_row(original) -> dict[str, float]:
         else:
             unlinked[r.item_code] = unlinked.get(r.item_code, 0.0) + flt(r.qty)
     for line in original.items:
-        take = min(unlinked.get(line.item_code, 0.0), flt(line.qty) - returned[line.name])
+        take = min(unlinked.get(line.item_code, 0.0), _stock_qty(line) - returned[line.name])
         if take > 0:
             returned[line.name] += take
             unlinked[line.item_code] -= take
@@ -64,14 +69,14 @@ def fully_returned(invoices: list[str]) -> set[str]:
     if not invoices:
         return set()
     rows = frappe.db.sql(
-        """SELECT parent, name, item_code, qty FROM `tabSales Invoice Item`
+        """SELECT parent, name, item_code, stock_qty AS qty FROM `tabSales Invoice Item`
            WHERE parent IN %(names)s ORDER BY parent, idx""",
         {"names": tuple(invoices)},
         as_dict=True,
     )
     returns = frappe.db.sql(
         """
-        SELECT si.return_against AS invoice, sii.sales_invoice_item, sii.item_code, -sii.qty AS qty
+        SELECT si.return_against AS invoice, sii.sales_invoice_item, sii.item_code, -sii.stock_qty AS qty
         FROM `tabSales Invoice Item` sii
         JOIN `tabSales Invoice` si ON si.name = sii.parent
         WHERE si.return_against IN %(names)s AND si.is_return = 1 AND si.docstatus = 1
@@ -98,19 +103,58 @@ def fully_returned(invoices: list[str]) -> set[str]:
     return {inv for inv, done in by_invoice.items() if done}
 
 
+def return_uom_factor(item_code: str, uom: str) -> Optional[float]:
+    """Conversion factor of `uom` for the item (stock UOM = 1); None if the
+    item has no such unit."""
+    if uom == frappe.db.get_value("Item", item_code, "stock_uom"):
+        return 1.0
+    cf = frappe.db.get_value("UOM Conversion Detail", {"parent": item_code, "uom": uom}, "conversion_factor")
+    return flt(cf) or None
+
+
+def return_uoms(invoice) -> dict[str, list[dict]]:
+    """Per invoice row, the units it may be returned in: the sold UOM first,
+    then the item's smaller units (see `append_return_rows`)."""
+    codes = list({i.item_code for i in invoice.items})
+    stock = dict(frappe.get_all("Item", {"name": ["in", codes]}, ["name", "stock_uom"], as_list=True))
+    units: dict[str, dict[str, float]] = {c: {stock.get(c): 1.0} for c in codes if stock.get(c)}
+    for r in frappe.get_all(
+        "UOM Conversion Detail",
+        {"parent": ["in", codes], "parenttype": "Item"},
+        ["parent", "uom", "conversion_factor"],
+    ):
+        units.setdefault(r.parent, {})[r.uom] = flt(r.conversion_factor) or 1.0
+    out = {}
+    for line in invoice.items:
+        cf = flt(line.conversion_factor) or 1
+        smaller = sorted(
+            ((u, f) for u, f in units.get(line.item_code, {}).items() if u != line.uom and f < cf - 1e-9),
+            key=lambda x: -x[1],
+        )
+        out[line.name] = [{"uom": line.uom, "conversion_factor": cf}] + [
+            {"uom": u, "conversion_factor": f} for u, f in smaller
+        ]
+    return out
+
+
 def append_return_rows(doc, original, items: list[dict[str, Any]]) -> None:
     """Add return lines to `doc`, each tied to one row of the original invoice.
 
     A line names its row with `sales_invoice_item`; without it, the first row
     of that item with qty left is used. Qty may not exceed what is left on the
-    row after earlier returns. UOM, conversion factor, rate, discount and
-    warehouse come from the original row, so the credit matches the sale.
-    Lines with qty 0 are skipped.
+    row after earlier returns (counted in stock units). A line may give a
+    `uom`: the sold one or a smaller one (sold a carton, return pieces); the
+    rate is the sale's, converted (carton rate / 12 per piece). ERPNext refuses
+    a return rate above the sale's, so a bigger UOM is not allowed. Discount
+    and warehouse come from the original row. Lines with qty 0 are skipped.
     """
+    from vansale.api.me import rate_precision
+
     rows = {line.name: line for line in original.items}
     left = {
-        name: flt(rows[name].qty) - done for name, done in returned_qty_by_row(original).items()
+        name: _stock_qty(rows[name]) - done for name, done in returned_qty_by_row(original).items()
     }
+    precision = rate_precision()
     for item in items:
         code = item.get("item_code")
         qty = abs(flt(item.get("qty")))
@@ -128,21 +172,31 @@ def append_return_rows(doc, original, items: list[dict[str, Any]]) -> None:
             if not candidates:
                 frappe.throw(_("Item {0} not in original invoice").format(code))
             orig = next((l for l in candidates if left[l.name] > 0), candidates[0])
-        if qty > left[orig.name] + 1e-9:
+        orig_cf = flt(orig.conversion_factor) or 1
+        uom = item.get("uom") or orig.uom
+        cf = orig_cf if uom == orig.uom else return_uom_factor(orig.item_code, uom)
+        if cf is None:
+            frappe.throw(_("{0} is not a unit of item {1}").format(uom, orig.item_code))
+        if cf > orig_cf + 1e-9:
             frappe.throw(
-                _("Cannot return {0} {1} of {2}: only {3} left after earlier returns").format(
-                    qty, orig.uom, orig.item_code, max(left[orig.name], 0)
+                _("Return {0} in {1} or a smaller unit, not {2}").format(orig.item_code, orig.uom, uom)
+            )
+        if qty * cf > left[orig.name] + 1e-9:
+            frappe.throw(
+                _("Cannot return {0} {1} of {2}: only {3} {1} left after earlier returns").format(
+                    qty, uom, orig.item_code, flt(max(left[orig.name], 0) / cf, 3)
                 )
             )
-        left[orig.name] -= qty
+        left[orig.name] -= qty * cf
 
         row = doc.append("items", {})
         row.item_code = orig.item_code
         row.qty = -qty
-        row.uom = orig.uom
-        row.conversion_factor = flt(orig.conversion_factor) or 1
-        row.price_list_rate = flt(orig.price_list_rate)
-        row.rate = flt(orig.rate)
+        row.uom = uom
+        row.conversion_factor = cf
+        # The sale's price per stock unit, in the return's UOM.
+        row.price_list_rate = flt(flt(orig.price_list_rate) / orig_cf * cf, precision)
+        row.rate = flt(flt(orig.rate) / orig_cf * cf, precision)
         if orig.discount_percentage:
             row.discount_percentage = flt(orig.discount_percentage)
         row.warehouse = item.get("warehouse") or orig.warehouse or doc.set_warehouse
@@ -239,17 +293,30 @@ def _decide_outstanding(doc, original) -> None:
     doc.update_outstanding_for_self = 0 if flt(original.outstanding_amount) >= credit - 0.005 else 1
 
 
+def refund_owed(cn) -> float:
+    """What may still be paid back on a credit note: its open credit less
+    refunds already made as drafts (they don't reduce the balance until the
+    office submits them, and must not be paid twice)."""
+    from vansale.api.payment import pending_by_invoice
+
+    if not cn.is_return or cn.docstatus != 1:
+        return 0.0
+    owed = abs(min(flt(cn.outstanding_amount), 0.0))
+    drafts = abs(pending_by_invoice([cn.name]).get(cn.name, 0.0))
+    return max(owed - drafts, 0.0)
+
+
 def refund_credit_note(cn, refund: Optional[dict]) -> Optional[str]:
-    """Pay the customer back for a credit note now (Payment Entry "Pay"),
-    submitted or left as a draft per the "Payment Entry status" setting."""
+    """Pay the customer back for a credit note (Payment Entry "Pay"), at the
+    return or later; submitted or a draft per the cash-sale / refund status."""
     from erpnext.accounts.doctype.payment_entry.payment_entry import get_payment_entry
     from vansale.api.payment import _needs_reference, _resolve_accounts, check_mode_allowed, submit_if_configured
 
     if not refund or not refund.get("mode_of_payment"):
         return None
-    owed = abs(flt(cn.outstanding_amount))
+    owed = refund_owed(cn)
     if owed <= 0.005:
-        frappe.throw(_("Nothing to refund: the credit reduced the invoice's unpaid balance"))
+        frappe.throw(_("Nothing to refund on {0}: no credit left to pay back").format(cn.name))
     amount = flt(refund.get("amount")) or owed
     if amount > owed + 0.005:
         frappe.throw(_("Refund ({0}) is more than the credit ({1})").format(amount, owed))
@@ -271,6 +338,39 @@ def refund_credit_note(cn, refund: Optional[dict]) -> Optional[str]:
     pe.insert()
     submit_if_configured(pe)
     return pe.name
+
+
+@frappe.whitelist(methods=["POST"])
+def refund(
+    client_id: str,
+    credit_note: str,
+    mode_of_payment: str,
+    amount: Optional[float] = None,
+    reference_no: Optional[str] = None,
+    posting_ts: Optional[str] = None,
+) -> dict:
+    """Pay out a credit note later — a return kept as customer credit at the
+    time. Same Payment Entry as "Refund now" on the return screens."""
+    from vansale.api.payment import _record_outbox
+
+    if not client_id:
+        frappe.throw(_("client_id is required"))
+    existing = claim(client_id, "payment", "Payment Entry")
+    if existing:
+        return {"payment_entry": existing, "idempotent_replay": True}
+    cn = readable_doc("Sales Invoice", credit_note)
+    if not cn.is_return or cn.docstatus != 1:
+        frappe.throw(_("{0} is not a submitted credit note").format(credit_note))
+    pe = refund_credit_note(
+        cn, {"mode_of_payment": mode_of_payment, "amount": amount, "reference_no": reference_no}
+    )
+    _record_outbox(client_id, pe, posting_ts, {"credit_note": cn.name, "amount": amount, "mode": mode_of_payment})
+    frappe.db.commit()
+    return {
+        "payment_entry": pe,
+        "docstatus": frappe.db.get_value("Payment Entry", pe, "docstatus"),
+        "idempotent_replay": False,
+    }
 
 
 def _set_reason(doc, reason_option: str, reason_text: str, note: Optional[str]) -> None:

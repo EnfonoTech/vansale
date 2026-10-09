@@ -5,11 +5,12 @@
  * edit or delete. Submitted entries are read-only from here — tap
  * opens the receipt view where Print is available.
  */
-import { onMounted, ref } from "vue";
+import { onMounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import { listMine } from "@/api/payment";
 import { useSessionStore } from "@/stores/session";
 import Icon from "@/components/Icon.vue";
+import ListSearch from "@/components/ListSearch.vue";
 import SarSymbol from "@/components/SarSymbol.vue";
 
 const router = useRouter();
@@ -17,6 +18,13 @@ const session = useSessionStore();
 const rows = ref<Array<Record<string, unknown>>>([]);
 const err = ref("");
 const loading = ref(false);
+// Searches on the server, so older entries beyond the latest page are found.
+const search = ref("");
+let searchTimer: number | undefined;
+watch(search, () => {
+  window.clearTimeout(searchTimer);
+  searchTimer = window.setTimeout(load, 300);
+});
 
 const CACHE_KEY = "vansale.payments.v1";
 
@@ -24,18 +32,22 @@ async function load() {
   err.value = "";
 
   // SWR paint: previous snapshot instantly, then refresh.
+  const term = search.value.trim();
   try {
     const raw = sessionStorage.getItem(CACHE_KEY);
-    if (raw && rows.value.length === 0) {
+    if (!term && raw && rows.value.length === 0) {
       rows.value = JSON.parse(raw);
     }
   } catch { /* ignore */ }
 
   loading.value = rows.value.length === 0;
   try {
-    const fresh = await listMine(50);
+    const fresh = await listMine(50, undefined, term || undefined);
     rows.value = fresh;
-    try { sessionStorage.setItem(CACHE_KEY, JSON.stringify(fresh)); } catch { /* quota */ }
+    // The snapshot is the unfiltered list only.
+    if (!term) {
+      try { sessionStorage.setItem(CACHE_KEY, JSON.stringify(fresh)); } catch { /* quota */ }
+    }
   } catch (e) {
     if (rows.value.length === 0) err.value = e instanceof Error ? e.message : String(e);
   } finally {
@@ -69,9 +81,14 @@ function statusLabel(docstatus: unknown, status: unknown): string {
 
 <template>
   <div class="stack">
-    <button class="new-btn" @click="router.push({ name: 'payment-new' })">
-      <Icon name="plus" :size="18" /> New payment
-    </button>
+
+    <!-- Search and New share one row (fits a small phone). -->
+    <div class="toolbar">
+      <ListSearch v-model="search" placeholder="Search payments" />
+      <button class="new-btn" :aria-label="'New payment'" @click="router.push({ name: 'payment-new' })">
+        <Icon name="plus" :size="18" /> New
+      </button>
+    </div>
 
     <p v-if="err" class="error">{{ err }}</p>
 
@@ -79,6 +96,11 @@ function statusLabel(docstatus: unknown, status: unknown): string {
       <div class="skeleton" style="height:3.25rem" />
       <div class="skeleton" style="height:3.25rem" />
       <div class="skeleton" style="height:3.25rem" />
+    </div>
+    <div v-else-if="rows.length === 0 && search.trim()" class="empty">
+      <Icon name="search" :size="32" class="empty-icon" />
+      <strong>No matches</strong>
+      <span class="muted">Nothing found for “{{ search.trim() }}”.</span>
     </div>
     <div v-else-if="rows.length === 0" class="empty">
       <Icon name="payment" :size="32" class="empty-icon" />
@@ -115,7 +137,8 @@ function statusLabel(docstatus: unknown, status: unknown): string {
 </template>
 
 <style scoped>
-.new-btn { align-self: flex-start; min-height: 2.5rem; padding: 0.55rem 0.9rem; }
+.toolbar { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0.5rem; align-items: center; }
+.new-btn { height: 2.75rem; min-height: 0; padding: 0 0.95rem; white-space: nowrap; }
 
 .list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0.5rem; }
 .item {
