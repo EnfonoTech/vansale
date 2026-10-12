@@ -105,6 +105,10 @@ export const useSessionStore = defineStore("session", {
     customerForm: (s) => s.defaults?.customer_form ?? null,
     splitPayment: (s) => Boolean(s.defaults?.split_payment),
     advancePayment: (s) => Boolean(s.defaults?.advance_payment),
+    lineDiscount: (s) => s.defaults?.invoice_options?.line_discount !== false,
+    applyDiscountOn: (s) => s.defaults?.invoice_options?.apply_discount_on ?? "Grand Total",
+    defaultPaymentType: (s): "cash" | "credit" => s.defaults?.invoice_options?.default_payment ?? "cash",
+    paymentDelete: (s) => s.defaults?.payment_delete !== false,
     returnWithoutInvoice: (s) => Boolean(s.defaults?.return_without_invoice),
   },
   actions: {

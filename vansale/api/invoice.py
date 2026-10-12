@@ -49,6 +49,20 @@ def _user_company() -> str:
     )
 
 
+def _set_additional_discount(doc, discount_amount) -> None:
+    """ERPNext Additional Discount on the "Apply additional discount on"
+    setting (Grand Total / Net Total). Item rates are left as sold. 0 clears
+    a discount (an edited draft); None leaves the document as it is."""
+    if discount_amount is None:
+        return
+    from vansale.api.me import invoice_options
+
+    amount = max(flt(discount_amount), 0.0)
+    doc.apply_discount_on = invoice_options()["apply_discount_on"]
+    doc.discount_amount = amount
+    doc.additional_discount_percentage = 0
+
+
 def _default_tax_template(company: str) -> Optional[str]:
     """Resolve the Company's default Sales Taxes and Charges Template.
 
@@ -259,10 +273,8 @@ def save(
     if sp:
         doc.append("sales_team", {"sales_person": sp, "allocated_percentage": 100})
 
-    # Invoice-level additional discount.
-    if discount_amount is not None:
-        doc.discount_amount = float(discount_amount)
-        doc.apply_discount_on = apply_discount_on or "Grand Total"
+    # Invoice-level ERPNext additional discount.
+    _set_additional_discount(doc, discount_amount)
 
     doc.insert(ignore_permissions=False)
 
@@ -559,9 +571,7 @@ def update_draft(
     _append_items(doc, items, set_warehouse)
     _apply_template_taxes(doc)
 
-    if discount_amount is not None:
-        doc.discount_amount = float(discount_amount)
-        doc.apply_discount_on = apply_discount_on or "Grand Total"
+    _set_additional_discount(doc, discount_amount)
 
     # ignore_version bypasses Frappe's optimistic-lock check (the
     # "Document has been modified after you have opened it" error).
@@ -809,7 +819,13 @@ def detail(name: str) -> dict:
         {
             "description": t.description,
             "rate": float(t.rate or 0),
-            "tax_amount": float(t.tax_amount or 0),
+            # After the additional discount: with "Grand Total" ERPNext keeps
+            # the pre-discount figure in tax_amount (15.00 vs 14.34 charged).
+            "tax_amount": float(
+                t.tax_amount_after_discount_amount
+                if t.tax_amount_after_discount_amount is not None
+                else t.tax_amount or 0
+            ),
             "total": float(t.total or 0),
         }
         for t in (doc.taxes or [])

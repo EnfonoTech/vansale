@@ -31,6 +31,7 @@ import { useSessionStore } from "@/stores/session";
 import { useToastStore } from "@/stores/toasts";
 import { computeTaxTotals } from "@/features/van/tax";
 import Icon from "@/components/Icon.vue";
+import { stockLabel } from "@/features/van/stock";
 import SarSymbol from "@/components/SarSymbol.vue";
 import SearchSelect from "@/components/SearchSelect.vue";
 
@@ -61,7 +62,8 @@ const lines = ref<Line[]>([]);
 const itemSearch = ref("");
 const remarks = ref("");
 
-const paymentType = ref<"cash" | "credit">("cash");
+// New invoices start on the "Default payment on invoice" setting; a reopened draft keeps its own.
+const paymentType = ref<"cash" | "credit">(session.defaultPaymentType);
 const modeOfPayment = ref<string>("Cash");
 // Modes with an account for this company (server-filtered), not a fixed list.
 const mops = ref<ModeOfPayment[]>([]);
@@ -194,6 +196,8 @@ const totals = computed(() =>
     discount: discountAmount.value,
     ratePercent: tax.value.rate,
     inclusive: tax.value.inclusive,
+    // ERPNext additional discount, as the server posts it (setting).
+    applyOn: session.applyDiscountOn,
   }),
 );
 const taxTotal = computed(() => totals.value.tax);
@@ -221,46 +225,6 @@ const singleCredit = computed(() =>
   singleAmount.value == null ? 0 : round(Math.max(grandTotal.value - singleAmount.value, 0)),
 );
 const netOfTax = computed(() => totals.value.netOfTax);
-
-/**
- * Itemwise split preview — shows how the invoice-level discount is spread
- * across each line proportionally to its amount. Mirrors the math in
- * `doSave()` so the operator sees exactly what the backend will store.
- */
-interface DiscountSplitRow {
-  item_name: string;
-  qty: number;
-  share: number;      // total discount absorbed by this line
-  perUnit: number;    // per-unit discount_amount stamped on the row
-  netAfter: number;   // line amount after discount
-}
-const discountSplit = computed<DiscountSplitRow[]>(() => {
-  const docDisc = Number(discountAmount.value) || 0;
-  const subtotal = netTotal.value;
-  if (docDisc <= 0 || subtotal <= 0 || lines.value.length === 0) return [];
-  const rows: DiscountSplitRow[] = [];
-  let allocated = 0;
-  lines.value.forEach((l, i) => {
-    const qty = Number(l.qty) || 0;
-    if (qty <= 0) {
-      rows.push({ item_name: l.item_name || l.item_code, qty, share: 0, perUnit: 0, netAfter: l.amount });
-      return;
-    }
-    const isLast = i === lines.value.length - 1;
-    const share = isLast
-      ? Math.max(0, docDisc - allocated)
-      : docDisc * ((Number(l.amount) || 0) / subtotal);
-    allocated += share;
-    rows.push({
-      item_name: l.item_name || l.item_code,
-      qty,
-      share,
-      perUnit: share / qty,
-      netAfter: Math.max(0, (Number(l.amount) || 0) - share),
-    });
-  });
-  return rows;
-});
 
 const selectedCustomer = computed(() =>
   customers.value.find((c) => c.name === customer.value),
@@ -378,7 +342,7 @@ const money = (n: number) => (Number(n) || 0).toFixed(session.currencyPrecision)
 function recalc(l: Line) {
   const qty = Number(l.qty) || 0;
   const rate = Number(l.rate) || 0;
-  const disc = Number(l.discount_percentage) || 0;
+  const disc = session.lineDiscount ? Number(l.discount_percentage) || 0 : 0;
   const net = qty * rate * (1 - disc / 100);
   l.amount = round(Math.max(0, net));
 }
@@ -468,61 +432,25 @@ async function doSave(submit: 0 | 1) {
   const flag = submit === 1;
   if (flag) busy.value = true; else savingDraft.value = true;
   try {
-    /*
-     * Split the invoice-level discount across items proportionally by
-     * line amount and stamp each line's `discount_amount`. The backend
-     * then stores discount on every line (per-item traceability) rather
-     * than carrying a floating doc-level discount that disappears into
-     * a tax row. This is what the user means by "split to itemwise" —
-     * each row's discount is visible in the printed invoice and the
-     * ledger.
-     *
-     * Math:
-     *   lineNet_i = qty_i * rate_i * (1 - line_disc_pct_i/100)
-     *   share_i  = docDiscount * lineNet_i / sum(lineNet)
-     *   perUnit  = share_i / qty_i
-     * The last line absorbs any rounding drift so the sum still equals
-     * the docDiscount the operator entered.
-     */
-    const docDisc = Number(discountAmount.value) || 0;
-    const subtotal = lines.value.reduce((s, l) => s + (Number(l.amount) || 0), 0);
-    const perLineExtraDisc: number[] = lines.value.map(() => 0);
-    if (docDisc > 0 && subtotal > 0) {
-      let allocated = 0;
-      lines.value.forEach((l, i) => {
-        const qty = Number(l.qty) || 0;
-        if (qty <= 0) return;
-        const isLast = i === lines.value.length - 1;
-        const share = isLast
-          ? Math.max(0, docDisc - allocated)
-          : docDisc * ((Number(l.amount) || 0) / subtotal);
-        allocated += share;
-        perLineExtraDisc[i] = share / qty;   // discount amount per unit
-      });
-    }
+    // The invoice discount goes to ERPNext as its Additional Discount
+    // (discount_amount + apply_discount_on from Vansale Settings), so item
+    // rates stay as sold and ERPNext / ZATCA see a document-level discount.
+    const docDisc = Math.max(0, Number(discountAmount.value) || 0);
 
     const payload = {
       customer: customer.value,
       warehouse: warehouse.value || undefined,
-      // ERPNext computes `discount_amount` + `discount_percentage` from
-      // (price_list_rate - rate). If we pass `rate == price_list_rate`
-      // AND `discount_amount`, ERPNext resets disc to 0 on validate()
-      // — which is why submitted invoices lost their discount. Collapse
-      // everything into an effective `rate`: line-% first, then doc-level
-      // split per unit. ERPNext then stores price_list_rate (original)
-      // and rate (after-discount), computes disc_%/disc_amount itself
-      // — so both the detail view and the ZATCA print format see the
-      // strike-through + discounted rate we want.
-      items: lines.value.map<InvoiceItem>((l, i) => {
+      // A line discount % (when allowed) goes into the line's `rate`; ERPNext
+      // derives discount_percentage / discount_amount from
+      // (price_list_rate - rate), which survives submit.
+      items: lines.value.map<InvoiceItem>((l) => {
         // The rate the driver sees (and may have typed) is the base. Using
         // price_list_rate here silently replaced a typed rate with the list
         // price: the screen showed one total and the invoice posted another.
         const listRate = Number(l.price_list_rate) || 0;
         const baseRate = Number(l.rate) || listRate;
-        const linePct = Math.max(0, Math.min(100, Number(l.discount_percentage) || 0));
-        const rateAfterLinePct = baseRate * (1 - linePct / 100);
-        const perUnitDoc = perLineExtraDisc[i] || 0;
-        const effectiveRate = Math.max(0, rateAfterLinePct - perUnitDoc);
+        const linePct = session.lineDiscount ? Math.max(0, Math.min(100, Number(l.discount_percentage) || 0)) : 0;
+        const effectiveRate = Math.max(0, baseRate * (1 - linePct / 100));
         return {
           item_code: l.item_code,
           item_name: l.item_name,
@@ -556,10 +484,10 @@ async function doSave(submit: 0 | 1) {
           // Partial payment in one mode; untouched = full amount (server pays the exact total).
           ? [{ mode_of_payment: modeOfPayment.value, amount: singleAmount.value, reference_no: null }]
           : undefined,
-      // Doc-level discount is now pre-distributed into item-level
-      // discount_amount, so we don't also send the doc discount field.
-      discount_amount: undefined,
-      apply_discount_on: undefined,
+      // 0 on an edited draft clears an earlier discount; the server applies
+      // it on the "Apply additional discount on" setting.
+      discount_amount: docDisc > 0 ? docDisc : isEditMode.value ? 0 : undefined,
+      apply_discount_on: docDisc > 0 ? session.applyDiscountOn : undefined,
     };
     // Edit mode uses server-side `update_draft` which mutates the existing
     // doc in place — Van Users have write perm on their own drafts but NOT
@@ -733,7 +661,7 @@ onMounted(loadAll);
             </button>
           </div>
           <div class="muted xsmall">{{ l.item_code }}</div>
-          <div class="line-grid">
+          <div class="line-grid" :class="{ 'no-disc': !session.lineDiscount }">
             <label>
               <span class="tiny">Qty</span>
               <input type="number" min="0" step="any" inputmode="decimal"
@@ -755,7 +683,7 @@ onMounted(loadAll);
               <input type="number" min="0" step="any" inputmode="decimal"
                      v-model.number="l.rate" @input="recalc(l)" />
             </label>
-            <label>
+            <label v-if="session.lineDiscount">
               <span class="tiny">Disc %</span>
               <input type="number" min="0" max="100" step="any" inputmode="decimal"
                      v-model.number="l.discount_percentage" @input="recalc(l)" />
@@ -787,7 +715,7 @@ onMounted(loadAll);
             </div>
             <div class="right-col">
               <span v-if="typeof it.stock_qty === 'number'" class="pill" data-tone="primary">
-                {{ it.stock_qty }} in stock
+                {{ stockLabel(it.stock_qty, it.stock_uom, it.sales_uom, it.sales_cf) }}
               </span>
             </div>
           </button>
@@ -808,32 +736,9 @@ onMounted(loadAll);
         <span class="tabular"><SarSymbol :code="session.currency" />{{ money(netTotal) }}</span>
       </div>
       <label class="field">
-        <span class="tiny">Invoice discount ({{ session.currency }})</span>
+        <span class="tiny">Additional discount on {{ session.applyDiscountOn }} ({{ session.currency }})</span>
         <input type="number" min="0" step="any" inputmode="decimal" v-model.number="discountAmount" placeholder="0" />
       </label>
-      <!-- Itemwise split preview — only visible when operator enters a
-           doc-level discount. Shows exactly how the amount flows into each
-           line's per-unit discount_amount (what gets stored + printed). -->
-      <div v-if="discountSplit.length > 0" class="disc-split">
-        <div class="disc-split-head">
-          <Icon name="tag" :size="14" />
-          <span>Discount split across items</span>
-        </div>
-        <ul class="disc-split-list">
-          <li v-for="(row, i) in discountSplit" :key="i" class="disc-split-row">
-            <div class="disc-split-name">
-              <strong class="truncate">{{ row.item_name }}</strong>
-              <span class="muted xsmall">
-                {{ row.qty }} × - <SarSymbol :code="session.currency" />{{ money(row.perUnit) }}/unit
-              </span>
-            </div>
-            <div class="disc-split-amt">
-              <strong class="tabular warn"><SarSymbol :code="session.currency" />{{ money(row.share) }}</strong>
-              <span class="muted xsmall">Net <SarSymbol :code="session.currency" />{{ money(row.netAfter) }}</span>
-            </div>
-          </li>
-        </ul>
-      </div>
       <div class="tot-row muted">
         <span>
           {{ tax.taxes[0]?.description || "VAT" }} ({{ tax.rate.toFixed(tax.rate % 1 ? 2 : 0) }}%)
@@ -853,7 +758,6 @@ onMounted(loadAll);
         This tax template has compound rows — the preview is approximate. The
         server computes the exact breakup on save.
       </p>
-      <p v-else class="muted xsmall">Final tax breakup computed by server on save.</p>
     </section>
 
     <label class="field">
@@ -919,6 +823,7 @@ onMounted(loadAll);
 .line { background: var(--surface-muted); border-radius: var(--radius); padding: 0.65rem 0.75rem; display: flex; flex-direction: column; gap: 0.3rem; }
 .line-head { display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; }
 .line-grid { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 0.4rem; align-items: end; margin-top: 0.3rem; }
+.line-grid.no-disc { grid-template-columns: 1fr 1fr 1fr; }
 .line-grid label { display: flex; flex-direction: column; gap: 0.15rem; }
 .line-grid input, .line-grid select { padding: 0.45rem 0.55rem; font-size: var(--text-sm); }
 .tiny { font-size: 0.65rem; color: var(--text-faint); text-transform: uppercase; letter-spacing: 0.06em; font-weight: 600; }
@@ -943,25 +848,6 @@ onMounted(loadAll);
 .totals .tot-row { display: flex; justify-content: space-between; align-items: center; font-size: var(--text-sm); }
 .totals .tot-row.grand { font-size: var(--text-base); font-weight: 700; border-top: 1px solid var(--border-soft, rgba(0,0,0,.08)); padding-top: 0.4rem; margin-top: 0.1rem; }
 
-.disc-split {
-  background: var(--warning-soft, color-mix(in srgb, var(--warning) 14%, transparent));
-  border: 1px dashed var(--warning);
-  border-radius: var(--radius-sm);
-  padding: 0.55rem 0.7rem;
-  display: flex; flex-direction: column; gap: 0.45rem;
-}
-.disc-split-head {
-  display: inline-flex; align-items: center; gap: 0.35rem;
-  font-size: var(--text-xs); font-weight: 600; color: var(--warning);
-  text-transform: uppercase; letter-spacing: 0.04em;
-}
-.disc-split-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0.35rem; }
-.disc-split-row {
-  display: grid; grid-template-columns: 1fr auto; gap: 0.5rem; align-items: center;
-  font-size: var(--text-sm);
-}
-.disc-split-name { display: flex; flex-direction: column; min-width: 0; }
-.disc-split-amt { display: flex; flex-direction: column; align-items: flex-end; gap: 0.05rem; }
 .warn { color: var(--warning); }
 
 .truncate { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

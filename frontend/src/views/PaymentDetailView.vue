@@ -160,7 +160,7 @@ const isRefund = computed(() => doc.value?.payment_type === "Pay");
             <Icon name="plus" :size="16" /> New payment
           </button>
           <button
-            v-if="doc.docstatus === 0"
+            v-if="doc.docstatus === 0 && session.paymentDelete"
             class="ghost danger-ghost"
             :disabled="busy"
             @click="onDelete"

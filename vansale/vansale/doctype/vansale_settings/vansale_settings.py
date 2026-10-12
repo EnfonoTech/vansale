@@ -59,6 +59,12 @@ def global_flags() -> dict:
         # Collections follow the cash-sale status unless set on their own.
         "collection_payment_entry_status": "Same as cash sale",
         "allow_advance_payment": False,
+        # Invoice screen: line discount on, ERPNext additional discount on the
+        # grand total, cash by default; drafts of payments may be deleted.
+        "allow_line_discount": True,
+        "apply_discount_on": "Grand Total",
+        "default_payment_type": "Cash",
+        "allow_delete_draft_payment": True,
         "invoice_print_format": None,
         "receipt_print_format": None,
         "allow_split_payment": False,
@@ -83,6 +89,8 @@ def global_flags() -> dict:
             "cash_sale_posting",
             "cash_payment_entry_status",
             "collection_payment_entry_status",
+            "apply_discount_on",
+            "default_payment_type",
             "invoice_print_format",
             "receipt_print_format",
         ):
@@ -95,6 +103,8 @@ def global_flags() -> dict:
             "allow_return_without_invoice",
             "allow_advance_payment",
             "show_pdf_button",
+            "allow_line_discount",
+            "allow_delete_draft_payment",
         ):
             if key in row:
                 flags[key] = bool(int(row.get(key) or 0))

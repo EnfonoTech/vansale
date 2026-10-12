@@ -2,6 +2,7 @@
 import { computed, onMounted, ref } from "vue";
 import { listStock, type VanStockRow } from "@/api/van_stock";
 import Icon from "@/components/Icon.vue";
+import { stockLabel } from "@/features/van/stock";
 
 const rows = ref<VanStockRow[]>([]);
 const warehouse = ref("");
@@ -24,11 +25,6 @@ async function load() {
 }
 
 onMounted(load);
-
-function fmt(n: unknown): string {
-  const v = typeof n === "number" ? n : Number(n) || 0;
-  return new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 }).format(v);
-}
 
 function tone(qty: number): string {
   if (qty <= 0) return "danger";
@@ -108,9 +104,9 @@ const totals = computed(() => {
       <li v-for="r in filtered" :key="r.item_code" class="item">
         <div class="body">
           <strong class="truncate">{{ r.item_name }}</strong>
-          <span class="muted xsmall">{{ r.item_code }} · {{ r.stock_uom }}</span>
+          <span class="muted xsmall">{{ r.item_code }}</span>
         </div>
-        <span class="qty pill" :data-tone="tone(r.actual_qty)">{{ fmt(r.actual_qty) }}</span>
+        <span class="qty pill" :data-tone="tone(r.actual_qty)">{{ stockLabel(r.actual_qty, r.stock_uom, r.sales_uom, r.sales_cf) }}</span>
       </li>
     </ul>
   </div>

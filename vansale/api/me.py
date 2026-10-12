@@ -192,6 +192,8 @@ def config_defaults() -> dict:
         "cash_sale_posting": cash_sale_settings(user)["posting"],
         "split_payment": split_payment_allowed(user),
         "advance_payment": advance_payment_allowed(user),
+        "invoice_options": invoice_options(),
+        "payment_delete": bool(global_flags().get("allow_delete_draft_payment", True)),
         "return_without_invoice": return_without_invoice_allowed(user),
         "print_formats": print_formats(user),
         "print": print_behaviour(user),
@@ -364,6 +366,19 @@ def collection_payment_entry_status(user: str | None = None) -> str:
     if status in ("Submit", "Draft"):
         return status
     return cash_sale_settings(user)["payment_entry_status"]
+
+
+def invoice_options() -> dict:
+    """Invoice screen options from Vansale Settings: line discount shown, what
+    the additional discount applies to (ERPNext `apply_discount_on`), and the
+    payment type a new invoice starts on."""
+    flags = global_flags()
+    apply_on = flags.get("apply_discount_on")
+    return {
+        "line_discount": bool(flags.get("allow_line_discount", True)),
+        "apply_discount_on": apply_on if apply_on in ("Grand Total", "Net Total") else "Grand Total",
+        "default_payment": "credit" if flags.get("default_payment_type") == "Credit" else "cash",
+    }
 
 
 def advance_payment_allowed(user: str | None = None) -> bool:

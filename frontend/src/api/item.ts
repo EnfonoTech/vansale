@@ -12,6 +12,9 @@ export interface ItemRow {
   standard_rate?: number;
   image?: string;
   stock_qty?: number;
+  /** Set when the item sells in another unit than its stock unit. */
+  sales_uom?: string | null;
+  sales_cf?: number | null;
 }
 
 export interface ItemUom {

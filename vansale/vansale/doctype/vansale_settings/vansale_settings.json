@@ -12,6 +12,10 @@
   "allow_uom_change",
   "use_customer_price",
   "allow_return_without_invoice",
+  "column_break_invoicing",
+  "allow_line_discount",
+  "apply_discount_on",
+  "default_payment_type",
   "section_break_cash_sale",
   "cash_sale_posting",
   "cash_payment_entry_status",
@@ -19,6 +23,7 @@
   "collection_payment_entry_status",
   "allow_split_payment",
   "allow_advance_payment",
+  "allow_delete_draft_payment",
   "section_break_print",
   "invoice_print_format",
   "column_break_print",
@@ -89,6 +94,30 @@
    "label": "Allow return without invoice"
   },
   {
+   "fieldname": "column_break_invoicing",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "1",
+   "fieldname": "allow_line_discount",
+   "fieldtype": "Check",
+   "label": "Allow line discount"
+  },
+  {
+   "default": "Grand Total",
+   "fieldname": "apply_discount_on",
+   "fieldtype": "Select",
+   "label": "Apply additional discount on",
+   "options": "Grand Total\nNet Total"
+  },
+  {
+   "default": "Cash",
+   "fieldname": "default_payment_type",
+   "fieldtype": "Select",
+   "label": "Default payment on invoice",
+   "options": "Cash\nCredit"
+  },
+  {
    "fieldname": "section_break_cash_sale",
    "fieldtype": "Section Break",
    "label": "Payments"
@@ -129,6 +158,12 @@
    "fieldname": "allow_advance_payment",
    "fieldtype": "Check",
    "label": "Allow advance payment (no invoice allocation)"
+  },
+  {
+   "default": "1",
+   "fieldname": "allow_delete_draft_payment",
+   "fieldtype": "Check",
+   "label": "Allow deleting draft payments"
   },
   {
    "fieldname": "section_break_print",
@@ -237,7 +272,7 @@
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-10-09 12:00:00.000000",
+ "modified": "2026-10-12 10:00:00.000000",
  "modified_by": "Administrator",
  "module": "Vansale",
  "name": "Vansale Settings",

@@ -430,6 +430,10 @@ def delete_payment(name: str) -> dict:
     """
     if not name:
         frappe.throw(_("Payment name required"))
+    from vansale.vansale.doctype.vansale_settings.vansale_settings import global_flags
+
+    if not global_flags().get("allow_delete_draft_payment", True):
+        frappe.throw(_("Deleting payments from the app is turned off. Ask the office."), frappe.PermissionError)
     doc = frappe.get_doc("Payment Entry", name)
     if doc.docstatus != 0:
         frappe.throw(_("Only draft payments can be deleted here. Submitted payments must be cancelled from the Desk."))

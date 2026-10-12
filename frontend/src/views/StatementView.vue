@@ -157,14 +157,20 @@ onMounted(load);
 <template>
   <div class="stack">
     <section class="card filter-card">
-      <label class="field">
-        <span class="label">From</span>
-        <input type="date" v-model="fromDate" />
-      </label>
-      <label class="field">
-        <span class="label">To</span>
-        <input type="date" v-model="toDate" />
-      </label>
+      <div class="field">
+        <span class="label-row">
+          <span class="label">From</span>
+          <button type="button" class="today" @click="fromDate = isoLocal(new Date())">Today</button>
+        </span>
+        <input type="date" v-model="fromDate" aria-label="From" />
+      </div>
+      <div class="field">
+        <span class="label-row">
+          <span class="label">To</span>
+          <button type="button" class="today" @click="toDate = isoLocal(new Date())">Today</button>
+        </span>
+        <input type="date" v-model="toDate" aria-label="To" />
+      </div>
       <button type="button" class="apply" aria-label="Apply" :disabled="loading" @click="load">
         <Icon name="refresh" :size="16" /> <span class="apply-text">Apply</span>
       </button>
@@ -222,6 +228,13 @@ onMounted(load);
 }
 .field { display: flex; flex-direction: column; gap: 0.25rem; min-width: 0; }
 .label { font-size: var(--text-xs); color: var(--text-muted); font-weight: 500; }
+.label-row { display: flex; justify-content: space-between; align-items: baseline; gap: 0.25rem; }
+.today {
+  all: unset; box-sizing: border-box; cursor: pointer;
+  font-size: var(--text-xs); font-weight: 600; color: var(--primary);
+  padding: 0.05rem 0.3rem; border-radius: var(--radius-sm);
+}
+.today:active { background: var(--primary-soft); }
 .field input, .apply { height: 2.75rem; box-sizing: border-box; }
 .field input { min-width: 0; padding-inline: 0.6rem; }
 .apply {

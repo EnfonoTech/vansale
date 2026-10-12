@@ -95,6 +95,9 @@ def list_stock(warehouse: Optional[str] = None, limit: int = 500) -> dict:
     for r in rows:
         r["actual_qty"] = float(r.get("actual_qty") or 0)
         r["stock_value"] = float(r.get("stock_value") or 0)
+    from vansale.api.item import add_sales_units
+
+    add_sales_units(rows)
     return {"warehouse": wh, "items": rows}
 
 

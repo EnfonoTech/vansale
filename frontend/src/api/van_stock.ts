@@ -11,6 +11,9 @@ export interface VanStockRow {
   actual_qty: number;
   stock_value: number;
   image?: string;
+  /** Set when the item sells in another unit than its stock unit. */
+  sales_uom?: string | null;
+  sales_cf?: number | null;
 }
 
 export interface TransferInPayload {

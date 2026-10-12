@@ -32,6 +32,14 @@ export interface TaxInput {
   ratePercent: number;
   /** True when the rate is `included_in_print_rate` on the tax template. */
   inclusive: boolean;
+  /**
+   * ERPNext additional discount (`apply_discount_on`):
+   *   "Net Total"   — off the amount before tax; tax is charged on what is left.
+   *   "Grand Total" — the customer pays exactly `discount` less; ERPNext splits
+   *                   it back into net and tax.
+   * Omitted: the discount comes off the line total (older behaviour).
+   */
+  applyOn?: "Grand Total" | "Net Total" | null;
 }
 
 export function computeTaxTotals({
@@ -39,9 +47,26 @@ export function computeTaxTotals({
   discount,
   ratePercent,
   inclusive,
+  applyOn,
 }: TaxInput): TaxTotals {
-  const afterDiscount = (Number(net) || 0) - (Number(discount) || 0);
   const r = (Number(ratePercent) || 0) / 100;
+  const d = Number(discount) || 0;
+  const lines = Number(net) || 0;
+
+  if (applyOn === "Net Total") {
+    // Taxable base = line amounts net of tax, less the discount.
+    const base = (inclusive ? lines / (1 + r) : lines) - d;
+    const tax = base * r;
+    return { afterDiscount: base, tax, grand: base + tax, netOfTax: base };
+  }
+  if (applyOn === "Grand Total") {
+    // Grand total before discount, less the discount; tax backed out of it.
+    const grand = (inclusive ? lines : lines * (1 + r)) - d;
+    const tax = r ? grand * (r / (1 + r)) : 0;
+    return { afterDiscount: grand, tax, grand, netOfTax: grand - tax };
+  }
+
+  const afterDiscount = lines - d;
 
   if (!r) {
     // Zero-rated or exempt: no tax line at all. Not "15% of nothing".

@@ -66,4 +66,29 @@ describe("computeTaxTotals", () => {
     expect(computeTaxTotals({ net: 100, discount: null, ratePercent: 15, inclusive: false }).grand)
       .toBeCloseTo(115);
   });
+
+  describe("ERPNext additional discount (apply_discount_on)", () => {
+    it("Net Total, exclusive: tax on the discounted net", () => {
+      const t = computeTaxTotals({ net: 200, discount: 100, ratePercent: 15, inclusive: false, applyOn: "Net Total" });
+      expect(round(t.netOfTax)).toBe(100);
+      expect(round(t.tax)).toBe(15);
+      expect(round(t.grand)).toBe(115);
+    });
+    it("Grand Total, exclusive: customer pays exactly the discount less", () => {
+      const t = computeTaxTotals({ net: 200, discount: 30, ratePercent: 15, inclusive: false, applyOn: "Grand Total" });
+      expect(round(t.grand)).toBe(200);
+      expect(round(t.tax)).toBe(26.09);
+      expect(round(t.netOfTax)).toBe(173.91);
+    });
+    it("Grand Total, inclusive: discount off the gross", () => {
+      const t = computeTaxTotals({ net: 230, discount: 115, ratePercent: 15, inclusive: true, applyOn: "Grand Total" });
+      expect(round(t.grand)).toBe(115);
+      expect(round(t.netOfTax)).toBe(100);
+    });
+    it("Net Total, inclusive: discount off the net of tax", () => {
+      const t = computeTaxTotals({ net: 230, discount: 100, ratePercent: 15, inclusive: true, applyOn: "Net Total" });
+      expect(round(t.netOfTax)).toBe(100);
+      expect(round(t.grand)).toBe(115);
+    });
+  });
 });

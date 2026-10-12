@@ -150,7 +150,38 @@ def list_mine(
         }
         for r in rows:
             r["stock_qty"] = balances.get(r["item_code"], 0.0)
+        add_sales_units(rows)
     return rows
+
+
+def sales_units(item_codes: list[str]) -> dict[str, tuple[str, float]]:
+    """Item → (Sales UOM, conversion factor) where the item sells in a unit
+    other than its stock unit, so stock can also be shown in that unit."""
+    if not item_codes:
+        return {}
+    items = frappe.get_all(
+        "Item", {"name": ["in", item_codes]}, ["name", "stock_uom", "sales_uom"], limit_page_length=0
+    )
+    wanted = {i.name: i.sales_uom for i in items if i.sales_uom and i.sales_uom != i.stock_uom}
+    if not wanted:
+        return {}
+    out = {}
+    for r in frappe.get_all(
+        "UOM Conversion Detail",
+        {"parent": ["in", list(wanted)], "parenttype": "Item"},
+        ["parent", "uom", "conversion_factor"],
+    ):
+        if wanted.get(r.parent) == r.uom and flt(r.conversion_factor) > 0:
+            out[r.parent] = (r.uom, flt(r.conversion_factor))
+    return out
+
+
+def add_sales_units(rows: list[dict]) -> None:
+    """Annotate stock rows with `sales_uom` / `sales_cf` (see `sales_units`)."""
+    units = sales_units([r["item_code"] for r in rows])
+    for r in rows:
+        uom, cf = units.get(r["item_code"], (None, None))
+        r["sales_uom"], r["sales_cf"] = uom, cf
 
 
 def _customer_price_list(customer: Optional[str]) -> Optional[str]:
@@ -334,4 +365,5 @@ def stock_balance(warehouse: str, limit: int = 500) -> list[dict]:
     )
     for r in rows:
         r["actual_qty"] = float(r.get("actual_qty") or 0)
+    add_sales_units(rows)
     return rows
