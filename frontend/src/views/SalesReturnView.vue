@@ -90,7 +90,7 @@ function qtyIn(stock: number, cf: number): number {
   return Math.floor((stock / (cf || 1)) * 1000 + 1e-6) / 1000;
 }
 
-const ratePrecision = computed(() => session.currencyPrecision);
+const ratePrecision = computed(() => session.ratePrecision);
 /** The sale's rate converted to the row's chosen unit (as the server does). */
 function rateIn(it: InvoiceDetailItem, cf: number): number {
   const p = 10 ** ratePrecision.value;
@@ -106,7 +106,12 @@ function onUomChange(i: number, it: InvoiceDetailItem) {
 }
 
 function fmt(n: number): string {
-  return new Intl.NumberFormat(undefined, { maximumFractionDigits: 2, minimumFractionDigits: 2 }).format(n);
+  return new Intl.NumberFormat(undefined, { maximumFractionDigits: session.currencyPrecision, minimumFractionDigits: session.currencyPrecision }).format(n);
+}
+
+function fmtRate(n: number): string {
+  const p = ratePrecision.value;
+  return new Intl.NumberFormat(undefined, { maximumFractionDigits: p, minimumFractionDigits: p }).format(n);
 }
 
 const selectedCount = computed(() =>
@@ -210,7 +215,7 @@ async function submit() {
       submit: 1,
       refund: refundPayload(),
     });
-    toasts.success(`Credit Note ${res.name} · ${session.currency} ${Math.abs(res.grand_total).toFixed(2)}`);
+    toasts.success(`Credit Note ${res.name} · ${session.currency} ${Math.abs(res.grand_total).toFixed(session.currencyPrecision)}`);
     if (session.printBehaviour?.after_submit) {
       // "Print after submit": the credit note's detail view prints on arrival.
       void router.push({ name: "invoice-detail", params: { name: res.name }, query: { autoprint: "1" } });
@@ -271,7 +276,7 @@ async function submit() {
               />
               <div class="head-body">
                 <strong class="truncate">{{ it.item_name }}</strong>
-                <span class="muted xsmall">{{ it.item_code }} · {{ it.uom || "" }} · <SarSymbol :code="session.currency" />{{ fmt(it.rate) }}</span>
+                <span class="muted xsmall">{{ it.item_code }} · {{ it.uom || "" }} · <SarSymbol :code="session.currency" />{{ fmtRate(it.rate) }}</span>
               </div>
               <strong class="line-amt"><SarSymbol :code="session.currency" />{{ fmt(it.amount) }}</strong>
             </label>
@@ -297,7 +302,7 @@ async function submit() {
               <div class="cap">
                 <span class="tiny">Max {{ fmt(rows[i].maxQty) }} {{ rows[i].uom }}</span>
                 <span v-if="rows[i].uom !== it.uom" class="tiny">
-                  <SarSymbol :code="session.currency" />{{ fmt(rateIn(it, rows[i].cf)) }} / {{ rows[i].uom }}
+                  <SarSymbol :code="session.currency" />{{ fmtRate(rateIn(it, rows[i].cf)) }} / {{ rows[i].uom }}
                 </span>
                 <span v-if="it.returned_qty" class="tiny muted">Returned {{ fmt(it.returned_qty) }}</span>
               </div>

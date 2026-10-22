@@ -191,23 +191,31 @@ def _vat_field() -> Optional[str]:
 
 
 def _outstanding_by_customer(customers: list[str]) -> dict[str, float]:
-    """Outstanding per customer as the customer screen shows it: submitted
-    invoices' balance less receipts awaiting office submit."""
+    """Each customer's balance in the ledger (submitted GL entries of the
+    user's company), as the Statement and Accounts Receivable show it —
+    invoices, returns, payments, advances, journal entries and opening
+    balances. Drafts are not in the ledger, so they are not counted; a
+    negative balance is credit the customer holds."""
     if not customers:
         return {}
-    from vansale.api.payment import pending_by_customer
+    from vansale.api.invoice import _user_company
 
-    pending = pending_by_customer(customers)
-    owed = dict(
+    balances = dict(
         frappe.db.sql(
-            """SELECT customer, SUM(outstanding_amount) FROM `tabSales Invoice`
-               WHERE docstatus = 1 AND customer IN %(names)s
-               GROUP BY customer""",
-            {"names": tuple(customers)},
+            f"""SELECT party, SUM(debit - credit) FROM `tabGL Entry`
+               WHERE party_type = 'Customer' AND party IN %(names)s
+                 AND company = %(company)s AND is_cancelled = 0
+                 {_NOT_SYSTEM_NOTE}
+               GROUP BY party""",
+            {"names": tuple(customers), "company": _user_company() or ""},
         )
     )
     precision = frappe.get_precision("Sales Invoice", "outstanding_amount") or 2
-    return {c: flt(max(flt(owed.get(c)) - pending.get(c, 0.0), 0.0), precision) for c in customers}
+    return {c: flt(balances.get(c), precision) for c in customers}
+
+
+def _outstanding(customer: str) -> float:
+    return _outstanding_by_customer([customer]).get(customer, 0.0)
 
 
 @frappe.whitelist(methods=["GET"])
@@ -386,17 +394,6 @@ def detail(name: str) -> dict:
         # Stable keys for the app whatever the site calls these fields.
         for key, field in mapped.items():
             a[key] = a.pop(field, None) if field and field != key else a.get(key)
-    outstanding = (
-        frappe.db.sql(
-            """
-            SELECT COALESCE(SUM(outstanding_amount), 0)
-            FROM `tabSales Invoice`
-            WHERE customer = %s AND docstatus = 1
-            """,
-            (name,),
-        )[0][0]
-        or 0
-    )
     from vansale.api.payment import pending_for_customer
 
     pending = pending_for_customer(name)
@@ -416,8 +413,9 @@ def detail(name: str) -> dict:
         "tax_id": doc.tax_id,
         "default_currency": doc.default_currency,
         "addresses": addresses,
-        # Collected but awaiting office submit (draft Payment Entries).
-        "outstanding": max(float(outstanding or 0) - pending, 0.0),
+        "outstanding": _outstanding(doc.name),
+        # Collected but awaiting office submit (draft Payment Entries);
+        # shown beside the balance, not taken off it.
         "pending": pending,
         "modified": naive_site_to_utc_iso(doc.modified),
     }
@@ -828,8 +826,12 @@ def _build_statement_html(name: str, from_date: str | None, to_date: str | None)
 
     pending = pending_for_customer(name)
 
+    from vansale.api.me import amount_precision
+
+    decimals = amount_precision()
+
     def fmt(x: float) -> str:
-        return f"{x:,.2f}"
+        return f"{x:,.{decimals}f}"
 
     def d(x) -> str:
         return formatdate(x, "dd-MM-yyyy")
@@ -1027,14 +1029,6 @@ def statement_pdf(name: str, from_date: str | None = None, to_date: str | None =
 def summary(customer: str) -> dict:
     """Aggregates for the customer detail tile strip."""
     check_read("Customer", customer)
-    outstanding = frappe.db.sql(
-        """
-        SELECT COALESCE(SUM(outstanding_amount), 0)
-        FROM `tabSales Invoice`
-        WHERE customer = %s AND docstatus = 1
-        """,
-        (customer,),
-    )[0][0] or 0
     last_invoice = frappe.db.get_value(
         "Sales Invoice", {"customer": customer, "docstatus": 1},
         ["name", "grand_total", "posting_date"],
@@ -1047,7 +1041,7 @@ def summary(customer: str) -> dict:
 
     pending = pending_for_customer(customer)
     return {
-        "outstanding": max(float(outstanding or 0) - pending, 0.0),
+        "outstanding": _outstanding(customer),
         "pending": pending,
         "last_invoice": last_invoice,
     }

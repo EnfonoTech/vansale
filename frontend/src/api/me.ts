@@ -28,8 +28,10 @@ export interface ConfigDefaults {
   allow_uom_change?: boolean;
   /** Customer-specific Item Prices used for pricing: van -> global. */
   use_customer_price?: boolean;
-  /** Decimals for rates/amounts, as ERPNext rounds Sales Invoice Item.rate. */
+  /** Decimals for amounts and totals (System Settings currency precision). */
   currency_precision?: number;
+  /** Decimals for rates (Sales Invoice Item.rate precision). */
+  rate_precision?: number;
   /** "POS Invoice" | "Payment Entry": how a cash sale is posted. */
   cash_sale_posting?: string;
   /** Several payment modes on one cash sale (setting). */

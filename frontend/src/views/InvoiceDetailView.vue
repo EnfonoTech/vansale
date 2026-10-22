@@ -10,6 +10,7 @@ import { ApiError } from "@/app/frappe";
 import { openPrint, printDocument, defaultPrintFormat } from "@/api/print";
 import Icon from "@/components/Icon.vue";
 import SarSymbol from "@/components/SarSymbol.vue";
+import { vDecimals } from "@/components/decimals";
 
 const route = useRoute();
 const router = useRouter();
@@ -76,7 +77,13 @@ onMounted(async () => {
 
 function fmt(n: number | null | undefined): string {
   const v = typeof n === "number" ? n : Number(n) || 0;
-  return new Intl.NumberFormat(undefined, { maximumFractionDigits: 2, minimumFractionDigits: 2 }).format(v);
+  return new Intl.NumberFormat(undefined, { maximumFractionDigits: session.currencyPrecision, minimumFractionDigits: session.currencyPrecision }).format(v);
+}
+
+/** Rates keep Sales Invoice Item.rate's precision (may differ from amounts). */
+function fmtRate(n: number | null | undefined): string {
+  const p = session.ratePrecision;
+  return new Intl.NumberFormat(undefined, { maximumFractionDigits: p, minimumFractionDigits: p }).format(Number(n) || 0);
 }
 
 function tone(status: string | undefined): string {
@@ -319,7 +326,7 @@ async function deleteInvoice() {
           </label>
           <label class="field">
             <span class="tiny">Amount</span>
-            <input type="number" min="0" step="any" inputmode="decimal" v-model.number="refundAmountModel" />
+            <input type="number" min="0" step="any" inputmode="decimal" v-model.number="refundAmountModel" v-decimals="session.currencyPrecision" />
           </label>
           <input v-if="refundNeedsRef" class="full" type="text" v-model="refundRef" placeholder="Reference no. (optional)" />
         </div>
@@ -344,12 +351,12 @@ async function deleteInvoice() {
               <span>{{ fmt(it.qty) }} {{ it.uom || "" }}</span>
               <span>×</span>
               <template v-if="it.price_list_rate && it.price_list_rate > it.rate">
-                <span class="strike"><SarSymbol :code="session.currency" />{{ fmt(it.price_list_rate) }}</span>
-                <span class="after-disc"><SarSymbol :code="session.currency" />{{ fmt(it.rate) }}</span>
+                <span class="strike"><SarSymbol :code="session.currency" />{{ fmtRate(it.price_list_rate) }}</span>
+                <span class="after-disc"><SarSymbol :code="session.currency" />{{ fmtRate(it.rate) }}</span>
                 <span class="disc">- {{ fmt(it.discount_percentage || ((it.price_list_rate - it.rate) / it.price_list_rate * 100)) }}%</span>
               </template>
               <template v-else>
-                <span><SarSymbol :code="session.currency" />{{ fmt(it.rate) }}</span>
+                <span><SarSymbol :code="session.currency" />{{ fmtRate(it.rate) }}</span>
                 <span v-if="it.discount_percentage > 0" class="disc">- {{ fmt(it.discount_percentage) }}%</span>
               </template>
             </div>

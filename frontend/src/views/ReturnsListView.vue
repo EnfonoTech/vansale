@@ -66,7 +66,7 @@ onMounted(load);
 
 function fmt(n: unknown): string {
   const num = typeof n === "number" ? n : Number(n) || 0;
-  return new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 }).format(Math.abs(num));
+  return new Intl.NumberFormat(undefined, { maximumFractionDigits: session.currencyPrecision }).format(Math.abs(num));
 }
 
 function openReturn(name: string) {

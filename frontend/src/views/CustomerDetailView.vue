@@ -65,7 +65,7 @@ onMounted(load);
 
 function fmt(n: unknown): string {
   const num = typeof n === "number" ? n : Number(n) || 0;
-  return new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 }).format(num);
+  return new Intl.NumberFormat(undefined, { maximumFractionDigits: session.currencyPrecision }).format(num);
 }
 
 function newInvoice() {

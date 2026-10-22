@@ -51,7 +51,7 @@ async function load() {
 
 function fmt(n: number | null | undefined): string {
   const v = typeof n === "number" ? n : Number(n) || 0;
-  return new Intl.NumberFormat(undefined, { maximumFractionDigits: 2, minimumFractionDigits: 2 }).format(v);
+  return new Intl.NumberFormat(undefined, { maximumFractionDigits: session.currencyPrecision, minimumFractionDigits: session.currencyPrecision }).format(v);
 }
 
 function tone(status: string | undefined): string {

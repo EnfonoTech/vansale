@@ -188,7 +188,8 @@ def config_defaults() -> dict:
         "require_pin": require_pin,
         "allow_uom_change": allow_uom_change,
         "use_customer_price": use_customer_price,
-        "currency_precision": rate_precision(),
+        "currency_precision": amount_precision(),
+        "rate_precision": rate_precision(),
         "cash_sale_posting": cash_sale_settings(user)["posting"],
         "split_payment": split_payment_allowed(user),
         "advance_payment": advance_payment_allowed(user),
@@ -314,12 +315,20 @@ def user_to_van_config(user: str | None) -> str | None:
 
 
 def rate_precision() -> int:
-    """Decimals for rates/amounts — the precision ERPNext uses for Sales
-    Invoice Item.rate (field precision → System Settings currency precision
-    → number format)."""
+    """Decimals for rates — the precision ERPNext uses for Sales Invoice
+    Item.rate: the field's own (Customize Form), else System Settings
+    currency precision."""
     from frappe.model.meta import get_field_precision
 
     return get_field_precision(frappe.get_meta("Sales Invoice Item").get_field("rate"))
+
+
+def amount_precision() -> int:
+    """Decimals for amounts and totals — Sales Invoice grand_total's
+    precision, normally System Settings currency precision."""
+    from frappe.model.meta import get_field_precision
+
+    return get_field_precision(frappe.get_meta("Sales Invoice").get_field("grand_total"))
 
 
 DEFAULT_INVOICE_PRINT_FORMAT = "Vansale Tax Invoice"

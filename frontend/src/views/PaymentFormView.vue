@@ -9,6 +9,7 @@ import { useToastStore } from "@/stores/toasts";
 import Icon from "@/components/Icon.vue";
 import SarSymbol from "@/components/SarSymbol.vue";
 import SearchSelect from "@/components/SearchSelect.vue";
+import { vDecimals } from "@/components/decimals";
 
 const router = useRouter();
 const route = useRoute();
@@ -92,7 +93,7 @@ async function loadOutstanding() {
 
 function fmt(n: unknown): string {
   const v = typeof n === "number" ? n : Number(n) || 0;
-  return new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 }).format(v);
+  return new Intl.NumberFormat(undefined, { maximumFractionDigits: session.currencyPrecision }).format(v);
 }
 
 function togglePick(r: Record<string, unknown>) {
@@ -157,7 +158,7 @@ async function submit() {
     toasts.success(
       res.queued
         ? "Payment queued offline"
-        : `Payment ${res.name} · ${session.currency} ${res.paid_amount.toFixed(2)}`,
+        : `Payment ${res.name} · ${session.currency} ${res.paid_amount.toFixed(session.currencyPrecision)}`,
     );
     // Land on the new payment's detail view so the user sees exactly what
     // was recorded (amount, mode, invoices covered) rather than bouncing
@@ -290,6 +291,7 @@ async function submit() {
             step="any"
             inputmode="decimal"
             v-model.number="amount"
+            v-decimals="session.currencyPrecision"
             placeholder="0.00"
           />
         </div>

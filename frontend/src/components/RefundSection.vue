@@ -12,6 +12,7 @@ import { modesOfPayment, type ModeOfPayment } from "@/api/payment";
 import type { ReturnTotals } from "@/api/invoice";
 import SarSymbol from "@/components/SarSymbol.vue";
 import Icon from "@/components/Icon.vue";
+import { vDecimals } from "@/components/decimals";
 
 export interface RefundState {
   on: boolean;
@@ -84,7 +85,7 @@ onMounted(async () => {
           </label>
           <label class="field">
             <span class="tiny">Amount</span>
-            <input type="number" min="0" step="any" inputmode="decimal" v-model.number="amountModel" />
+            <input type="number" min="0" step="any" inputmode="decimal" v-model.number="amountModel" v-decimals="precision" />
           </label>
           <input v-if="needsReference(state.mode)" class="full" type="text" v-model="state.reference"
                  placeholder="Reference no. (optional)" />

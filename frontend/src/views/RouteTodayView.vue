@@ -221,8 +221,8 @@ const skippedCount = computed(() => stops.value.filter((s) => s.status === "skip
 
 function fmt(n: number): string {
   return new Intl.NumberFormat(undefined, {
-    maximumFractionDigits: 2,
-    minimumFractionDigits: 2,
+    maximumFractionDigits: session.currencyPrecision,
+    minimumFractionDigits: session.currencyPrecision,
   }).format(n);
 }
 

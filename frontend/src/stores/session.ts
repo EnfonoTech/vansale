@@ -95,8 +95,11 @@ export const useSessionStore = defineStore("session", {
      */
     uomChangeAllowed: (s) => s.defaults?.allow_uom_change !== false,
     vanPriceList: (s) => s.defaults?.selling_price_list ?? null,
-    /** Decimals for rates and amounts (server: Sales Invoice Item.rate precision). */
+    /** Decimals for amounts and totals (System Settings currency precision). */
     currencyPrecision: (s) => s.defaults?.currency_precision ?? 2,
+    /** Decimals for rates: Sales Invoice Item.rate's own precision when set in
+     *  Customize Form, else the currency precision. */
+    ratePrecision: (s) => s.defaults?.rate_precision ?? s.defaults?.currency_precision ?? 2,
     /** Configured print formats (null → the app's own defaults). */
     printFormats: (s) => s.defaults?.print_formats ?? null,
     printBehaviour: (s) => s.defaults?.print ?? null,

@@ -77,7 +77,7 @@ async function load() {
 onMounted(load);
 
 function fmt(n: number | undefined | null): string {
-  return new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 }).format(Number(n) || 0);
+  return new Intl.NumberFormat(undefined, { maximumFractionDigits: session.currencyPrecision }).format(Number(n) || 0);
 }
 
 const currency = computed(() => session.currency ?? "");

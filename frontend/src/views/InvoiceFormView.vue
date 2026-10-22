@@ -34,6 +34,7 @@ import Icon from "@/components/Icon.vue";
 import { stockLabel } from "@/features/van/stock";
 import SarSymbol from "@/components/SarSymbol.vue";
 import SearchSelect from "@/components/SearchSelect.vue";
+import { vDecimals } from "@/components/decimals";
 
 const router = useRouter();
 const route = useRoute();
@@ -230,17 +231,24 @@ const selectedCustomer = computed(() =>
   customers.value.find((c) => c.name === customer.value),
 );
 
-// Re-price all lines when customer changes (different price list).
+// Re-price all lines when customer changes (different price list) — not
+// when a draft being edited sets its own customer: its rates are the ones
+// it was saved with.
+let keepDraftRates = false;
 watch(customer, async (newCustomer) => {
   if (!newCustomer) return;
   // Tax Category is per-customer, so the rate can change with the customer.
   void loadTaxInfo();
+  if (keepDraftRates) {
+    keepDraftRates = false;
+    return;
+  }
   for (const l of lines.value) {
     try {
       const p = await priceFor(l.item_code, newCustomer, l.uom);
       if (p.price_list_rate) {
-        l.price_list_rate = round(p.price_list_rate);
-        l.rate = round(p.price_list_rate);
+        l.price_list_rate = roundRate(p.price_list_rate);
+        l.rate = roundRate(p.price_list_rate);
         recalc(l);
       }
     } catch {
@@ -283,6 +291,7 @@ async function prefillFromDraft(name: string) {
       void router.replace({ name: "invoice-detail", params: { name } });
       return;
     }
+    keepDraftRates = customer.value !== doc.customer;
     customer.value = doc.customer;
     remarks.value = doc.remarks || "";
     discountAmount.value = doc.discount_amount || null;
@@ -338,6 +347,12 @@ function round(n: number): number {
   return Math.round((Number(n) || 0) * f) / f;
 }
 const money = (n: number) => (Number(n) || 0).toFixed(session.currencyPrecision);
+/** Rates keep Sales Invoice Item.rate's precision (may differ from amounts). */
+function roundRate(n: number): number {
+  const f = 10 ** session.ratePrecision;
+  return Math.round((Number(n) || 0) * f) / f;
+}
+const rateText = (n: number) => (Number(n) || 0).toFixed(session.ratePrecision);
 
 function recalc(l: Line) {
   const qty = Number(l.qty) || 0;
@@ -381,8 +396,8 @@ async function addLine(item: ItemRow) {
     item_code: item.item_code,
     item_name: item.item_name,
     qty: 1,
-    rate: round(firstUom?.price_list_rate || priceListRate),
-    price_list_rate: round(firstUom?.price_list_rate || priceListRate),
+    rate: roundRate(firstUom?.price_list_rate || priceListRate),
+    price_list_rate: roundRate(firstUom?.price_list_rate || priceListRate),
     uom: firstUom?.uom || item.stock_uom,
     conversion_factor: firstUom?.conversion_factor || 1,
     discount_percentage: 0,
@@ -399,13 +414,13 @@ async function onUomChange(l: Line) {
   const chosen = l.uoms.find((u) => u.uom === l.uom);
   if (chosen) {
     l.conversion_factor = chosen.conversion_factor;
-    l.price_list_rate = round(chosen.price_list_rate);
-    l.rate = round(chosen.price_list_rate);
+    l.price_list_rate = roundRate(chosen.price_list_rate);
+    l.rate = roundRate(chosen.price_list_rate);
   } else {
     try {
       const p = await priceFor(l.item_code, customer.value || undefined, l.uom);
-      l.price_list_rate = round(p.price_list_rate);
-      l.rate = round(p.price_list_rate);
+      l.price_list_rate = roundRate(p.price_list_rate);
+      l.rate = roundRate(p.price_list_rate);
     } catch {
       /* keep existing rate */
     }
@@ -599,7 +614,7 @@ onMounted(loadAll);
           <select v-model="r.mode">
             <option v-for="m in mops" :key="m.name" :value="m.name">{{ m.name }}</option>
           </select>
-          <input type="number" min="0" step="any" inputmode="decimal" v-model.number="r.amount"
+          <input type="number" min="0" step="any" inputmode="decimal" v-model.number="r.amount" v-decimals="session.currencyPrecision"
                  placeholder="Tap for rest" @focus="fillRest(i)" />
           <button v-if="payRows.length > 1" class="icon-only small" type="button" @click="removePayRow(i)" aria-label="Remove">
             <Icon name="x" :size="16" />
@@ -630,7 +645,7 @@ onMounted(loadAll);
           </label>
           <label class="field">
             <span class="tiny">Amount</span>
-            <input type="number" min="0" step="any" inputmode="decimal" v-model.number="singleAmountModel" />
+            <input type="number" min="0" step="any" inputmode="decimal" v-model.number="singleAmountModel" v-decimals="session.currencyPrecision" />
           </label>
         </div>
         <div v-if="singleCredit > 0" class="tot-row small muted pay-credit">
@@ -681,7 +696,7 @@ onMounted(loadAll);
             <label>
               <span class="tiny">Rate</span>
               <input type="number" min="0" step="any" inputmode="decimal"
-                     v-model.number="l.rate" @input="recalc(l)" />
+                     v-model.number="l.rate" v-decimals="session.ratePrecision" @input="recalc(l)" />
             </label>
             <label v-if="session.lineDiscount">
               <span class="tiny">Disc %</span>
@@ -691,7 +706,7 @@ onMounted(loadAll);
           </div>
           <div class="line-foot">
             <span v-if="l.price_list_rate && l.price_list_rate !== l.rate" class="muted xsmall">
-              List: <SarSymbol :code="session.currency" />{{ money(l.price_list_rate || 0) }}
+              List: <SarSymbol :code="session.currency" />{{ rateText(l.price_list_rate || 0) }}
             </span>
             <strong class="tabular"><SarSymbol :code="session.currency" />{{ money(l.amount) }}</strong>
           </div>
@@ -737,7 +752,7 @@ onMounted(loadAll);
       </div>
       <label class="field">
         <span class="tiny">Additional discount on {{ session.applyDiscountOn }} ({{ session.currency }})</span>
-        <input type="number" min="0" step="any" inputmode="decimal" v-model.number="discountAmount" placeholder="0" />
+        <input type="number" min="0" step="any" inputmode="decimal" v-model.number="discountAmount" v-decimals="session.currencyPrecision" placeholder="0" />
       </label>
       <div class="tot-row muted">
         <span>

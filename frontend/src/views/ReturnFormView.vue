@@ -28,6 +28,7 @@ import Icon from "@/components/Icon.vue";
 import SarSymbol from "@/components/SarSymbol.vue";
 import SearchSelect from "@/components/SearchSelect.vue";
 import RefundSection, { type RefundState } from "@/components/RefundSection.vue";
+import { vDecimals } from "@/components/decimals";
 
 const router = useRouter();
 const session = useSessionStore();
@@ -63,8 +64,8 @@ const customerOptions = computed(() =>
 );
 
 const precision = computed(() => session.currencyPrecision);
-const round = (n: number) => Math.round((Number(n) || 0) * 10 ** precision.value) / 10 ** precision.value;
 const money = (n: number) => (Number(n) || 0).toFixed(precision.value);
+const roundRate = (n: number) => Math.round((Number(n) || 0) * 10 ** session.ratePrecision) / 10 ** session.ratePrecision;
 // ZATCA references (sites with ksa_compliance): always chosen by the user;
 // items never sold to the customer are only flagged.
 const refOptions = ref<ReferenceOptions | null>(null);
@@ -163,7 +164,7 @@ async function addLine(it: ItemRow) {
       item_name: it.item_name,
       qty: 1,
       uom: first?.uom ?? it.stock_uom,
-      rate: round(first?.price_list_rate ?? 0),
+      rate: roundRate(first?.price_list_rate ?? 0),
       uoms: d.uoms,
     });
   } catch (e) {
@@ -173,7 +174,7 @@ async function addLine(it: ItemRow) {
 
 function onUomChange(l: Line) {
   const u = l.uoms.find((x) => x.uom === l.uom);
-  if (u) l.rate = round(u.price_list_rate);
+  if (u) l.rate = roundRate(u.price_list_rate);
 }
 
 function removeLine(i: number) {
@@ -262,7 +263,7 @@ onMounted(async () => {
             </label>
             <label>
               <span class="tiny">Rate</span>
-              <input type="number" min="0" step="any" inputmode="decimal" v-model.number="l.rate" />
+              <input type="number" min="0" step="any" inputmode="decimal" v-model.number="l.rate" v-decimals="session.ratePrecision" />
             </label>
           </div>
           <div class="line-foot muted xsmall">
