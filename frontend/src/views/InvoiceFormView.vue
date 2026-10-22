@@ -311,8 +311,8 @@ async function prefillFromDraft(name: string) {
         reference: p.reference_no ?? "",
       }));
     }
-    // Rebuild line rows. We skip UOM re-fetching since the doc already has
-    // rate/price_list_rate frozen; operator can still change qty/rate inline.
+    // Rebuild line rows with the rates, UOM and factor they were saved with;
+    // the item's other UOMs are loaded below so the UOM can still change.
     lines.value = doc.items.map<Line>((it) => ({
       item_code: it.item_code,
       item_name: it.item_name,
@@ -331,10 +331,37 @@ async function prefillFromDraft(name: string) {
         : [],
       amount: it.amount,
     }));
+    void loadDraftUoms();
   } catch (e) {
     toasts.error(e instanceof Error ? e.message : String(e));
     void router.replace({ name: "invoices" });
   }
+}
+
+/** The item UOMs of an edited draft's lines (a draft line only knows its
+ *  own), so the UOM can be changed as on a new line. Saved rates stay until
+ *  the UOM is changed; offline, a line keeps its one UOM. */
+async function loadDraftUoms() {
+  if (!session.uomChangeAllowed) return;
+  const codes = [...new Set(lines.value.map((l) => l.item_code))];
+  await Promise.all(
+    codes.map(async (code) => {
+      let uoms = uomCache[uomKey(code)];
+      if (!uoms) {
+        try {
+          uoms = (await itemDetail(code, customer.value || undefined)).uoms;
+          uomCache[uomKey(code)] = uoms;
+        } catch {
+          return;
+        }
+      }
+      for (const l of lines.value) {
+        if (l.item_code !== code) continue;
+        const own = l.uoms?.[0];
+        l.uoms = own && !uoms.some((u) => u.uom === own.uom) ? [own, ...uoms] : uoms;
+      }
+    }),
+  );
 }
 
 async function searchItems() {
