@@ -13,6 +13,7 @@
  */
 import { computed, nextTick, ref, watch } from "vue";
 import Icon from "./Icon.vue";
+import { useVisibleArea } from "./visibleArea";
 
 const props = withDefaults(
   defineProps<{
@@ -34,6 +35,9 @@ const emit = defineEmits<{
 const open = ref(false);
 const term = ref("");
 const inputEl = ref<HTMLInputElement | null>(null);
+
+// The sheet covers only the visible area (above the keyboard).
+const sheetStyle = useVisibleArea(open);
 
 const selected = computed(() => props.options.find((o) => o.value === props.modelValue));
 
@@ -83,7 +87,7 @@ function clear() {
     </button>
 
     <Teleport to="body">
-      <div v-if="open" class="ss-sheet" @click.self="open = false">
+      <div v-if="open" class="ss-sheet" :style="sheetStyle" @click.self="open = false">
         <div class="ss-panel">
           <div class="ss-search">
             <Icon name="search" :size="18" class="ss-ic" />
@@ -143,23 +147,26 @@ function clear() {
 .ss-ph { color: var(--text-muted); }
 .ss-val { font-weight: 600; }
 
+/* Opens from the top, search box first: a sheet from the bottom sat under
+   the phone keyboard. Its height follows the visible area (see sheetStyle). */
 .ss-sheet {
   position: fixed;
-  inset: 0;
+  inset-inline: 0;
+  top: 0;
+  height: 100dvh;
   z-index: 60;
   background: rgb(0 0 0 / 40%);
   display: flex;
-  align-items: flex-end;
+  justify-content: center;
 }
 .ss-panel {
   width: 100%;
-  max-height: 80dvh;
+  max-width: var(--max-content);
+  height: 100%;
   display: flex;
   flex-direction: column;
   background: var(--bg);
-  border-start-start-radius: var(--radius-lg);
-  border-start-end-radius: var(--radius-lg);
-  padding-bottom: env(safe-area-inset-bottom);
+  padding-top: env(safe-area-inset-top);
 }
 .ss-search {
   display: flex;
@@ -172,7 +179,7 @@ function clear() {
 .ss-ic { color: var(--text-muted); flex: none; }
 .ss-close { all: unset; cursor: pointer; color: var(--primary); font-weight: 600; flex: none; }
 
-.ss-list { list-style: none; margin: 0; padding: 0.25rem; overflow-y: auto; }
+.ss-list { list-style: none; margin: 0; padding: 0.25rem; overflow-y: auto; flex: 1; min-height: 0; overscroll-behavior: contain; }
 .ss-row {
   all: unset;
   cursor: pointer;

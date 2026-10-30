@@ -14,6 +14,7 @@ import { useSessionStore } from "@/stores/session";
 import ListSearch from "@/components/ListSearch.vue";
 import Icon from "@/components/Icon.vue";
 import SarSymbol from "@/components/SarSymbol.vue";
+import { useVisibleArea } from "@/components/visibleArea";
 
 const router = useRouter();
 const session = useSessionStore();
@@ -31,6 +32,8 @@ const pickerRows = ref<Array<Record<string, unknown>>>([]);
 const pickerLoading = ref(false);
 const pickerErr = ref("");
 const pickerSearch = ref("");
+// Above the phone keyboard, so the invoices are not hidden under it.
+const pickerStyle = useVisibleArea(pickerOpen);
 
 const filteredPicker = computed(() => {
   const q = pickerSearch.value.trim().toLowerCase();
@@ -181,7 +184,7 @@ function pickInvoice(name: string) {
     <!-- Invoice picker modal — surfaces return_against targets. Separate
          from the v-if/v-else list chain so opening it doesn't unmount the
          underlying list. -->
-    <div v-if="pickerOpen" class="modal-overlay" @click.self="closePicker">
+    <div v-if="pickerOpen" class="modal-overlay" :style="pickerStyle" @click.self="closePicker">
       <div class="modal-card stack" role="dialog" aria-label="Pick invoice to return">
         <div class="modal-head">
           <div>
@@ -287,18 +290,20 @@ function pickInvoice(name: string) {
   white-space: nowrap;
 }
 
+/* Opens at the top with its height fitted to the visible area (pickerStyle):
+   anchored to the bottom, the list sat under the phone keyboard. */
 .modal-overlay {
-  position: fixed; inset: 0;
+  position: fixed; inset-inline: 0; top: 0; height: 100dvh;
   background: rgba(10,10,14,0.55);
   backdrop-filter: blur(3px);
-  display: grid; place-items: end center;
-  padding: 1rem;
+  display: flex; justify-content: center; align-items: flex-start;
+  padding: 0.75rem; box-sizing: border-box;
   z-index: 100;
   animation: fade-in var(--dur-fast) var(--ease);
 }
 .modal-card {
-  width: 100%; max-width: 32rem; max-height: 82vh;
-  overflow-y: auto;
+  width: 100%; max-width: 32rem; max-height: 100%; box-sizing: border-box;
+  display: flex; flex-direction: column; overflow: hidden;
   background: var(--surface);
   border-radius: var(--radius-lg);
   padding: 1rem;
@@ -316,6 +321,7 @@ function pickInvoice(name: string) {
 
 .picker-list {
   list-style: none; padding: 0; margin: 0;
+  flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain;
   display: flex; flex-direction: column; gap: 0.35rem;
 }
 .picker-row {

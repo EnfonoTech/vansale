@@ -29,6 +29,7 @@ import SarSymbol from "@/components/SarSymbol.vue";
 import SearchSelect from "@/components/SearchSelect.vue";
 import RefundSection, { type RefundState } from "@/components/RefundSection.vue";
 import { vDecimals } from "@/components/decimals";
+import { revealOnFocus } from "@/components/reveal";
 
 const router = useRouter();
 const session = useSessionStore();
@@ -314,7 +315,7 @@ onMounted(async () => {
     <section class="card stack split-side">
       <div class="search-bar">
         <Icon name="search" :size="18" class="search-ic" />
-        <input v-model="itemSearch" placeholder="Search item code / name" @input="searchItems" />
+        <input v-model="itemSearch" placeholder="Search item code / name" @input="searchItems" @focus="revealOnFocus" />
       </div>
       <ul class="catalog">
         <li v-for="it in items" :key="it.item_code">

@@ -73,6 +73,8 @@ def head_tags() -> str:
     name = frappe.utils.escape_html(app_name())
     return (
         f'<link rel="manifest" href="{SCOPE}/manifest.webmanifest">'
+        # Tab icon; without one the browser asks for /favicon.ico (404).
+        f'<link rel="icon" type="image/png" href="{SCOPE}/icon-192.png">'
         f'<link rel="apple-touch-icon" href="{SCOPE}/icon-192.png">'
         '<meta name="mobile-web-app-capable" content="yes">'
         '<meta name="apple-mobile-web-app-capable" content="yes">'
