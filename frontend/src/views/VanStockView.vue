@@ -4,6 +4,7 @@ import { listStock, type VanStockRow } from "@/api/van_stock";
 import Icon from "@/components/Icon.vue";
 import { stockLabel } from "@/features/van/stock";
 import { revealOnFocus } from "@/components/reveal";
+import { inputValue } from "@/components/liveInput";
 
 const rows = ref<VanStockRow[]>([]);
 const warehouse = ref("");
@@ -79,7 +80,7 @@ const totals = computed(() => {
 
     <div class="search">
       <Icon name="search" :size="18" class="search-icon" />
-      <input v-model="query" type="search" placeholder="Search item or code" @focus="revealOnFocus" />
+      <input :value="query" type="search" @input="query = inputValue($event)" placeholder="Search item or code" @focus="revealOnFocus" />
     </div>
 
     <p v-if="err" class="error">{{ err }}</p>

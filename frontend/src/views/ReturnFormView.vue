@@ -30,6 +30,7 @@ import SearchSelect from "@/components/SearchSelect.vue";
 import RefundSection, { type RefundState } from "@/components/RefundSection.vue";
 import { vDecimals } from "@/components/decimals";
 import { revealOnFocus } from "@/components/reveal";
+import { inputValue } from "@/components/liveInput";
 
 const router = useRouter();
 const session = useSessionStore();
@@ -61,6 +62,8 @@ const customerOptions = computed(() =>
     value: c.name,
     label: customerLabel(c),
     sub: [c.secondary_name, c.vat_number ? `VAT ${c.vat_number}` : ""].filter(Boolean).join(" · "),
+    // Searched but not shown: code, both names, mobile, VAT.
+    keywords: [c.name, c.customer_name, c.customer_name_2, c.mobile_no, c.vat_number].filter(Boolean).join(" "),
   })),
 );
 
@@ -315,7 +318,7 @@ onMounted(async () => {
     <section class="card stack split-side">
       <div class="search-bar">
         <Icon name="search" :size="18" class="search-ic" />
-        <input v-model="itemSearch" placeholder="Search item code / name" @input="searchItems" @focus="revealOnFocus" />
+        <input :value="itemSearch" placeholder="Search item code / name" @input="itemSearch = inputValue($event); searchItems()" @focus="revealOnFocus" />
       </div>
       <ul class="catalog">
         <li v-for="it in items" :key="it.item_code">

@@ -15,6 +15,7 @@ import ListSearch from "@/components/ListSearch.vue";
 import Icon from "@/components/Icon.vue";
 import SarSymbol from "@/components/SarSymbol.vue";
 import { useVisibleArea } from "@/components/visibleArea";
+import { inputValue } from "@/components/liveInput";
 
 const router = useRouter();
 const session = useSessionStore();
@@ -197,7 +198,7 @@ function pickInvoice(name: string) {
         </div>
         <div class="search-bar">
           <Icon name="search" :size="16" class="search-ic" />
-          <input v-model="pickerSearch" placeholder="Search invoice # or customer" />
+          <input :value="pickerSearch" @input="pickerSearch = inputValue($event)" placeholder="Search invoice # or customer" />
         </div>
         <p v-if="pickerErr" class="error">{{ pickerErr }}</p>
         <div v-if="pickerLoading" class="stack">

@@ -36,6 +36,7 @@ import SarSymbol from "@/components/SarSymbol.vue";
 import SearchSelect from "@/components/SearchSelect.vue";
 import { vDecimals } from "@/components/decimals";
 import { revealOnFocus } from "@/components/reveal";
+import { inputValue } from "@/components/liveInput";
 
 const router = useRouter();
 const route = useRoute();
@@ -175,6 +176,8 @@ const customerOptions = computed(() =>
     sub: [c.secondary_name, c.vat_number ? `VAT ${c.vat_number}` : ""]
       .filter(Boolean)
       .join(" · ") || (c.name !== customerLabel(c) ? c.name : ""),
+    // Searched but not shown: code, both names, mobile, VAT.
+    keywords: [c.name, c.customer_name, c.customer_name_2, c.mobile_no, c.vat_number].filter(Boolean).join(" "),
   })),
 );
 
@@ -747,7 +750,7 @@ onMounted(loadAll);
       <h3 style="margin:0">Catalog</h3>
       <div class="search-bar">
         <Icon name="search" :size="18" class="search-ic" />
-        <input v-model="itemSearch" placeholder="Search item code / name / barcode" @input="searchItems" @focus="revealOnFocus" />
+        <input :value="itemSearch" placeholder="Search item code / name / barcode" @input="itemSearch = inputValue($event); searchItems()" @focus="revealOnFocus" />
       </div>
       <ul class="catalog">
         <li v-for="it in items" :key="it.item_code">

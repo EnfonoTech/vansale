@@ -1,6 +1,7 @@
 <script setup lang="ts">
 /** Search box for the list screens (invoices, payments, returns). */
 import Icon from "@/components/Icon.vue";
+import { inputValue } from "@/components/liveInput";
 
 defineProps<{ placeholder?: string }>();
 const model = defineModel<string>({ required: true });
@@ -9,7 +10,7 @@ const model = defineModel<string>({ required: true });
 <template>
   <div class="list-search">
     <Icon name="search" :size="16" class="ic" />
-    <input v-model="model" type="search" :placeholder="placeholder ?? 'Search…'" enterkeyhint="search" />
+    <input :value="model" type="search" @input="model = inputValue($event)" :placeholder="placeholder ?? 'Search…'" enterkeyhint="search" />
     <button v-if="model" type="button" class="clear" aria-label="Clear search" @click="model = ''">
       <Icon name="x" :size="14" />
     </button>

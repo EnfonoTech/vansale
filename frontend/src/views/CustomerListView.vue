@@ -23,6 +23,7 @@ import { NetworkError } from "@/app/frappe";
 import Icon from "@/components/Icon.vue";
 import SarSymbol from "@/components/SarSymbol.vue";
 import { useSessionStore } from "@/stores/session";
+import { inputValue } from "@/components/liveInput";
 
 const router = useRouter();
 const session = useSessionStore();
@@ -115,7 +116,8 @@ const totalCount = computed(() => rows.value.length);
       <div class="search-bar">
         <Icon name="search" :size="16" class="search-ic" />
         <input
-          v-model="search"
+          :value="search"
+          @input="search = inputValue($event)"
           placeholder="Search customers, phone, VAT…"
           aria-label="Search customers"
           autocomplete="off"

@@ -334,4 +334,19 @@ const cta = computed(() => {
 @media (max-height: 680px) {
   .key { min-height: 2.6rem; font-size: 1.15rem; }
 }
+
+/* Tablet: bigger keypad and dots instead of the phone-sized card. */
+@media (min-width: 768px) and (min-height: 600px) {
+  .auth { max-width: 26rem; gap: 1.4rem; }
+  .brand-mark { width: 3.5rem; height: 3.5rem; }
+  .brand-mark :deep(svg) { width: 2rem; height: 2rem; }
+  .brand h1 { font-size: var(--text-2xl); }
+  .pin-card { padding: 1.6rem; gap: 1.1rem; }
+  .pin-dots { gap: 0.8rem; }
+  .dot { width: 15px; height: 15px; }
+  .error { font-size: var(--text-sm); }
+  .keypad { gap: 0.75rem; }
+  .key { min-height: 4rem; font-size: 1.6rem; }
+  .submit { min-height: 3.5rem; font-size: var(--text-lg); }
+}
 </style>

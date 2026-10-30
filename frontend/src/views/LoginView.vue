@@ -230,4 +230,18 @@ async function onSubmit() {
 .submit { min-height: 3rem; font-size: var(--text-base); }
 
 .ver { text-align: center; margin: 0; }
+
+/* Tablet: the phone-sized form looked lost on a large screen. */
+@media (min-width: 768px) and (min-height: 600px) {
+  .auth { max-width: 28rem; gap: 1.6rem; }
+  .brand-mark { width: 4rem; height: 4rem; }
+  .brand-mark :deep(svg) { width: 2.25rem; height: 2.25rem; }
+  .brand h1 { font-size: var(--text-2xl); }
+  .brand .small { font-size: var(--text-base); }
+  .card { padding: 1.75rem; gap: 1.1rem; }
+  .label { font-size: var(--text-base); }
+  .card input { min-height: 3.25rem; font-size: var(--text-lg); }
+  .pw-toggle { font-size: var(--text-sm); }
+  .submit { min-height: 3.5rem; font-size: var(--text-lg); }
+}
 </style>

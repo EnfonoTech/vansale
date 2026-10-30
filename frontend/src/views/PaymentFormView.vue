@@ -53,6 +53,8 @@ const customerOptions = computed(() =>
     value: c.name,
     label: customerLabel(c),
     sub: [c.secondary_name, c.vat_number ? `VAT ${c.vat_number}` : ""].filter(Boolean).join(" · "),
+    // Searched but not shown: code, both names, mobile, VAT.
+    keywords: [c.name, c.customer_name, c.customer_name_2, c.mobile_no, c.vat_number].filter(Boolean).join(" "),
   })),
 );
 

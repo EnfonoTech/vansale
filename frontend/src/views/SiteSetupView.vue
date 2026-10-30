@@ -192,4 +192,15 @@ async function connect() {
   text-align: center;
   margin: 0;
 }
+
+/* Tablet: larger form, as on the login screen. */
+@media (min-width: 768px) and (min-height: 600px) {
+  .auth { width: min(30rem, 100%); gap: 1.6rem; }
+  .brand-mark { width: 4rem; height: 4rem; }
+  .brand-mark :deep(svg) { width: 2.25rem; height: 2.25rem; }
+  .brand h1 { font-size: var(--text-2xl); }
+  .label { font-size: var(--text-sm); }
+  input { min-height: 3.25rem; font-size: var(--text-lg); }
+  button { min-height: 3.5rem; font-size: var(--text-lg); }
+}
 </style>

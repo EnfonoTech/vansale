@@ -1,4 +1,4 @@
-<script setup lang="ts" generic="T extends { value: string; label: string; sub?: string }">
+<script setup lang="ts" generic="T extends { value: string; label: string; sub?: string; keywords?: string }">
 /**
  * Searchable single-select for long lists.
  *
@@ -14,6 +14,7 @@
 import { computed, nextTick, ref, watch } from "vue";
 import Icon from "./Icon.vue";
 import { useVisibleArea } from "./visibleArea";
+import { inputValue } from "@/components/liveInput";
 
 const props = withDefaults(
   defineProps<{
@@ -45,7 +46,7 @@ const filtered = computed(() => {
   const q = term.value.trim().toLowerCase();
   if (!q) return props.options.slice(0, 50);
   return props.options
-    .filter((o) => o.label.toLowerCase().includes(q) || (o.sub ?? "").toLowerCase().includes(q))
+    .filter((o) => `${o.label} ${o.sub ?? ""} ${o.keywords ?? ""}`.toLowerCase().includes(q))
     .slice(0, 50);
 });
 
@@ -93,7 +94,8 @@ function clear() {
             <Icon name="search" :size="18" class="ss-ic" />
             <input
               ref="inputEl"
-              v-model="term"
+              :value="term"
+              @input="term = inputValue($event)"
               type="search"
               :placeholder="props.placeholder"
               autocapitalize="none"

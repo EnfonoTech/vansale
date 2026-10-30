@@ -239,7 +239,14 @@ def list_mine(limit: int = 50, search: Optional[str] = None) -> list[dict]:
     or_filters = {}
     if search:
         s = f"%{search}%"
-        or_filters = {"customer_name": ["like", s], "mobile_no": ["like", s], "tax_id": ["like", s]}
+        # Customer code (ID) too — on sites with a naming series it is the
+        # only short handle a driver has.
+        or_filters = {
+            "name": ["like", s],
+            "customer_name": ["like", s],
+            "mobile_no": ["like", s],
+            "tax_id": ["like", s],
+        }
         for f in {name_2, vat, title}:
             if f:
                 or_filters[f] = ["like", s]
