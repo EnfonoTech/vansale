@@ -31,6 +31,7 @@ import RefundSection, { type RefundState } from "@/components/RefundSection.vue"
 import { vDecimals } from "@/components/decimals";
 import { revealOnFocus } from "@/components/reveal";
 import { inputValue } from "@/components/liveInput";
+import { confirmSubmit, withCurrency } from "@/stores/confirm";
 
 const router = useRouter();
 const session = useSessionStore();
@@ -196,6 +197,15 @@ async function submit() {
   }
   const refundErr = refundAmountError();
   if (refundErr) { toasts.warn(refundErr); return; }
+  const cust = customers.value.find((c) => c.name === customer.value);
+  const ok = await confirmSubmit("Submit return?", [
+    cust ? customerLabel(cust) : customer.value,
+    `${picked.length} item${picked.length === 1 ? "" : "s"}${totals.value ? ` · ${withCurrency(money(Math.abs(totals.value.grand_total)))}` : ""}`,
+    refund.value.on
+      ? `Refund ${refund.value.amount != null ? money(refund.value.amount) : "in full"} · ${refund.value.mode}`
+      : "Kept as customer credit",
+  ]);
+  if (!ok) return;
   busy.value = true;
   try {
     const res = await returnWithoutInvoice({

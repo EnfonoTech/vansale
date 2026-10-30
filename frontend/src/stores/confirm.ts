@@ -16,6 +16,7 @@
  *   }
  */
 import { defineStore } from "pinia";
+import { useSessionStore } from "@/stores/session";
 
 export interface ConfirmOptions {
   title: string;
@@ -63,3 +64,29 @@ export const useConfirmStore = defineStore("confirm", {
     },
   },
 });
+
+/**
+ * Yes / No before posting an invoice, return, payment or refund, when
+ * Vansale Settings "Ask Yes / No before submitting" is on. `details` are the
+ * summary lines (customer, amount, payment); empty ones are skipped.
+ * Resolves true to go ahead — at once when the setting is off.
+ */
+export function confirmSubmit(
+  title: string,
+  details: Array<string | false | null | undefined>,
+  yesText = "Yes, submit",
+): Promise<boolean> {
+  if (!useSessionStore().confirmSubmit) return Promise.resolve(true);
+  return useConfirmStore().ask({
+    title,
+    message: details.filter(Boolean).join("\n"),
+    confirmText: yesText,
+    cancelText: "No",
+  });
+}
+
+/** "SAR 12.50" for a confirmation summary; just the amount without a currency. */
+export function withCurrency(amount: string): string {
+  const cur = useSessionStore().currency;
+  return cur ? `${cur} ${amount}` : amount;
+}

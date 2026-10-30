@@ -24,6 +24,7 @@ import { useToastStore } from "@/stores/toasts";
 import Icon from "@/components/Icon.vue";
 import SarSymbol from "@/components/SarSymbol.vue";
 import RefundSection, { type RefundState } from "@/components/RefundSection.vue";
+import { confirmSubmit, withCurrency } from "@/stores/confirm";
 
 interface ReturnRowState {
   include: boolean;
@@ -197,6 +198,14 @@ async function submit() {
   }
   const refundErr = refundAmountError();
   if (refundErr) { toasts.warn(refundErr); return; }
+  const ok = await confirmSubmit("Submit return?", [
+    `${orig.value.customer_name} · against ${orig.value.name}`,
+    `${picks.length} line${picks.length === 1 ? "" : "s"}${totals.value ? ` · ${withCurrency(fmt(Math.abs(totals.value.grand_total)))}` : ""}`,
+    refund.value.on
+      ? `Refund ${refund.value.amount != null ? fmt(refund.value.amount) : "in full"} · ${refund.value.mode}`
+      : "Kept as customer credit",
+  ]);
+  if (!ok) return;
   busy.value = true;
   try {
     const res = await returnAgainst({

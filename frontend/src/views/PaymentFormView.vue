@@ -10,6 +10,7 @@ import Icon from "@/components/Icon.vue";
 import SarSymbol from "@/components/SarSymbol.vue";
 import SearchSelect from "@/components/SearchSelect.vue";
 import { vDecimals } from "@/components/decimals";
+import { confirmSubmit, withCurrency } from "@/stores/confirm";
 
 const router = useRouter();
 const route = useRoute();
@@ -146,6 +147,15 @@ async function submit() {
     toasts.warn(`Enter the reference number for ${mode.value}`);
     return;
   }
+  const cust = customers.value.find((c) => c.name === customer.value);
+  const ok = await confirmSubmit("Save payment?", [
+    cust ? customerLabel(cust) : customer.value,
+    `${withCurrency(fmt(n))} · ${mode.value}`,
+    advance.value
+      ? "Advance (not allocated)"
+      : hasPicks.value ? `For ${selectedList.value.length} invoice${selectedList.value.length === 1 ? "" : "s"}` : "Oldest invoices first",
+  ], "Yes, save");
+  if (!ok) return;
   busy.value = true;
   try {
     const res = await save({

@@ -65,6 +65,8 @@ def global_flags() -> dict:
         "apply_discount_on": "Grand Total",
         "default_payment_type": "Cash",
         "allow_delete_draft_payment": True,
+        # Yes / No before posting an invoice, return, payment or refund.
+        "confirm_before_submit": False,
         "invoice_print_format": None,
         "receipt_print_format": None,
         "allow_split_payment": False,
@@ -105,6 +107,7 @@ def global_flags() -> dict:
             "show_pdf_button",
             "allow_line_discount",
             "allow_delete_draft_payment",
+            "confirm_before_submit",
         ):
             if key in row:
                 flags[key] = bool(int(row.get(key) or 0))

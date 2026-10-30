@@ -16,6 +16,7 @@
   "allow_line_discount",
   "apply_discount_on",
   "default_payment_type",
+  "confirm_before_submit",
   "section_break_cash_sale",
   "cash_sale_posting",
   "cash_payment_entry_status",
@@ -116,6 +117,12 @@
    "fieldtype": "Select",
    "label": "Default payment on invoice",
    "options": "Cash\nCredit"
+  },
+  {
+   "default": "0",
+   "fieldname": "confirm_before_submit",
+   "fieldtype": "Check",
+   "label": "Ask Yes / No before submitting"
   },
   {
    "fieldname": "section_break_cash_sale",
@@ -272,7 +279,7 @@
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-10-12 10:00:00.000000",
+ "modified": "2026-10-30 12:00:00.000000",
  "modified_by": "Administrator",
  "module": "Vansale",
  "name": "Vansale Settings",

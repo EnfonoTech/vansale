@@ -41,6 +41,8 @@ export interface ConfigDefaults {
   invoice_options?: { line_discount: boolean; apply_discount_on: "Grand Total" | "Net Total"; default_payment: "cash" | "credit" };
   /** Draft payments may be deleted from the app (setting; default on). */
   payment_delete?: boolean;
+  /** Ask Yes / No before posting (Vansale Settings). */
+  confirm_submit?: boolean;
   /** Returns without an original invoice allowed (setting). */
   return_without_invoice?: boolean;
   /** Print formats chosen in Vansale Settings / the van. */

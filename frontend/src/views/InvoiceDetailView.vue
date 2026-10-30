@@ -11,6 +11,7 @@ import { openPrint, printDocument, defaultPrintFormat } from "@/api/print";
 import Icon from "@/components/Icon.vue";
 import SarSymbol from "@/components/SarSymbol.vue";
 import { vDecimals } from "@/components/decimals";
+import { confirmSubmit, withCurrency } from "@/stores/confirm";
 
 const route = useRoute();
 const router = useRouter();
@@ -132,6 +133,11 @@ async function doRefund() {
   const a = refundAmount.value;
   if (a != null && !(a > 0)) { toasts.warn("Refund amount must be more than 0"); return; }
   if (a != null && a > max + 0.005) { toasts.warn("Refund amount can't be more than the credit"); return; }
+  const ok = await confirmSubmit("Refund the customer?", [
+    inv.value.customer_name,
+    `${withCurrency(fmt(a ?? max))} · ${refundMode.value}`,
+  ], "Yes, refund");
+  if (!ok) return;
   busy.value = true;
   try {
     const res = await refundCreditNote({
@@ -191,6 +197,11 @@ function editDraft() {
  */
 async function submitInvoice() {
   if (!inv.value || busy.value) return;
+  const ok = await confirmSubmit(`Submit ${inv.value.name}?`, [
+    inv.value.customer_name,
+    `${withCurrency(fmt(inv.value.grand_total))}`,
+  ]);
+  if (!ok) return;
   busy.value = true;
   try {
     await submitDraft(inv.value.name);

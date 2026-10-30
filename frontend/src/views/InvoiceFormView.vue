@@ -37,6 +37,7 @@ import SearchSelect from "@/components/SearchSelect.vue";
 import { vDecimals } from "@/components/decimals";
 import { revealOnFocus } from "@/components/reveal";
 import { inputValue } from "@/components/liveInput";
+import { confirmSubmit, withCurrency } from "@/stores/confirm";
 
 const router = useRouter();
 const route = useRoute();
@@ -476,6 +477,20 @@ async function doSave(submit: 0 | 1) {
     if (singleAmount.value > grandTotal.value + 0.005) { toasts.warn("Amount is more than the invoice total"); return; }
   }
   const flag = submit === 1;
+  if (flag) {
+    const paid = useSplit.value
+      ? splitPaid.value
+      : paymentType.value === "cash" ? singleAmount.value ?? grandTotal.value : 0;
+    const pay = paid <= 0.005
+      ? "Credit"
+      : paid >= grandTotal.value - 0.005 ? "Paid in full" : `Paid ${money(paid)} · rest on credit`;
+    const ok = await confirmSubmit(isEditMode.value ? "Submit this invoice?" : "Submit invoice?", [
+      selectedCustomer.value ? customerLabel(selectedCustomer.value) : customer.value,
+      `${lines.value.length} item${lines.value.length === 1 ? "" : "s"} · ${withCurrency(money(grandTotal.value))}`,
+      pay,
+    ]);
+    if (!ok) return;
+  }
   if (flag) busy.value = true; else savingDraft.value = true;
   try {
     // The invoice discount goes to ERPNext as its Additional Discount

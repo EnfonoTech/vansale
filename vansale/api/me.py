@@ -195,6 +195,7 @@ def config_defaults() -> dict:
         "advance_payment": advance_payment_allowed(user),
         "invoice_options": invoice_options(),
         "payment_delete": bool(global_flags().get("allow_delete_draft_payment", True)),
+        "confirm_submit": bool(global_flags().get("confirm_before_submit", False)),
         "return_without_invoice": return_without_invoice_allowed(user),
         "print_formats": print_formats(user),
         "print": print_behaviour(user),

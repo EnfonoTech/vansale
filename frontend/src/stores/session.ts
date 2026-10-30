@@ -112,6 +112,7 @@ export const useSessionStore = defineStore("session", {
     applyDiscountOn: (s) => s.defaults?.invoice_options?.apply_discount_on ?? "Grand Total",
     defaultPaymentType: (s): "cash" | "credit" => s.defaults?.invoice_options?.default_payment ?? "cash",
     paymentDelete: (s) => s.defaults?.payment_delete !== false,
+    confirmSubmit: (s) => s.defaults?.confirm_submit === true,
     returnWithoutInvoice: (s) => Boolean(s.defaults?.return_without_invoice),
   },
   actions: {
