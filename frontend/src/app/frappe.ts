@@ -171,7 +171,16 @@ function apiUrl(pathOrMethod: string, asMethod: boolean): string {
 interface FrappeErrorBody {
   exception?: string;
   exc?: string;
+  message?: unknown;
   _server_messages?: string;
+}
+
+/** Server message as plain text. Frappe wraps some in
+ *  <details><summary>short</summary>technical detail</details> (e.g.
+ *  "not permitted … / Function x is not whitelisted"): only the short part. */
+function plainMessage(html: string): string {
+  const summary = html.match(/<summary>([\s\S]*?)<\/summary>/i);
+  return (summary ? summary[1] : html).replace(/<[^>]+>/g, "").trim();
 }
 
 function parseServerError(body: unknown): string | undefined {
@@ -183,13 +192,20 @@ function parseServerError(body: unknown): string | undefined {
       const first = Array.isArray(parsed) && parsed.length > 0 ? parsed[0] : null;
       const inner = typeof first === "string" ? JSON.parse(first) : first;
       if (inner && typeof inner === "object" && "message" in inner) {
-        return String((inner as { message?: string }).message ?? "").replace(/<[^>]+>/g, "");
+        return plainMessage(String((inner as { message?: string }).message ?? ""));
       }
     } catch {
       /* ignore parse errors */
     }
   }
-  return b.exception;
+  // Some errors carry their text in `message` instead (failed login:
+  // "Invalid login credentials").
+  if (typeof b.message === "string" && b.message.trim()) return plainMessage(b.message);
+  // "frappe.exceptions.ValidationError: <text>" → the text; a bare class
+  // name ("frappe.exceptions.AuthenticationError") is no message at all, so
+  // the screen's own wording is used instead.
+  const text = b.exception?.replace(/^[\w.]+(Error|Exception)\b:?\s*/, "").trim();
+  return text || undefined;
 }
 
 /**
@@ -264,8 +280,10 @@ async function callOnce<T>(
   }
 
   if (!res.ok) {
-    const msg = parseServerError(data) ?? `HTTP ${res.status}`;
-    throw new ApiError(msg, res.status, msg);
+    // serverMessage only when the server said something readable, so a
+    // screen's own wording ("Incorrect email or password") is used otherwise.
+    const serverMsg = parseServerError(data);
+    throw new ApiError(serverMsg ?? `HTTP ${res.status}`, res.status, serverMsg);
   }
 
   const wrapped = data as { message?: T } | null;
