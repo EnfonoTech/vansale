@@ -189,8 +189,11 @@ function parseServerError(body: unknown): string | undefined {
   if (b._server_messages) {
     try {
       const parsed = JSON.parse(b._server_messages);
-      const first = Array.isArray(parsed) && parsed.length > 0 ? parsed[0] : null;
-      const inner = typeof first === "string" ? JSON.parse(first) : first;
+      // The error raised is the last message; earlier ones are warnings
+      // printed while the document was built (e.g. "Please set Customer
+      // Address…" before "Discount is more than the return total").
+      const last = Array.isArray(parsed) && parsed.length > 0 ? parsed[parsed.length - 1] : null;
+      const inner = typeof last === "string" ? JSON.parse(last) : last;
       if (inner && typeof inner === "object" && "message" in inner) {
         return plainMessage(String((inner as { message?: string }).message ?? ""));
       }

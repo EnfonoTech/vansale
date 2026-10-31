@@ -24,6 +24,7 @@ import { useToastStore } from "@/stores/toasts";
 import Icon from "@/components/Icon.vue";
 import SarSymbol from "@/components/SarSymbol.vue";
 import RefundSection, { type RefundState } from "@/components/RefundSection.vue";
+import { vDecimals } from "@/components/decimals";
 import { confirmSubmit, withCurrency } from "@/stores/confirm";
 
 interface ReturnRowState {
@@ -123,6 +124,21 @@ const selectedCount = computed(() =>
 // (dry run, nothing saved) whenever the selection changes.
 const totals = ref<ReturnTotals | null>(null);
 const refund = ref<RefundState>({ on: false, mode: "", amount: null, reference: "" });
+// The invoice's additional discount on this return: by default all of what is
+// left on a full return and none on a partial one (server rule); the driver
+// may type another amount. null = not touched (the default); once edited an
+// empty box is 0 — it used to snap back to the default while backspacing.
+const discountTyped = ref<number | "" | null>(null);
+const discountModel = computed<number | string>({
+  get: () => (discountTyped.value === null ? totals.value?.discount_default ?? "" : discountTyped.value),
+  set: (v) => {
+    discountTyped.value = v === "" || v == null || Number.isNaN(Number(v)) ? "" : Number(v);
+  },
+});
+/** What the server gets: undefined = its default. */
+const discountToSend = () => (discountTyped.value === null ? undefined : Number(discountTyped.value) || 0);
+// Why there are no totals (e.g. a discount over the return total).
+const previewError = ref("");
 // Blank = the full credit; otherwise a partial refund, never more than the credit.
 function refundAmountError(): string | null {
   const a = refund.value.amount;
@@ -150,18 +166,26 @@ function selectedLines() {
     .map(({ it, r }) => ({ sales_invoice_item: it.name, item_code: it.item_code, qty: r.qty, uom: r.uom || undefined }));
 }
 watch(
-  () => JSON.stringify(selectedLines()),
+  () => JSON.stringify([selectedLines(), discountTyped.value]),
   () => {
     window.clearTimeout(previewTimer);
     previewTimer = window.setTimeout(async () => {
       const seq = ++previewSeq;
       const items = selectedLines();
-      if (!orig.value || !items.length) { totals.value = null; return; }
+      if (!orig.value || !items.length) { totals.value = null; previewError.value = ""; return; }
       try {
-        const t = await returnPreview({ original_invoice: orig.value.name, items });
-        if (seq === previewSeq) totals.value = t;
-      } catch {
-        if (seq === previewSeq) totals.value = null;
+        const t = await returnPreview({
+          original_invoice: orig.value.name,
+          items,
+          discount_amount: discountToSend(),
+        });
+        if (seq !== previewSeq) return;
+        totals.value = t;
+        previewError.value = "";
+      } catch (e) {
+        if (seq !== previewSeq) return;
+        totals.value = null;
+        previewError.value = e instanceof ApiError ? e.serverMessage ?? "" : "";
       }
     }, 350);
   },
@@ -223,6 +247,7 @@ async function submit() {
       note: remarks.value || undefined,
       submit: 1,
       refund: refundPayload(),
+      discount_amount: discountToSend(),
     });
     toasts.success(`Credit Note ${res.name} · ${session.currency} ${Math.abs(res.grand_total).toFixed(session.currencyPrecision)}`);
     if (session.printBehaviour?.after_submit) {
@@ -344,6 +369,14 @@ async function submit() {
           <span>Lines selected</span>
           <strong>{{ selectedCount }}</strong>
         </div>
+        <label class="disc-field">
+          <span class="tiny">
+            Additional discount on {{ totals?.discount_on || "Grand Total" }}
+          </span>
+          <input type="number" min="0" step="any" inputmode="decimal" v-model.number="discountModel"
+                 v-decimals="session.currencyPrecision" placeholder="0" />
+        </label>
+        <p v-if="previewError" class="error small">{{ previewError }}</p>
         <template v-if="totals">
           <div class="tot-row">
             <span>Net</span>
@@ -357,8 +390,11 @@ async function submit() {
             <span>Credit total</span>
             <strong><SarSymbol :code="session.currency" />{{ fmt(totals.grand_total) }}</strong>
           </div>
+          <p v-if="totals.discount" class="muted xsmall disc-note">
+            Includes an additional discount of <SarSymbol :code="session.currency" />{{ fmt(totals.discount) }}
+          </p>
         </template>
-        <p v-else class="muted xsmall">Calculating…</p>
+        <p v-else-if="!previewError" class="muted xsmall">Calculating…</p>
       </section>
 
       <RefundSection v-model="refund" :totals="totals" :currency="session.currency"
@@ -429,4 +465,6 @@ async function submit() {
   border-color: var(--primary);
   color: var(--primary);
 }
+.disc-note { margin: 0.2rem 0 0; text-align: end; }
+.disc-field { display: flex; flex-direction: column; gap: 0.3rem; }
 </style>

@@ -249,7 +249,7 @@ def _record_outbox(client_id: str, ref_name: str, posting_ts: Optional[str], pay
     doc.save(ignore_permissions=True)
 
 
-def build_return_against(original, items: list[dict[str, Any]], posting=None):
+def build_return_against(original, items: list[dict[str, Any]], posting=None, discount_amount=None):
     """Unsaved credit note against `original` (shared by save, return_against, preview)."""
     from vansale.api.me import current_user_sales_person
 
@@ -275,11 +275,55 @@ def build_return_against(original, items: list[dict[str, Any]], posting=None):
     doc.posting_date = posting.date()
     doc.posting_time = posting.strftime("%H:%M:%S")
     append_return_rows(doc, original, items)
+    _carry_invoice_discount(doc, original, discount_amount)
     sp = current_user_sales_person()
     if sp:
         doc.append("sales_team", {"sales_person": sp, "allocated_percentage": 100})
     _decide_outstanding(doc, original)
     return doc
+
+
+def _carry_invoice_discount(doc, original, discount_amount=None) -> None:
+    """The invoice's Additional Discount on the return.
+
+    Without it a full return credited more than was charged (invoice 105.01
+    with a 0.22 discount → credit 105.23). By default the return that brings
+    every line back takes the discount not yet given on earlier returns (so
+    all credits together equal the invoice) and a partial return none; the
+    driver may type another amount (not more than the return itself).
+    `doc.flags.return_discount` keeps the default for the preview."""
+    given = -flt(
+        frappe.db.sql(
+            """SELECT COALESCE(SUM(discount_amount), 0) FROM `tabSales Invoice`
+               WHERE return_against = %s AND is_return = 1 AND docstatus = 1""",
+            original.name,
+        )[0][0]
+    )
+    precision = original.precision("discount_amount")
+    left = max(flt(flt(original.discount_amount) - given, precision), 0.0)
+    done = returned_qty_by_row(original)
+    for line in doc.items:
+        if line.get("sales_invoice_item") in done:
+            done[line.sales_invoice_item] += abs(flt(line.qty)) * (flt(line.conversion_factor) or 1)
+    completes = all(done[row.name] >= _stock_qty(row) - 1e-6 for row in original.items)
+    default = left if completes else 0.0
+    discount_on = original.apply_discount_on or "Grand Total"
+    doc.flags.return_discount = {"default": default, "max": left, "on": discount_on}
+
+    if discount_amount is None or discount_amount == "":
+        amount = default
+    else:
+        amount = flt(discount_amount, precision)
+        if amount < 0:
+            frappe.throw(_("Discount can't be negative"))
+        if amount > 0:
+            doc.calculate_taxes_and_totals()
+            if amount > abs(flt(doc.total)) + abs(flt(doc.total_taxes_and_charges)) + 0.005:
+                frappe.throw(_("Discount is more than the return total"))
+    if amount > 0:
+        doc.apply_discount_on = discount_on
+        doc.additional_discount_percentage = 0
+        doc.discount_amount = -amount
 
 
 def _decide_outstanding(doc, original) -> None:
@@ -392,6 +436,7 @@ def save(
     posting_ts: Optional[str] = None,
     submit: int = 1,
     refund: Optional[dict] = None,
+    discount_amount: Optional[float] = None,
 ) -> dict:
     if not client_id:
         frappe.throw(_("client_id is required"))
@@ -416,7 +461,7 @@ def save(
 
     original = readable_doc("Sales Invoice", original_invoice)
     posting = parse_client_ts(posting_ts) if posting_ts else frappe.utils.now_datetime()
-    doc = build_return_against(original, items, posting)
+    doc = build_return_against(original, items, posting, discount_amount)
     _set_reason(doc, reason_option, reason_text, note)
     doc.custom_client_id = client_id
 
@@ -431,6 +476,7 @@ def save(
         "items": items,
         "reason": reason,
         "note": note,
+        "discount_amount": discount_amount,
     })
     frappe.db.commit()
 
@@ -496,7 +542,7 @@ def default_references(customer: str, item_codes: list[str]) -> tuple[list[str],
 
 
 def build_bulk_return(customer: str, items: list[dict[str, Any]], references: Optional[list[str]] = None,
-                      posting=None, preview: bool = False):
+                      posting=None, preview: bool = False, discount_amount=None):
     """Unsaved credit note without an original invoice (shared by save + preview).
 
     Lines priced like a sale unless a rate is given; stock into the van
@@ -560,12 +606,30 @@ def build_bulk_return(customer: str, items: list[dict[str, Any]], references: Op
             "warehouse": warehouse,
         })
     _apply_template_taxes(doc)
+    _set_return_discount(doc, discount_amount)
     for invoice in refs:
         doc.append(ZATCA_REFERENCES_FIELD, {"sales_invoice": invoice})
     sp = current_user_sales_person()
     if sp:
         doc.append("sales_team", {"sales_person": sp, "allocated_percentage": 100})
     return doc
+
+
+def _set_return_discount(doc, discount_amount) -> None:
+    """Bulk return's Additional Discount, typed by the driver, on the
+    "Apply additional discount on" setting (as on a sale); negative, as on
+    any credit note."""
+    from vansale.api.me import invoice_options
+
+    amount = flt(discount_amount)
+    if amount <= 0:
+        return
+    doc.calculate_taxes_and_totals()
+    if amount > abs(flt(doc.total)) + abs(flt(doc.total_taxes_and_charges)) + 0.005:
+        frappe.throw(_("Discount is more than the return total"))
+    doc.apply_discount_on = invoice_options()["apply_discount_on"]
+    doc.additional_discount_percentage = 0
+    doc.discount_amount = -amount
 
 
 @frappe.whitelist(methods=["POST"])
@@ -579,6 +643,7 @@ def save_without_invoice(
     submit: int = 1,
     references: Optional[list[str]] = None,
     refund: Optional[dict] = None,
+    discount_amount: Optional[float] = None,
 ) -> dict:
     """Bulk return: credit note for returned goods without one original
     invoice, when the "Return without invoice" setting allows it. See
@@ -600,7 +665,7 @@ def save_without_invoice(
                 "idempotent_replay": True}
 
     posting = parse_client_ts(posting_ts) if posting_ts else frappe.utils.now_datetime()
-    doc = build_bulk_return(customer, items, references, posting)
+    doc = build_bulk_return(customer, items, references, posting, discount_amount=discount_amount)
     _set_reason(doc, reason_option, reason_text, note)
     doc.custom_client_id = client_id
     doc.insert(ignore_permissions=False)
@@ -615,6 +680,7 @@ def save_without_invoice(
         "items": items,
         "reason": reason,
         "references": refs,
+        "discount_amount": discount_amount,
     })
     frappe.db.commit()
     return {
@@ -656,15 +722,17 @@ def preview(
     items: list[dict[str, Any]],
     original_invoice: Optional[str] = None,
     customer: Optional[str] = None,
+    discount_amount: Optional[float] = None,
 ) -> dict:
     """Totals of a return before saving it — net, VAT and total as ERPNext
     will post them (the document is built and calculated, never saved)."""
     if not _bulk_lines(items):
         return {"net_total": 0.0, "tax": 0.0, "grand_total": 0.0, "refundable": False}
     if original_invoice:
-        doc = build_return_against(readable_doc("Sales Invoice", original_invoice), items)
+        doc = build_return_against(readable_doc("Sales Invoice", original_invoice), items,
+                                   discount_amount=discount_amount)
     elif customer:
-        doc = build_bulk_return(customer, items, preview=True)
+        doc = build_bulk_return(customer, items, preview=True, discount_amount=discount_amount)
     else:
         frappe.throw(_("Customer or original invoice required"))
     if not doc.get("items"):
@@ -676,6 +744,11 @@ def preview(
     refundable = not original_invoice or bool(doc.update_outstanding_for_self)
     return {
         "net_total": abs(flt(doc.net_total)),
+        "discount": abs(flt(doc.discount_amount)),
+        # Return against an invoice: the discount it gets by default.
+        "discount_default": (doc.flags.return_discount or {}).get("default") if original_invoice else None,
+        "discount_max": (doc.flags.return_discount or {}).get("max") if original_invoice else None,
+        "discount_on": (doc.flags.return_discount or {}).get("on") if original_invoice else None,
         "tax": abs(flt(doc.total_taxes_and_charges)),
         "grand_total": abs(flt(doc.rounded_total) or flt(doc.grand_total)),
         "refundable": refundable,

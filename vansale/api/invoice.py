@@ -680,6 +680,7 @@ def return_against(
     note: Optional[str] = None,
     submit: int = 1,
     refund: Optional[dict] = None,
+    discount_amount: Optional[float] = None,
 ) -> dict:
     """Create a Sales Return (Credit Note) against an existing submitted invoice.
 
@@ -717,7 +718,7 @@ def return_against(
 
     original = readable_doc("Sales Invoice", original_name)
     posting = parse_client_ts(posting_ts) if posting_ts else frappe.utils.now_datetime()
-    doc = build_return_against(original, items, posting)
+    doc = build_return_against(original, items, posting, discount_amount)
     _set_reason(doc, reason_option, reason_text, note)
     doc.custom_client_id = client_id
 
@@ -730,6 +731,7 @@ def return_against(
     _record_outbox(client_id, doc.name, posting_ts, {
         "return_against": original.name,
         "items": items,
+        "discount_amount": discount_amount,
     })
     frappe.db.commit()
 
