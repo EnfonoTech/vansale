@@ -1,0 +1,46 @@
+# .github/workflows/brain-pr-review.yml
+# Copy this to every Enfono Frappe app repo.
+#
+# Required GitHub secrets (set at org level → all repos inherit):
+#   BRAIN_VPS_SSH_KEY   — private key for brain VPS deploy user
+#   BRAIN_VPS_HOST      — 5.189.131.247 (or brain.enfonoerp.com)
+#   BRAIN_VPS_USER      — brain (service account, not root)
+
+name: Brain PR Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      # Only trigger for Frappe-relevant file changes
+      - '**.py'
+      - '**.js'
+      - '**.html'
+      - '**/hooks.py'
+      - '**/patches.txt'
+      - '**/fixtures/**'
+
+jobs:
+  review:
+    name: Enfono Brain Review
+    runs-on: ubuntu-latest
+    # Skip draft PRs and bot PRs
+    if: |
+      github.event.pull_request.draft == false &&
+      !contains(github.event.pull_request.user.login, '[bot]')
+
+    steps:
+      - name: Trigger brain review on VPS
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.BRAIN_VPS_HOST }}
+          username: ${{ secrets.BRAIN_VPS_USER }}
+          key: ${{ secrets.BRAIN_VPS_SSH_KEY }}
+          script: |
+            cd /opt/frappe-brain-vps
+            .venv/bin/python3 pr_review_bot.py \
+              --owner "${{ github.repository_owner }}" \
+              --repo "${{ github.event.repository.name }}" \
+              --pr "${{ github.event.pull_request.number }}"
+          # Timeout: 3 min (brain search + Anthropic API)
+          command_timeout: 180m
