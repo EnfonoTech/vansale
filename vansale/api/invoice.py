@@ -451,7 +451,7 @@ def _append_items(doc, items: list[dict[str, Any]], set_warehouse: Optional[str]
     """
     from vansale.api.item import check_item_allowed
 
-    check_read("Customer", doc.customer)
+    check_read("Customer", doc.get("customer"))
     for code in {i.get("item_code") for i in items if i.get("item_code")}:
         check_item_allowed(code)
     for item in items:

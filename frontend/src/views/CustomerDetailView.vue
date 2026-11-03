@@ -71,6 +71,12 @@ function fmt(n: unknown): string {
 function newInvoice() {
   void router.push({ name: "invoice-new", query: { customer: customerName } });
 }
+function newQuotation() {
+  void router.push({ name: "quotation-new", query: { customer: customerName } });
+}
+function newOrder() {
+  void router.push({ name: "order-new", query: { customer: customerName } });
+}
 function newPayment() {
   void router.push({ name: "payment-new", query: { customer: customerName } });
 }
@@ -191,6 +197,12 @@ async function onEndVisit() {
         <button class="action-btn ghost" @click="printStatement">
           <Icon name="receipt" :size="18" /> Statement
         </button>
+        <button class="action-btn ghost" @click="newQuotation">
+          <Icon name="receipt" :size="18" /> Quote
+        </button>
+        <button class="action-btn ghost" @click="newOrder">
+          <Icon name="bag" :size="18" /> Order
+        </button>
       </section>
 
       <section class="card stack">
@@ -272,7 +284,7 @@ async function onEndVisit() {
 .outstanding[data-positive="true"] { background: var(--warning-soft); color: var(--warning); }
 .outstanding strong { font-size: var(--text-xl); font-variant-numeric: tabular-nums; }
 
-.actions-row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0.5rem; }
+.actions-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.5rem; }
 .action-btn { min-height: 3rem; font-size: var(--text-sm); padding: 0 0.4rem; }
 .action-btn.success { background: var(--success); }
 .action-btn.ghost { background: var(--surface-muted); color: var(--text); }
