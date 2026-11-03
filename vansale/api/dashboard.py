@@ -190,3 +190,20 @@ def warehouses(company: Optional[str] = None) -> list[dict]:
         limit=200,
         order_by="warehouse_name",
     )
+
+
+@frappe.whitelist(methods=["GET"])
+def customer_overview() -> dict:
+    """The home screen's customer card: how many customers the user has, how
+    many owe money and how much in total — ledger balances, as the customer
+    list shows them. Customers holding credit are not netted off the total."""
+    from vansale.api.customer import _outstanding_by_customer, visible_customers
+
+    customers = visible_customers()
+    balances = _outstanding_by_customer(customers)
+    owing = [b for b in balances.values() if b > 0.005]
+    return {
+        "customers": len(customers),
+        "with_outstanding": len(owing),
+        "outstanding": sum(owing),
+    }

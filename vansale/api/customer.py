@@ -218,6 +218,19 @@ def _outstanding(customer: str) -> float:
     return _outstanding_by_customer([customer]).get(customer, 0.0)
 
 
+def visible_customers() -> list[str]:
+    """Every enabled customer the user sees in the app — the same set as
+    `list_mine` (a salesman's Sales Person customers; office users all),
+    with the user's permissions applied."""
+    filters: dict = {"disabled": 0}
+    if not is_office_user(default_roles={"System Manager", "Van Manager"}):
+        allowed = _sales_person_customers(current_user_sales_person())
+        if not allowed:
+            return []
+        filters["name"] = ["in", list(allowed)]
+    return frappe.get_list("Customer", filters=filters, pluck="name", limit_page_length=0)
+
+
 @frappe.whitelist(methods=["GET"])
 def list_mine(limit: int = 50, search: Optional[str] = None) -> list[dict]:
     filters: dict = {"disabled": 0}
