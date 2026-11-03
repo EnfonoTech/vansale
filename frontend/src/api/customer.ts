@@ -62,21 +62,30 @@ export interface CustomerDetail extends CustomerRow {
  * offline users can still filter by name / mobile.
  */
 export async function listMine(search?: string, limit = 50): Promise<CustomerRow[]> {
+  return (await listMineWithSource(search, limit)).rows;
+}
+
+/** `listMine`, also saying whether the rows are the saved copy (offline or
+ *  server unreachable) rather than live — for an "Offline" note. */
+export async function listMineWithSource(
+  search?: string,
+  limit = 50,
+): Promise<{ rows: CustomerRow[]; fromCache: boolean }> {
   const qs = new URLSearchParams();
   qs.set("limit", String(limit));
   if (search) qs.set("search", search);
 
   if (!isOnline()) {
-    return await _listFromCache(search, limit);
+    return { rows: await _listFromCache(search, limit), fromCache: true };
   }
   try {
     const rows = await apiCall<CustomerRow[]>("GET", `vansale.api.customer.list_mine?${qs.toString()}`);
     // Fewer rows than asked for = the user's whole list, so the cache is
     // replaced: customers no longer theirs must not linger offline.
     if (!search) void _writeCache(rows, rows.length < limit).catch(() => {});
-    return rows;
+    return { rows, fromCache: false };
   } catch (err) {
-    if (err instanceof NetworkError) return await _listFromCache(search, limit);
+    if (err instanceof NetworkError) return { rows: await _listFromCache(search, limit), fromCache: true };
     throw err;
   }
 }

@@ -17,9 +17,8 @@
  */
 import { computed, onMounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
-import { listMine, fromCache, refreshCache, customerLabel, type CustomerRow } from "@/api/customer";
-import { isOnline, useOnline } from "@/app/online";
-import { NetworkError } from "@/app/frappe";
+import { listMineWithSource, fromCache, refreshCache, customerLabel, type CustomerRow } from "@/api/customer";
+import { useOnline } from "@/app/online";
 import Icon from "@/components/Icon.vue";
 import SarSymbol from "@/components/SarSymbol.vue";
 import { useSessionStore } from "@/stores/session";
@@ -33,10 +32,15 @@ const rows = ref<CustomerRow[]>([]);
 const search = ref("");
 const err = ref("");
 const source = ref<"live" | "cache">("live");
+// The live list could not be fetched (offline / server unreachable). The
+// saved copy is also painted for a moment before every live load; the
+// "Offline" note only shows when that copy is what stays on screen.
+const fetchFailed = ref(false);
 const loading = ref(false);
 
 async function load() {
   err.value = "";
+  fetchFailed.value = false;
 
   // SWR: paint cache instantly (skips 2-3s of skeleton), then hit the
   // network. Search queries skip the cache — the cache contains the
@@ -55,25 +59,16 @@ async function load() {
   loading.value = rows.value.length === 0;
 
   try {
-    if (isOnline()) {
-      rows.value = await listMine(search.value || undefined, 120);
-      source.value = "live";
-      // Fire-and-forget — don't block render on cache write.
-      if (!search.value) void refreshCache();
-    } else if (rows.value.length === 0) {
-      rows.value = (await fromCache()).map((c) => c.raw as unknown as CustomerRow);
-      source.value = "cache";
-    }
+    const res = await listMineWithSource(search.value || undefined, 120);
+    // Offline / server unreachable: keep what is on screen if the saved copy
+    // came back empty for this search.
+    if (!res.fromCache || res.rows.length || search.value) rows.value = res.rows;
+    source.value = res.fromCache ? "cache" : "live";
+    fetchFailed.value = res.fromCache;
+    // Fire-and-forget — don't block render on cache write.
+    if (!res.fromCache && !search.value) void refreshCache();
   } catch (e) {
-    if (e instanceof NetworkError) {
-      if (rows.value.length === 0) {
-        rows.value = (await fromCache()).map((c) => c.raw as unknown as CustomerRow);
-        source.value = "cache";
-      }
-      err.value = "Offline — showing cached customers";
-    } else {
-      err.value = e instanceof Error ? e.message : String(e);
-    }
+    err.value = e instanceof Error ? e.message : String(e);
   } finally {
     loading.value = false;
   }
@@ -134,7 +129,7 @@ const totalCount = computed(() => rows.value.length);
       </div>
     </header>
 
-    <p v-if="source === 'cache'" class="offline-hint">
+    <p v-if="source === 'cache' && fetchFailed" class="offline-hint">
       <Icon name="wifi-off" :size="14" />
       Offline — showing cached customers.
     </p>
