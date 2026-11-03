@@ -3,7 +3,8 @@
 Called via the `after_migrate` hook. Ensures:
   * `Van User` + `Van Manager` roles exist.
   * A curated set of DocPerm rows for `Van User` covering the day-to-day
-    flow (Sales Invoice, Payment Entry, Customer, Item lookups, etc.).
+    flow (Sales Invoice, Payment Entry, Customer, Item lookups, etc.) —
+    added when missing; rows a site already has are its own choice.
   * Vansale Configuration rows re-apply their User Permissions so admins
     can add a user on a config and have permissions materialise without
     having to open + save the row manually.
@@ -266,12 +267,14 @@ def _ensure_standard_perms(doctype: str) -> None:
 
 
 def _apply_role_permissions(role: str, perms: list[dict]) -> None:
+    """Add the role's permission rows that are missing. A row the site
+    already has is left as it is: each client decides in Role Permission
+    Manager (e.g. whether salesmen may submit Payment Entries) and a migrate
+    used to overwrite that choice."""
     for perm in perms:
         _ensure_standard_perms(perm["parent"])
         filters = {"parent": perm["parent"], "role": role, "permlevel": 0}
-        existing = frappe.db.get_value("Custom DocPerm", filters, "name")
-        if existing:
-            frappe.db.set_value("Custom DocPerm", existing, perm)
+        if frappe.db.exists("Custom DocPerm", filters):
             continue
         doc = frappe.new_doc("Custom DocPerm")
         doc.parent = perm["parent"]
