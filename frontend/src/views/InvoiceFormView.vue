@@ -394,6 +394,19 @@ function recalc(l: Line) {
   l.amount = round(Math.max(0, net));
 }
 
+/** Catalog pick: add the line and, after a search, clear it (full list back,
+ *  cursor in the box) so the next item can be typed straight away. */
+const itemSearchEl = ref<HTMLInputElement | null>(null);
+async function pickItem(it: ItemRow) {
+  const before = lines.value.length;
+  await addLine(it);
+  if (lines.value.length > before && itemSearch.value) {
+    itemSearch.value = "";
+    void searchItems();
+    itemSearchEl.value?.focus();
+  }
+}
+
 async function addLine(item: ItemRow) {
   // Always add a new row (same-item multi-row per PDF 1a).
   let uoms = uomCache[uomKey(item.item_code)];
@@ -765,11 +778,11 @@ onMounted(loadAll);
       <h3 style="margin:0">Catalog</h3>
       <div class="search-bar">
         <Icon name="search" :size="18" class="search-ic" />
-        <input :value="itemSearch" placeholder="Search item code / name / barcode" @input="itemSearch = inputValue($event); searchItems()" @focus="revealOnFocus" />
+        <input ref="itemSearchEl" :value="itemSearch" placeholder="Search item code / name / barcode" @input="itemSearch = inputValue($event); searchItems()" @focus="revealOnFocus" />
       </div>
       <ul class="catalog">
         <li v-for="it in items" :key="it.item_code">
-          <button class="cat-item" type="button" @click="addLine(it)">
+          <button class="cat-item" type="button" @click="pickItem(it)">
             <div>
               <strong class="truncate">{{ it.item_name }}</strong>
               <div class="muted xsmall">{{ it.item_code }}</div>

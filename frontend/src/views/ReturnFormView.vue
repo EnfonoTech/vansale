@@ -167,6 +167,19 @@ async function searchItems() {
   items.value = await listItems(itemSearch.value || undefined, undefined, 60, false);
 }
 
+/** Catalog pick: add the line and, after a search, clear it (full list back,
+ *  cursor in the box) so the next item can be typed straight away. */
+const itemSearchEl = ref<HTMLInputElement | null>(null);
+async function pickItem(it: ItemRow) {
+  const before = lines.value.length;
+  await addLine(it);
+  if (lines.value.length > before && itemSearch.value) {
+    itemSearch.value = "";
+    void searchItems();
+    itemSearchEl.value?.focus();
+  }
+}
+
 async function addLine(it: ItemRow) {
   if (!customer.value) { toasts.warn("Pick the customer first — prices depend on it"); return; }
   try {
@@ -347,11 +360,11 @@ onMounted(async () => {
     <section class="card stack split-side">
       <div class="search-bar">
         <Icon name="search" :size="18" class="search-ic" />
-        <input :value="itemSearch" placeholder="Search item code / name" @input="itemSearch = inputValue($event); searchItems()" @focus="revealOnFocus" />
+        <input ref="itemSearchEl" :value="itemSearch" placeholder="Search item code / name" @input="itemSearch = inputValue($event); searchItems()" @focus="revealOnFocus" />
       </div>
       <ul class="catalog">
         <li v-for="it in items" :key="it.item_code">
-          <button class="cat-item" type="button" @click="addLine(it)">
+          <button class="cat-item" type="button" @click="pickItem(it)">
             <strong class="truncate">{{ it.item_name }}</strong>
             <span class="muted xsmall">{{ it.item_code }}</span>
           </button>
