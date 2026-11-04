@@ -153,7 +153,7 @@ def detail(name: str) -> dict:
         "territory": doc.territory,
         "city": doc.city,
         "status": doc.status,
-        "customer": doc.customer,
+        "customer": linked_customer(doc),
         "notes": [
             {"note": n.note, "added_by": n.added_by, "added_on": str(n.added_on) if n.added_on else None}
             for n in (doc.get("notes") or [])
@@ -173,29 +173,44 @@ def options() -> dict:
     }
 
 
-@frappe.whitelist(methods=["POST"])
-def convert(client_id: str, name: str) -> dict:
-    """Turn the lead into a Customer (ERPNext `make_customer`).
+def linked_customer(lead) -> Optional[str]:
+    """The Customer made from this lead. ERPNext records the link on the
+    Customer (`lead_name`), not always on the Lead's own `customer` field."""
+    return lead.customer or frappe.db.get_value("Customer", {"lead_name": lead.name}, "name")
+
+
+def ensure_customer(lead) -> tuple[str, bool]:
+    """The lead's Customer, creating it (ERPNext `make_customer`) if it has none.
 
     The Customer `before_insert` hook assigns it to the salesman, so it shows
     up in his customer list at once. ERPNext marks the lead Converted when the
-    Customer is saved.
+    Customer is saved. Returns (customer name, created now?).
     """
-    if not client_id:
-        frappe.throw(_("client_id is required"))
-    lead = readable_doc("Lead", name)
-    if lead.customer:
-        return {"customer": lead.customer, "idempotent_replay": True}
-
-    existing = claim(client_id, "lead", "Customer")
+    existing = linked_customer(lead)
     if existing:
-        return {"customer": existing, "idempotent_replay": True}
+        return existing, False
 
     from erpnext.crm.doctype.lead.lead import make_customer
 
     customer = make_customer(lead.name)
     customer.insert()
+    return customer.name, True
 
-    record_outbox(client_id, "lead", "Customer", customer.name, None, {"converted_lead": lead.name})
+
+@frappe.whitelist(methods=["POST"])
+def convert(client_id: str, name: str) -> dict:
+    """Turn the lead into a Customer."""
+    if not client_id:
+        frappe.throw(_("client_id is required"))
+    lead = readable_doc("Lead", name)
+    if linked_customer(lead):
+        return {"customer": linked_customer(lead), "idempotent_replay": True}
+
+    existing = claim(client_id, "lead", "Customer")
+    if existing:
+        return {"customer": existing, "idempotent_replay": True}
+
+    customer, _created = ensure_customer(lead)
+    record_outbox(client_id, "lead", "Customer", customer, None, {"converted_lead": lead.name})
     frappe.db.commit()
-    return {"customer": customer.name, "customer_name": customer.customer_name, "idempotent_replay": False}
+    return {"customer": customer, "customer_name": frappe.db.get_value("Customer", customer, "customer_name"), "idempotent_replay": False}

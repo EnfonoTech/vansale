@@ -114,6 +114,10 @@ export interface SellingSaved {
   grand_total: number;
   status: string;
   docstatus: number;
+  /** Quotation: the customer it was made for (a lead is converted on save). */
+  customer?: string | null;
+  /** Set when saving converted a lead into this new customer. */
+  converted_customer?: string | null;
 }
 
 const path = (kind: SellingKind, fn: string) => `${KIND[kind].module}.${fn}`;

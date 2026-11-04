@@ -76,6 +76,17 @@ def save(
     if existing:
         return _result(frappe.get_doc("Quotation", existing), replay=True)
 
+    # Quoting a lead makes it a customer, as ERPNext's own flow ends up doing
+    # (and an order needs a customer anyway). Same transaction as the quotation,
+    # so a failed quote leaves the lead untouched.
+    converted = None
+    if quotation_to == "Lead":
+        from vansale.api.lead import ensure_customer
+
+        party, created = ensure_customer(readable_doc("Lead", party))
+        quotation_to = "Customer"
+        converted = party if created else None
+
     company = _user_company()
     doc = frappe.new_doc("Quotation")
     doc.quotation_to = quotation_to
@@ -96,7 +107,7 @@ def save(
         "party": party, "quotation_to": quotation_to, "items": items,
     })
     frappe.db.commit()
-    return _result(doc)
+    return {**_result(doc), "customer": party if quotation_to == "Customer" else None, "converted_customer": converted}
 
 
 @frappe.whitelist(methods=["POST"])

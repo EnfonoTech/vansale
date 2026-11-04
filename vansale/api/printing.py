@@ -16,7 +16,7 @@ import frappe
 from frappe import _
 from frappe.utils import cint
 
-PRINTABLE = ("Sales Invoice", "Payment Entry")
+PRINTABLE = ("Sales Invoice", "Payment Entry", "Quotation", "Sales Order")
 MAX_COPIES = 10
 
 

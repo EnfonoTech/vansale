@@ -11,6 +11,7 @@ import {
   type SellingDetail, type SellingKind,
 } from "@/api/selling";
 import { convertLead } from "@/api/lead";
+import { openPrint } from "@/api/print";
 import { ApiError } from "@/app/frappe";
 import { useSessionStore } from "@/stores/session";
 import { useToastStore } from "@/stores/toasts";
@@ -137,6 +138,15 @@ const convertThenOrder = () => run(async () => {
   void router.push({ name: "customer-detail", params: { name: c.customer } });
 });
 
+async function print() {
+  if (!doc.value) return;
+  try {
+    await openPrint(router, k.value.doctype, doc.value.name, session.printFormats, session.printBehaviour);
+  } catch (e) {
+    fail(e);
+  }
+}
+
 const open = (name: string, route: string) => router.push({ name: route, params: { name } });
 </script>
 
@@ -177,6 +187,7 @@ const open = (name: string, route: string) => router.push({ name: route, params:
             <button class="ghost" :disabled="busy" @click="router.push({ name: k.edit, params: { name: doc.name } })">
               <Icon name="edit" :size="16" /> Edit
             </button>
+            <button class="ghost" :disabled="busy" @click="print"><Icon name="receipt" :size="16" /> Print</button>
             <button class="ghost danger-ghost" :disabled="busy" @click="remove"><Icon name="trash" :size="16" /> Delete</button>
           </template>
           <template v-else-if="isOpen && kind === 'quotation'">
@@ -191,6 +202,7 @@ const open = (name: string, route: string) => router.push({ name: route, params:
           <template v-else-if="isOpen && kind === 'order' && (doc.per_billed ?? 0) < 100">
             <button class="primary" :disabled="busy" @click="toInvoice"><Icon name="invoice" :size="16" /> Create invoice</button>
           </template>
+          <button v-if="!isDraft" class="ghost" :disabled="busy" @click="print"><Icon name="receipt" :size="16" /> Print</button>
         </div>
       </section>
 

@@ -111,6 +111,8 @@ const PARENTS: Record<string, (r: RouteLike) => RouteTarget> = {
     if (dt === "Sales Invoice" && nm) {
       return { name: "invoice-detail", params: { name: nm } };
     }
+    if (dt === "Quotation" && nm) return { name: "quotation-detail", params: { name: nm } };
+    if (dt === "Sales Order" && nm) return { name: "order-detail", params: { name: nm } };
     return { name: "dashboard" };
   },
 };

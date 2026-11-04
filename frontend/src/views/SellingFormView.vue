@@ -15,7 +15,7 @@ import { useRoute, useRouter } from "vue-router";
 import { listMine as listCustomers, customerLabel, type CustomerRow } from "@/api/customer";
 import { listMine as listItems, detail as itemDetail, priceFor, type ItemRow, type ItemUom } from "@/api/item";
 import { taxInfo, type TaxInfo } from "@/api/invoice";
-import { leadDetail } from "@/api/lead";
+import { leadDetail, listLeads, type LeadRow } from "@/api/lead";
 import {
   KIND, docDetail, saveDoc, updateDocDraft, type SellingKind, type SellingLine,
 } from "@/api/selling";
@@ -39,9 +39,27 @@ const toasts = useToastStore();
 const k = computed(() => KIND[props.kind]);
 
 const isEdit = computed(() => Boolean(props.name));
-const leadId = String(route.query.lead ?? "");
-const quotationTo = ref<"Customer" | "Lead">(leadId && props.kind === "quotation" ? "Lead" : "Customer");
+// A quotation may be for a lead; saving it turns the lead into a customer.
+const leadId = ref(String(route.query.lead ?? ""));
+const quotationTo = ref<"Customer" | "Lead">(leadId.value && props.kind === "quotation" ? "Lead" : "Customer");
 const leadLabel = ref("");
+const leads = ref<LeadRow[]>([]);
+const leadOptions = computed(() =>
+  leads.value.map((l) => ({
+    value: l.name,
+    label: l.company_name || l.lead_name,
+    sub: [l.company_name ? l.lead_name : "", l.mobile_no].filter(Boolean).join(" · "),
+    keywords: [l.name, l.lead_name, l.company_name, l.mobile_no, l.email_id].filter(Boolean).join(" "),
+  })),
+);
+async function onLeadSearch(term: string) {
+  try {
+    const found = await listLeads(50, term || undefined);
+    const seen = new Set(leads.value.map((l) => l.name));
+    for (const l of found) if (!seen.has(l.name) && !l.customer && l.status !== "Converted") leads.value.push(l);
+  } catch { /* the preloaded list still filters locally */ }
+}
+const canPickLead = computed(() => props.kind === "quotation" && !isEdit.value);
 
 interface Line extends SellingLine { uoms?: ItemUom[]; discount_percentage: number; amount: number }
 
@@ -63,7 +81,7 @@ const addDays = (n: number) => {
 const date = ref(addDays(props.kind === "quotation" ? 30 : 7));
 const warehouse = computed(() => session.defaultWarehouse ?? "");
 
-const party = computed(() => (quotationTo.value === "Lead" ? leadId : customer.value));
+const party = computed(() => (quotationTo.value === "Lead" ? leadId.value : customer.value));
 
 const tax = ref<TaxInfo>({ template: null, rate: 0, inclusive: false, simple: true, taxes: [] });
 async function loadTax() {
@@ -219,21 +237,24 @@ async function loadAll() {
     listCustomers(undefined, 200).then((r) => { customers.value = r; }).catch(() => {}),
     searchItems().catch(() => {}),
   ];
-  if (leadId && quotationTo.value === "Lead" && !isEdit.value) {
-    jobs.push(leadDetail(leadId).then((l) => { leadLabel.value = l.company_name || l.lead_name; }).catch(() => {}));
+  if (canPickLead.value) {
+    jobs.push(listLeads(100).then((r) => { leads.value = r.filter((l) => !l.customer && l.status !== "Converted"); }).catch(() => {}));
+  }
+  if (leadId.value && quotationTo.value === "Lead" && !isEdit.value) {
+    jobs.push(leadDetail(leadId.value).then((l) => { leadLabel.value = l.company_name || l.lead_name; }).catch(() => {}));
   }
   await Promise.all(jobs);
   if (props.name) await prefill(props.name);
 }
 
 async function doSave(submit: 0 | 1) {
-  if (!party.value) { toasts.warn("Pick a customer"); return; }
+  if (!party.value) { toasts.warn(quotationTo.value === "Lead" ? "Pick a lead" : "Pick a customer"); return; }
   if (!lines.value.length) { toasts.warn("Add at least one item"); return; }
   const bad = lines.value.find((l) => !(Number(l.qty) > 0));
   if (bad) { toasts.warn(`Enter a quantity for ${bad.item_name || bad.item_code}`); return; }
   if (submit) {
     const ok = await confirmSubmit(`Submit ${k.value.title.toLowerCase()}?`, [
-      quotationTo.value === "Lead" ? leadLabel.value : customerOptions.value.find((o) => o.value === customer.value)?.label,
+      quotationTo.value === "Lead" ? leadOptions.value.find((o) => o.value === leadId.value)?.label ?? leadLabel.value : customerOptions.value.find((o) => o.value === customer.value)?.label,
       `${lines.value.length} item${lines.value.length === 1 ? "" : "s"} · ${withCurrency(money(totals.value.grand))}`,
     ]);
     if (!ok) return;
@@ -268,6 +289,7 @@ async function doSave(submit: 0 | 1) {
       ? await updateDocDraft(props.kind, props.name, payload)
       : await saveDoc(props.kind, payload);
     toasts.success(`${k.value.title} ${res.name} ${submit ? "submitted" : "saved as draft"}`);
+    if (res.converted_customer) toasts.success(`Lead converted to customer ${res.converted_customer}`);
     void router.replace({ name: k.value.detail, params: { name: res.name } });
   } catch (e) {
     toasts.error(e instanceof ApiError ? e.serverMessage ?? e.message : e instanceof Error ? e.message : String(e));
@@ -288,10 +310,27 @@ onMounted(loadAll);
                 @click="router.push({ name: 'customer-new' })">
           <Icon name="plus" :size="14" /> New
         </button>
+        <button v-else-if="quotationTo === 'Lead' && !isEdit" type="button" class="link-btn"
+                @click="router.push({ name: 'lead-new' })">
+          <Icon name="plus" :size="14" /> New lead
+        </button>
       </div>
-      <div v-if="quotationTo === 'Lead'" class="selected-hint">
-        <Icon name="user" :size="14" /> {{ leadLabel || leadId }}
+      <div v-if="canPickLead" class="seg">
+        <button type="button" class="seg-btn" :data-active="quotationTo === 'Customer'" @click="quotationTo = 'Customer'">
+          <Icon name="customer" :size="16" /> Customer
+        </button>
+        <button type="button" class="seg-btn" :data-active="quotationTo === 'Lead'" @click="quotationTo = 'Lead'">
+          <Icon name="user" :size="16" /> Lead
+        </button>
       </div>
+      <template v-if="quotationTo === 'Lead'">
+        <div v-if="isEdit" class="selected-hint"><Icon name="user" :size="14" /> {{ leadLabel || leadId }}</div>
+        <template v-else>
+          <SearchSelect v-model="leadId" :options="leadOptions" placeholder="Search lead by name, company or mobile"
+                        remote @search="onLeadSearch" />
+          <p class="muted xsmall">The lead becomes a customer when you save this quotation.</p>
+        </template>
+      </template>
       <SearchSelect v-else v-model="customer" :options="customerOptions" placeholder="Search customer by name or code"
                     remote :disabled="isEdit && kind === 'order'" @search="onCustomerSearch" />
       <label class="field">
@@ -399,6 +438,13 @@ onMounted(loadAll);
 <style scoped>
 .field { display: flex; flex-direction: column; gap: 0.3rem; }
 .label { font-size: var(--text-sm); color: var(--text-muted); font-weight: 500; }
+.seg { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; }
+.seg-btn {
+  all: unset; cursor: pointer; padding: 0.55rem 0.75rem; border-radius: var(--radius-sm);
+  background: var(--surface-muted); text-align: center; font-weight: 500;
+  display: inline-flex; justify-content: center; align-items: center; gap: 0.35rem;
+}
+.seg-btn[data-active="true"] { background: var(--primary); color: var(--on-primary, white); }
 .row-head { display: flex; justify-content: space-between; align-items: center; }
 .link-btn { all: unset; cursor: pointer; color: var(--primary); font-size: var(--text-xs); font-weight: 600; display: inline-flex; align-items: center; gap: 0.25rem; }
 .selected-hint { font-size: var(--text-sm); color: var(--primary); display: inline-flex; align-items: center; gap: 0.3rem; }
