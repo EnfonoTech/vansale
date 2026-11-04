@@ -24,6 +24,8 @@ export interface CustomerRow {
   secondary_name?: string | null;
   /** Submitted invoices' balance less receipts awaiting office submit. */
   outstanding?: number;
+  /** Salesman's list: the customer's whole balance (outstanding = their van's). */
+  outstanding_total?: number;
 }
 
 /** Name to show for a customer row (older cached rows lack display_name). */
@@ -51,7 +53,16 @@ export interface CustomerDetail extends CustomerRow {
   /** Collected but awaiting office submit (draft Payment Entries). */
   pending?: number;
   addresses: CustomerAddress[];
+  /** A salesman: their van's invoices; office users: the whole balance. */
   outstanding: number;
+  /** The whole balance by warehouse (van), plus what no invoice carries. */
+  outstanding_breakdown?: {
+    rows: Array<{ warehouse: string; amount: number; mine: boolean }>;
+    /** Advances, unallocated payments, journal entries (negative = credit). */
+    unlinked: number;
+    total: number;
+    scope: "van" | "all";
+  };
 }
 
 /**

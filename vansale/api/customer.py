@@ -190,7 +190,7 @@ def _vat_field() -> Optional[str]:
     ) else None
 
 
-def _outstanding_by_customer(customers: list[str]) -> dict[str, float]:
+def _ledger_balance_by_customer(customers: list[str]) -> dict[str, float]:
     """Each customer's balance in the ledger (submitted GL entries of the
     user's company), as the Statement and Accounts Receivable show it —
     invoices, returns, payments, advances, journal entries and opening
@@ -214,8 +214,86 @@ def _outstanding_by_customer(customers: list[str]) -> dict[str, float]:
     return {c: flt(balances.get(c), precision) for c in customers}
 
 
+def _invoice_outstanding_by_warehouse(customers: list[str]) -> dict[str, dict[str, float]]:
+    """customer → {warehouse: unpaid balance of its submitted invoices and
+    credit notes} for the user's company. An invoice's warehouse is its
+    "Set warehouse" (the van's), else its first item's."""
+    if not customers:
+        return {}
+    from vansale.api.invoice import _user_company
+
+    out: dict[str, dict[str, float]] = {}
+    for customer, warehouse, amount in frappe.db.sql(
+        """SELECT si.customer,
+                  COALESCE(NULLIF(si.set_warehouse, ''),
+                           (SELECT MIN(sii.warehouse) FROM `tabSales Invoice Item` sii WHERE sii.parent = si.name)) AS wh,
+                  SUM(si.outstanding_amount)
+           FROM `tabSales Invoice` si
+           WHERE si.docstatus = 1 AND si.customer IN %(names)s AND si.company = %(company)s
+             AND si.outstanding_amount != 0
+           GROUP BY si.customer, wh""",
+        {"names": tuple(customers), "company": _user_company() or ""},
+    ):
+        out.setdefault(customer, {})[warehouse or ""] = flt(amount)
+    return out
+
+
+def van_warehouses() -> list[str]:
+    """A salesman's van warehouses (their Vansale Configuration, else their
+    Warehouse User Permissions); [] for office users, who see whole balances."""
+    if is_office_user(default_roles={"System Manager", "Van Manager"}):
+        return []
+    van = user_to_van_config(frappe.session.user)
+    warehouses = (
+        frappe.get_all("Vansale Configuration Warehouse", filters={"parent": van}, pluck="warehouse")
+        if van else []
+    )
+    return [w for w in warehouses if w] or frappe.get_all(
+        "User Permission", filters={"user": frappe.session.user, "allow": "Warehouse"}, pluck="for_value"
+    )
+
+
+def _outstanding_by_customer(customers: list[str]) -> dict[str, float]:
+    """The outstanding the app shows (customer list, customer screen, home
+    card). A salesman: what the customer owes on their own van's invoices —
+    a customer also buying from other vans owed them too, and the whole
+    balance read as the salesman's. Office users: the whole ledger balance.
+    The Statement always shows the whole account."""
+    warehouses = set(van_warehouses())
+    if not warehouses:
+        return _ledger_balance_by_customer(customers)
+    precision = frappe.get_precision("Sales Invoice", "outstanding_amount") or 2
+    by_wh = _invoice_outstanding_by_warehouse(customers)
+    return {
+        c: flt(sum(v for w, v in by_wh.get(c, {}).items() if w in warehouses), precision) for c in customers
+    }
+
+
 def _outstanding(customer: str) -> float:
     return _outstanding_by_customer([customer]).get(customer, 0.0)
+
+
+def outstanding_breakdown(customer: str) -> dict:
+    """The customer's whole balance by warehouse (van), plus what no invoice
+    carries (advances, unallocated payments, journal entries), so the lines
+    add up to the ledger balance."""
+    precision = frappe.get_precision("Sales Invoice", "outstanding_amount") or 2
+    total = _ledger_balance_by_customer([customer]).get(customer, 0.0)
+    by_wh = _invoice_outstanding_by_warehouse([customer]).get(customer, {})
+    mine = set(van_warehouses())
+    rows = [
+        {"warehouse": w or _("No warehouse"), "amount": flt(v, precision), "mine": w in mine}
+        for w, v in by_wh.items()
+        if abs(flt(v, precision)) >= 0.005
+    ]
+    rows.sort(key=lambda r: (not r["mine"], -r["amount"]))
+    unlinked = flt(total - sum(by_wh.values()), precision)
+    return {
+        "rows": rows,
+        "unlinked": unlinked if abs(unlinked) >= 0.005 else 0.0,
+        "total": total,
+        "scope": "van" if mine else "all",
+    }
 
 
 def visible_customers() -> list[str]:
@@ -273,10 +351,16 @@ def list_mine(limit: int = 50, search: Optional[str] = None) -> list[dict]:
         limit=int(limit),
         order_by="modified desc",
     )
-    outstanding = _outstanding_by_customer([r.name for r in rows])
+    names = [r.name for r in rows]
+    outstanding = _outstanding_by_customer(names)
+    # A salesman's list also shows the customer's whole balance (other vans,
+    # advances) when it differs from their van's.
+    totals = _ledger_balance_by_customer(names) if van_warehouses() else {}
     for r in rows:
         r["modified"] = naive_site_to_utc_iso(r.get("modified"))
         r["outstanding"] = outstanding.get(r.name, 0.0)
+        if totals:
+            r["outstanding_total"] = totals.get(r.name, 0.0)
         # Stable keys for the app whatever the site calls these fields.
         r["customer_name_2"] = r.get(name_2) if name_2 else None
         r["vat_number"] = (r.get(vat) if vat else None) or r.get("tax_id")
@@ -434,6 +518,7 @@ def detail(name: str) -> dict:
         "default_currency": doc.default_currency,
         "addresses": addresses,
         "outstanding": _outstanding(doc.name),
+        "outstanding_breakdown": outstanding_breakdown(doc.name),
         # Collected but awaiting office submit (draft Payment Entries);
         # shown beside the balance, not taken off it.
         "pending": pending,

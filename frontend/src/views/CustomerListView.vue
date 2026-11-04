@@ -170,8 +170,13 @@ const totalCount = computed(() => rows.value.length);
             </span>
           </span>
           <!-- Older cached rows have no outstanding; show nothing then. -->
-          <span v-if="c.outstanding != null" class="due" :class="{ zero: c.outstanding <= 0 }">
-            <SarSymbol :code="session.currency" />{{ money(c.outstanding) }}
+          <span v-if="c.outstanding != null" class="due-col">
+            <span class="due" :class="{ zero: c.outstanding <= 0 }">
+              <SarSymbol :code="session.currency" />{{ money(c.outstanding) }}
+            </span>
+            <!-- Salesman: the customer's whole balance, when other vans / advances make it differ. -->
+            <span v-if="c.outstanding_total != null && Math.abs(c.outstanding_total - c.outstanding) >= 0.005"
+                  class="due-total">Total {{ money(c.outstanding_total) }}</span>
           </span>
           <Icon name="chevron-right" :size="16" class="chev" />
         </button>
@@ -329,6 +334,8 @@ const totalCount = computed(() => rows.value.length);
   color: var(--warning);
 }
 .due.zero { font-weight: 400; color: var(--text-faint); }
+.due-col { display: flex; flex-direction: column; align-items: flex-end; gap: 0.05rem; }
+.due-total { font-size: var(--text-xs); color: var(--text-muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
 .chev { color: var(--text-faint); }
 
 .footnote {

@@ -8,7 +8,13 @@ export interface TodayCollection {
   by_mode: Array<{ mode: string; amount: number; count: number }>;
 }
 /** Home screen customer card: the user's customers, ledger balances. */
-export interface CustomerOverview { customers: number; with_outstanding: number; outstanding: number }
+export interface CustomerOverview {
+  customers: number;
+  with_outstanding: number;
+  outstanding: number;
+  /** "van": a salesman's own van's invoices; "all": whole balances. */
+  scope?: "van" | "all";
+}
 export interface MonthSummary { from: string; to: string; sales: number; collections: number }
 export interface ActivityRow {
   kind: "invoice" | "payment";

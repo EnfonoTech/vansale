@@ -18,6 +18,7 @@ const visit = useRouteVisitStore();
 const toasts = useToastStore();
 
 const customer = ref<CustomerDetail | null>(null);
+const breakdown = computed(() => customer.value?.outstanding_breakdown ?? null);
 const invoices = ref<Array<Record<string, unknown>>>([]);
 const loading = ref(false);
 const err = ref("");
@@ -177,6 +178,24 @@ async function onEndVisit() {
         <span class="muted xsmall">Outstanding</span>
         <strong><SarSymbol :code="session.currency" />{{ fmt(customer.outstanding) }}</strong>
       </section>
+      <!-- Where the whole balance sits: each van's warehouse, plus payments /
+           journal entries not on any invoice. The lines add up to the total. -->
+      <section v-if="breakdown && (breakdown.rows.length > 1 || breakdown.unlinked || breakdown.scope === 'van')"
+               class="card stack os-breakdown">
+        <span class="muted xsmall">Outstanding by warehouse</span>
+        <div v-for="r in breakdown.rows" :key="r.warehouse" class="os-row" :class="{ mine: r.mine }">
+          <span class="truncate">{{ r.warehouse }}</span>
+          <span class="tabular"><SarSymbol :code="session.currency" />{{ fmt(r.amount) }}</span>
+        </div>
+        <div v-if="breakdown.unlinked" class="os-row">
+          <span class="truncate">{{ breakdown.unlinked < 0 ? "Advance / credit (not on an invoice)" : "Not on an invoice" }}</span>
+          <span class="tabular"><SarSymbol :code="session.currency" />{{ fmt(breakdown.unlinked) }}</span>
+        </div>
+        <div class="os-row os-total">
+          <span>Customer's total balance</span>
+          <strong class="tabular"><SarSymbol :code="session.currency" />{{ fmt(breakdown.total) }}</strong>
+        </div>
+      </section>
       <p v-if="(customer.pending ?? 0) > 0" class="muted xsmall pending-note">
         <SarSymbol :code="session.currency" />{{ fmt(customer.pending ?? 0) }} collected, awaiting office approval
       </p>
@@ -269,6 +288,10 @@ async function onEndVisit() {
   display: flex; justify-content: space-between; align-items: baseline;
   background: var(--surface-sunk);
 }
+.os-breakdown { gap: 0.4rem; }
+.os-row { display: flex; justify-content: space-between; align-items: baseline; gap: 0.75rem; font-size: var(--text-sm); }
+.os-row.mine { font-weight: 600; }
+.os-total { border-top: 1px solid var(--border); padding-top: 0.4rem; }
 .outstanding[data-positive="true"] { background: var(--warning-soft); color: var(--warning); }
 .outstanding strong { font-size: var(--text-xl); font-variant-numeric: tabular-nums; }
 
