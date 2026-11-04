@@ -91,9 +91,10 @@ export async function fetchPrintPdfBlob(
     format: printFormat,
     no_letterhead: noLetterhead ? "1" : "0",
   });
-  // More than one copy: the app's endpoint repeats the pages in one PDF.
+  // The app's endpoint: repeats the pages for copies, and prints like the
+  // browser when Vansale Settings asks for it.
   if (copies > 1) qs.set("copies", String(copies));
-  const method = copies > 1 ? "vansale.api.printing.pdf" : "frappe.utils.print_format.download_pdf";
+  const method = "vansale.api.printing.pdf";
   const url = `${apiBase()}/api/method/${method}?${qs.toString()}`;
   const headers: Record<string, string> = { Accept: "application/pdf" };
   const creds = await getCredentials();

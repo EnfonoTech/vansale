@@ -75,6 +75,8 @@ def global_flags() -> dict:
         "print_after_submit": False,
         # PDF (save to device) button on print screens; on unless a site hides it.
         "show_pdf_button": True,
+        # App PDFs printed by Chromium like the browser prints (off: Frappe's PDF).
+        "pdf_like_browser_print": False,
         "print_copies": 1,
     }
     try:
@@ -108,6 +110,7 @@ def global_flags() -> dict:
             "allow_line_discount",
             "allow_delete_draft_payment",
             "confirm_before_submit",
+            "pdf_like_browser_print",
         ):
             if key in row:
                 flags[key] = bool(int(row.get(key) or 0))

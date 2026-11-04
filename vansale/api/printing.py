@@ -4,17 +4,27 @@
 Style and Frappe's print.bundle.css), so the in-app preview and web print
 look the same as printing from desk.
 
-`pdf`: Android prints a PDF (the WebView ignores window.print). Copies are
-the document's pages repeated in one PDF, so the driver gets them in one job.
+`pdf`: the app's PDF (download, Android printing — the WebView ignores
+window.print). Copies are the document's pages repeated in one PDF, so the
+driver gets them in one job. With Vansale Settings "PDF same as browser
+print" it is Chromium printing desk's print view, as Print → Save as PDF in
+a browser does; Frappe's PDF engines lay pages out differently (wkhtmltopdf
+has no flexbox; both force a 15 mm top margin and ignore the format's
+@page rule).
 """
 
 from __future__ import annotations
 
 import io
+import os
+import subprocess
+import tempfile
 
 import frappe
 from frappe import _
 from frappe.utils import cint
+
+from vansale.vansale.doctype.vansale_settings.vansale_settings import global_flags
 
 PRINTABLE = ("Sales Invoice", "Payment Entry")
 MAX_COPIES = 10
@@ -54,9 +64,13 @@ def get_html(doctype: str, name: str, format: str | None = None, no_letterhead: 
 def pdf(doctype: str, name: str, format: str | None = None, copies: int = 1, no_letterhead: int = 0):
     doc = _printable(doctype, name)
 
-    data = frappe.get_print(
-        doctype, name, format, doc=doc, as_pdf=True, no_letterhead=cint(no_letterhead)
-    )
+    data = None
+    if global_flags().get("pdf_like_browser_print"):
+        data = _browser_print_pdf(doc, format, cint(no_letterhead))
+    if data is None:
+        data = frappe.get_print(
+            doctype, name, format, doc=doc, as_pdf=True, no_letterhead=cint(no_letterhead)
+        )
     copies = max(1, min(cint(copies), MAX_COPIES))
     if copies > 1:
         from pypdf import PdfReader, PdfWriter
@@ -73,3 +87,59 @@ def pdf(doctype: str, name: str, format: str | None = None, copies: int = 1, no_
     frappe.local.response.filename = f"{name}.pdf"
     frappe.local.response.filecontent = data
     frappe.local.response.type = "pdf"
+
+
+def _chromium_path() -> str | None:
+    """Chromium for printing: site config `chromium_binary_path` /
+    `chromium_path`, else the one Print Designer sets up in the bench."""
+    configured = frappe.conf.get("chromium_binary_path") or frappe.conf.get("chromium_path")
+    candidates = [configured] if configured else []
+    bench = frappe.utils.get_bench_path()
+    candidates += [
+        os.path.join(bench, "chromium", "chrome-linux", "headless_shell"),
+        os.path.join(bench, "chromium", "chrome-linux", "chrome"),
+    ]
+    for path in candidates:
+        if path and os.path.isfile(path) and os.access(path, os.X_OK):
+            return path
+    return None
+
+
+def _browser_print_pdf(doc, print_format: str | None, no_letterhead: int) -> bytes | None:
+    """The PDF a browser makes from desk's print view (Print → Save as PDF):
+    the same page printed by Chromium, so the format's @page size and margins
+    apply. None when Chromium is missing or fails — the caller then uses
+    Frappe's PDF, so printing keeps working."""
+    from vansale.api.customer import _inline_public_images
+
+    exe = _chromium_path()
+    if not exe:
+        frappe.log_error("Vansale: no Chromium for browser-print PDF", "Vansale PDF")
+        return None
+    html = frappe.get_print(doc.doctype, doc.name, print_format, doc=doc, no_letterhead=no_letterhead)
+    # Images from the site's files go in the page itself; CSS and anything
+    # else resolve against the site's URL.
+    html = _inline_public_images(html)
+    html = html.replace("<head>", f'<head><base href="{frappe.utils.get_url()}/">', 1)
+    with tempfile.TemporaryDirectory(prefix="vansale-pdf-") as tmp:
+        src, out = os.path.join(tmp, "doc.html"), os.path.join(tmp, "doc.pdf")
+        with open(src, "w", encoding="utf-8") as fh:
+            fh.write(html)
+        try:
+            subprocess.run(
+                [
+                    exe, "--headless", "--no-sandbox", "--disable-gpu",
+                    "--no-pdf-header-footer", "--print-to-pdf-no-header",
+                    f"--user-data-dir={os.path.join(tmp, 'profile')}",
+                    f"--print-to-pdf={out}", "file://" + src,
+                ],
+                capture_output=True, timeout=60, check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            frappe.log_error(f"{doc.doctype} {doc.name}: {exc}", "Vansale PDF")
+            return None
+        if not os.path.isfile(out) or os.path.getsize(out) == 0:
+            frappe.log_error(f"{doc.doctype} {doc.name}: Chromium wrote no PDF", "Vansale PDF")
+            return None
+        with open(out, "rb") as fh:
+            return fh.read()
