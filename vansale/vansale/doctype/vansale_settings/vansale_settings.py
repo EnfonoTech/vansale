@@ -75,6 +75,8 @@ def global_flags() -> dict:
         "print_after_submit": False,
         # PDF (save to device) button on print screens; on unless a site hides it.
         "show_pdf_button": True,
+        # Share button (phone share sheet) on print screens.
+        "show_share_button": True,
         # App PDFs printed by Chromium like the browser prints (off: Frappe's PDF).
         "pdf_like_browser_print": False,
         "print_copies": 1,
@@ -107,6 +109,7 @@ def global_flags() -> dict:
             "allow_return_without_invoice",
             "allow_advance_payment",
             "show_pdf_button",
+            "show_share_button",
             "allow_line_discount",
             "allow_delete_draft_payment",
             "confirm_before_submit",

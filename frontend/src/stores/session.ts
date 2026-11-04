@@ -105,6 +105,7 @@ export const useSessionStore = defineStore("session", {
     printBehaviour: (s) => s.defaults?.print ?? null,
     /** "Show PDF button" setting (van → global); shown unless turned off. */
     showPdfButton: (s) => s.defaults?.print?.pdf_button !== false,
+    showShareButton: (s) => s.defaults?.print?.share_button !== false,
     customerForm: (s) => s.defaults?.customer_form ?? null,
     splitPayment: (s) => Boolean(s.defaults?.split_payment),
     advancePayment: (s) => Boolean(s.defaults?.advance_payment),

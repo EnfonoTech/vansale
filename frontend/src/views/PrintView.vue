@@ -19,6 +19,7 @@ import {
   defaultPrintFormat,
   printDocument,
 } from "@/api/print";
+import { shareDocument } from "@/app/share";
 import { ApiError, NetworkError } from "@/app/frappe";
 import { useSessionStore } from "@/stores/session";
 import { useToastStore } from "@/stores/toasts";
@@ -38,6 +39,7 @@ const loading = ref(false);
 const err = ref("");
 const downloading = ref(false);
 const printing = ref(false);
+const sharing = ref(false);
 const iframe = ref<HTMLIFrameElement | null>(null);
 
 async function load() {
@@ -84,6 +86,21 @@ async function doDownload() {
   }
 }
 
+/** The same PDF as the PDF button, to WhatsApp / email / … */
+async function doShare() {
+  if (sharing.value) return;
+  sharing.value = true;
+  try {
+    const res = await shareDocument(doctype.value, name.value, format.value);
+    if (res === "saved") toasts.info("Sharing isn't available here — PDF saved instead");
+  } catch (e) {
+    if (e instanceof NetworkError) toasts.error("Offline — try again when connected");
+    else toasts.error(e instanceof Error ? e.message : String(e));
+  } finally {
+    sharing.value = false;
+  }
+}
+
 onMounted(load);
 </script>
 
@@ -96,6 +113,10 @@ onMounted(load);
       <div class="toolbar">
         <span class="eyebrow">{{ doctype }} · {{ name }}</span>
         <div class="toolbar-actions">
+          <button v-if="session.showShareButton" type="button" class="ghost" :disabled="sharing" @click="doShare">
+            <Icon name="share" :size="16" />
+            <span>{{ sharing ? "Preparing…" : "Share" }}</span>
+          </button>
           <button v-if="session.showPdfButton" type="button" class="ghost" :disabled="downloading" @click="doDownload">
             <Icon name="receipt" :size="16" />
             <span>{{ downloading ? "Saving…" : "PDF" }}</span>

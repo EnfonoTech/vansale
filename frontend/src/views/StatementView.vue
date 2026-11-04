@@ -12,6 +12,7 @@
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { useRoute } from "vue-router";
 import { statement, fetchStatementPdf, downloadStatementPdf } from "@/api/customer";
+import { sharePdf } from "@/app/share";
 import { ApiError, NetworkError } from "@/app/frappe";
 import { hasNativePrint, printPdfNative } from "@/app/native-print";
 import { useSessionStore } from "@/stores/session";
@@ -133,6 +134,23 @@ async function printStatement() {
   }
 }
 
+const sharing = ref(false);
+/** The statement PDF to WhatsApp / email / … */
+async function shareStatement() {
+  if (sharing.value) return;
+  sharing.value = true;
+  try {
+    const blob = await fetchStatementPdf(customerName.value, fromDate.value || undefined, toDate.value || undefined);
+    const res = await sharePdf(blob, `statement-${customerName.value}.pdf`, `Statement · ${customerName.value}`);
+    if (res === "saved") toasts.info("Sharing isn't available here — PDF saved instead");
+  } catch (e) {
+    if (e instanceof NetworkError) toasts.error("Offline — try again when connected");
+    else toasts.error(e instanceof Error ? e.message : String(e));
+  } finally {
+    sharing.value = false;
+  }
+}
+
 async function saveAsPdf() {
   if (downloading.value) return;
   downloading.value = true;
@@ -181,6 +199,10 @@ onMounted(load);
 
     <template v-if="!loading && html">
       <div class="toolbar">
+        <button v-if="session.showShareButton" type="button" class="ghost" :disabled="sharing" @click="shareStatement">
+          <Icon name="share" :size="16" />
+          <span>{{ sharing ? "Preparing…" : "Share" }}</span>
+        </button>
         <button v-if="session.showPdfButton" type="button" class="ghost" :disabled="downloading" @click="saveAsPdf">
           <Icon name="receipt" :size="16" />
           <span>{{ downloading ? "Saving…" : "PDF" }}</span>

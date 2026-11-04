@@ -12,6 +12,15 @@ dependencies = [
     "python-dateutil>=2.8",
 ]
 
+# System packages Chromium needs for "PDF same as browser print"
+# (Frappe Cloud installs these; elsewhere see Vansale Settings → Check PDF setup).
+[deploy.dependencies.apt]
+packages = [
+    "libnss3", "libnspr4", "libasound2", "libatk-bridge2.0-0", "libatk1.0-0", "libatspi2.0-0",
+    "libgbm1", "libgtk-3-0", "libxcomposite1", "libxdamage1", "libxfixes3", "libxkbcommon0",
+    "libxrandr2", "libcups2", "libdrm2", "fonts-liberation",
+]
+
 [build-system]
 requires = ["flit_core >=3.4,<4"]
 build-backend = "flit_core.buildapi"

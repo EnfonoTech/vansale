@@ -33,6 +33,7 @@
   "direct_print",
   "print_after_submit",
   "show_pdf_button",
+  "show_share_button",
   "pdf_like_browser_print",
   "column_break_print_behaviour",
   "print_copies",
@@ -217,6 +218,12 @@
    "label": "Show PDF button"
   },
   {
+   "default": "1",
+   "fieldname": "show_share_button",
+   "fieldtype": "Check",
+   "label": "Show Share button (WhatsApp, email…)"
+  },
+  {
    "default": "0",
    "fieldname": "pdf_like_browser_print",
    "fieldtype": "Check",
@@ -286,7 +293,7 @@
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-11-04 12:00:00.000000",
+ "modified": "2026-11-04 15:00:00.000000",
  "modified_by": "Administrator",
  "module": "Vansale",
  "name": "Vansale Settings",

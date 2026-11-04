@@ -89,30 +89,15 @@ def pdf(doctype: str, name: str, format: str | None = None, copies: int = 1, no_
     frappe.local.response.type = "pdf"
 
 
-def _chromium_path() -> str | None:
-    """Chromium for printing: site config `chromium_binary_path` /
-    `chromium_path`, else the one Print Designer sets up in the bench."""
-    configured = frappe.conf.get("chromium_binary_path") or frappe.conf.get("chromium_path")
-    candidates = [configured] if configured else []
-    bench = frappe.utils.get_bench_path()
-    candidates += [
-        os.path.join(bench, "chromium", "chrome-linux", "headless_shell"),
-        os.path.join(bench, "chromium", "chrome-linux", "chrome"),
-    ]
-    for path in candidates:
-        if path and os.path.isfile(path) and os.access(path, os.X_OK):
-            return path
-    return None
-
-
 def _browser_print_pdf(doc, print_format: str | None, no_letterhead: int) -> bytes | None:
     """The PDF a browser makes from desk's print view (Print → Save as PDF):
     the same page printed by Chromium, so the format's @page size and margins
     apply. None when Chromium is missing or fails — the caller then uses
     Frappe's PDF, so printing keeps working."""
     from vansale.api.customer import _inline_public_images
+    from vansale.pdf_engine import chromium_path
 
-    exe = _chromium_path()
+    exe = chromium_path()
     if not exe:
         frappe.log_error("Vansale: no Chromium for browser-print PDF", "Vansale PDF")
         return None

@@ -6,8 +6,9 @@ import { modesOfPayment, type ModeOfPayment } from "@/api/payment";
 import { useSessionStore } from "@/stores/session";
 import { useToastStore } from "@/stores/toasts";
 import { useConfirmStore } from "@/stores/confirm";
-import { ApiError } from "@/app/frappe";
+import { ApiError, NetworkError } from "@/app/frappe";
 import { openPrint, printDocument, defaultPrintFormat } from "@/api/print";
+import { shareDocument } from "@/app/share";
 import Icon from "@/components/Icon.vue";
 import SarSymbol from "@/components/SarSymbol.vue";
 import { vDecimals } from "@/components/decimals";
@@ -174,6 +175,22 @@ async function printInvoice() {
   }
 }
 
+const sharing = ref(false);
+/** The document's PDF to WhatsApp / email / … (also for "Print directly"
+ *  vans, which never see the print preview). */
+async function shareThis(doctype: string, name: string) {
+  if (sharing.value) return;
+  sharing.value = true;
+  try {
+    const res = await shareDocument(doctype, name, defaultPrintFormat(doctype, session.printFormats));
+    if (res === "saved") toasts.info("Sharing isn't available here — PDF saved instead");
+  } catch (e) {
+    toasts.error(e instanceof NetworkError ? "Offline — try again when connected" : e instanceof Error ? e.message : String(e));
+  } finally {
+    sharing.value = false;
+  }
+}
+
 function returnInvoice() {
   if (!inv.value) return;
   void router.push({ name: "invoice-return", params: { name: inv.value.name } });
@@ -310,6 +327,10 @@ async function deleteInvoice() {
             </button>
             <button class="ghost" @click="printInvoice">
               <Icon name="receipt" :size="16" /> Print
+            </button>
+            <button v-if="session.showShareButton && inv.docstatus === 1" class="ghost" :disabled="sharing"
+                    @click="shareThis('Sales Invoice', inv.name)">
+              <Icon name="share" :size="16" /> {{ sharing ? "Preparing…" : "Share" }}
             </button>
             <button
               v-if="inv.docstatus === 1 && !inv.is_return"
