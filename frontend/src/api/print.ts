@@ -31,6 +31,8 @@ export function defaultPrintFormat(
   configured?: { invoice: string; receipt: string } | null,
 ): string {
   if (doctype === "Payment Entry") return configured?.receipt || DEFAULT_PE_PRINT_FORMAT;
+  // No app-specific layout for these: Frappe's standard print format.
+  if (doctype === "Quotation" || doctype === "Sales Order") return "Standard";
   return configured?.invoice || DEFAULT_SI_PRINT_FORMAT;
 }
 
