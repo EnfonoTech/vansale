@@ -21,6 +21,7 @@ import { openPrint, printDocument, defaultPrintFormat } from "@/api/print";
 import { shareDocument } from "@/app/share";
 import Icon from "@/components/Icon.vue";
 import SarSymbol from "@/components/SarSymbol.vue";
+import { customerLine } from "@/app/customerName";
 
 const route = useRoute();
 const router = useRouter();
@@ -161,7 +162,7 @@ const isRefund = computed(() => doc.value?.payment_type === "Pay");
           <div>
             <span class="muted xsmall">Payment</span>
             <h2 class="pe-name">{{ doc.name }}</h2>
-            <span class="muted small">{{ doc.posting_date }} · {{ doc.party_name || doc.party }}</span>
+            <span class="muted small">{{ doc.posting_date }} · {{ customerLine(doc.party_title, doc.party_name, doc.party) }}</span>
           </div>
           <span class="pill" :data-tone="tone(doc.status)">{{ doc.status }}</span>
         </div>

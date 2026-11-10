@@ -69,6 +69,8 @@ export interface ReturnRow {
   name: string;
   customer: string;
   customer_name: string;
+  /** The customer's title (Badria: English name); customer_name is what the invoice stored. */
+  customer_title?: string | null;
   grand_total: number;
   status: string;
   posting_date: string | null;
@@ -128,6 +130,8 @@ export interface InvoiceDetail {
   name: string;
   customer: string;
   customer_name: string;
+  /** The customer's title (Badria: English name); customer_name is what the invoice stored. */
+  customer_title?: string | null;
   company: string;
   currency: string;
   posting_date: string | null;

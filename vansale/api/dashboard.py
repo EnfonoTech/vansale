@@ -141,10 +141,15 @@ def recent_activity(limit: int = 10) -> list[dict]:
         {"user": user, "limit": int(limit)},
         as_dict=True,
     )
+    from vansale.api.customer import customer_titles
+
+    titles = customer_titles([r["party"] for r in rows])
     for r in rows:
         r["amount"] = float(r.get("amount") or 0)
         r["posting_date"] = str(r.get("posting_date") or "")
         r["modified"] = naive_site_to_utc_iso(r.get("modified"))
+        # The customer's title (Badria: English name), not the ID.
+        r["party_title"] = titles.get(r["party"]) or r["party"]
     return rows
 
 

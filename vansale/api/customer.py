@@ -162,6 +162,31 @@ def _display_names(row) -> tuple[str, Optional[str]]:
     return display, (other if other and other != display else None)
 
 
+def customer_titles(names) -> dict[str, str]:
+    """Customer ID → the name the app shows: the customer's title as desk
+    shows it (Badria: the English name), else customer_name. Invoices and
+    payments only store customer_name, so lists showed the Arabic name."""
+    names = [n for n in set(names or []) if n]
+    if not names:
+        return {}
+    tf, name_2 = _title_field(), customer_name_2_field()
+    fields = ["name", "customer_name"] + [f for f in {tf, name_2} if f]
+    return {
+        r.name: (_display_names(r)[0] or r.name).strip()
+        for r in frappe.get_all("Customer", filters={"name": ["in", names]}, fields=fields)
+    }
+
+
+def customers_titled(search: str, limit: int = 200) -> list[str]:
+    """Customer IDs whose title matches `search`, for list search boxes."""
+    tf = _title_field()
+    if not tf or not (search or "").strip():
+        return []
+    return frappe.get_all(
+        "Customer", filters={tf: ["like", f"%{search.strip()}%"]}, pluck="name", limit_page_length=limit
+    )
+
+
 def _default_leaf(doctype: str, van_field: str, selling_settings_field: str) -> Optional[str]:
     """Default Customer Group / Territory for a new customer.
 

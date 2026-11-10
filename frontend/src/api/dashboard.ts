@@ -20,6 +20,8 @@ export interface ActivityRow {
   kind: "invoice" | "payment";
   name: string;
   party: string;
+  /** The customer's title (Badria: English name). */
+  party_title?: string;
   amount: number;
   posting_date: string;
   modified: string;

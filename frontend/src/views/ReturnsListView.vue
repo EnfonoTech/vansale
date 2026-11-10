@@ -16,6 +16,8 @@ import Icon from "@/components/Icon.vue";
 import SarSymbol from "@/components/SarSymbol.vue";
 import { useVisibleArea } from "@/components/visibleArea";
 import { inputValue } from "@/components/liveInput";
+import CustomerName from "@/components/CustomerName.vue";
+import { customerLine } from "@/app/customerName";
 
 const router = useRouter();
 const session = useSessionStore();
@@ -41,7 +43,7 @@ const filteredPicker = computed(() => {
   if (!q) return pickerRows.value;
   return pickerRows.value.filter((r) => {
     const name = String(r.name || "").toLowerCase();
-    const cust = String(r.customer_name || r.customer || "").toLowerCase();
+    const cust = String(r.customer_title || r.customer_name || r.customer || "").toLowerCase();
     return name.includes(q) || cust.includes(q);
   });
 });
@@ -162,7 +164,7 @@ function pickInvoice(name: string) {
           <div class="body">
             <strong class="name">{{ r.name }}</strong>
             <span class="muted xsmall">
-              {{ r.customer_name || r.customer }} · {{ r.posting_date }}
+              {{ customerLine(r.customer_title, r.customer_name, r.customer) }} · {{ r.posting_date }}
             </span>
           </div>
           <strong class="amount">- <SarSymbol :code="session.currency" />{{ fmt(r.grand_total) }}</strong>
@@ -214,7 +216,7 @@ function pickInvoice(name: string) {
           <li v-for="r in filteredPicker" :key="String(r.name)">
             <button type="button" class="picker-row" @click="pickInvoice(String(r.name))">
               <div class="picker-body">
-                <strong class="truncate">{{ r.customer_name || r.customer }}</strong>
+                <CustomerName :title="r.customer_title" :name="r.customer_name" :id="r.customer" />
                 <span class="muted xsmall">{{ r.name }} · {{ r.posting_date }}</span>
               </div>
               <div class="picker-right">

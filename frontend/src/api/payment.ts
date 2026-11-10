@@ -88,6 +88,8 @@ export interface PaymentDetail {
   name: string;
   party: string;
   party_name: string | null;
+  /** The customer's title (Badria: English name). */
+  party_title?: string | null;
   payment_type: string;
   paid_amount: number;
   received_amount: number;

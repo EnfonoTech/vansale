@@ -15,6 +15,7 @@ import {
 import { warmCaches } from "@/offline/warm";
 import Icon from "@/components/Icon.vue";
 import SarSymbol from "@/components/SarSymbol.vue";
+import CustomerName from "@/components/CustomerName.vue";
 
 const router = useRouter();
 const session = useSessionStore();
@@ -238,7 +239,7 @@ function onActivityClick(row: ActivityRow) {
             <Icon :name="kindIcon(row.kind)" :size="18" />
           </span>
           <div class="activity-main">
-            <strong class="truncate">{{ row.party }}</strong>
+            <CustomerName :title="row.party_title" :id="row.party" />
             <span class="muted xsmall">{{ row.name }} · {{ row.posting_date }}</span>
           </div>
           <strong class="activity-amt">{{ fmt(row.amount) }}</strong>

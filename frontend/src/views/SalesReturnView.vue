@@ -26,6 +26,7 @@ import SarSymbol from "@/components/SarSymbol.vue";
 import RefundSection, { type RefundState } from "@/components/RefundSection.vue";
 import { vDecimals } from "@/components/decimals";
 import { confirmSubmit, withCurrency } from "@/stores/confirm";
+import { customerLine } from "@/app/customerName";
 
 interface ReturnRowState {
   include: boolean;
@@ -223,7 +224,7 @@ async function submit() {
   const refundErr = refundAmountError();
   if (refundErr) { toasts.warn(refundErr); return; }
   const ok = await confirmSubmit("Submit return?", [
-    `${orig.value.customer_name} · against ${orig.value.name}`,
+    `${customerLine(orig.value.customer_title, orig.value.customer_name, orig.value.customer)} · against ${orig.value.name}`,
     `${picks.length} line${picks.length === 1 ? "" : "s"}${totals.value ? ` · ${withCurrency(fmt(Math.abs(totals.value.grand_total)))}` : ""}`,
     refund.value.on
       ? `Refund ${refund.value.amount != null ? fmt(refund.value.amount) : "in full"} · ${refund.value.mode}`
@@ -282,7 +283,7 @@ async function submit() {
           <div>
             <span class="muted xsmall">Return against</span>
             <h3 class="inv-name">{{ orig.name }}</h3>
-            <span class="muted small">{{ orig.customer_name }} · {{ orig.posting_date }}</span>
+            <span class="muted small">{{ customerLine(orig.customer_title, orig.customer_name, orig.customer) }} · {{ orig.posting_date }}</span>
           </div>
           <span class="pill" data-tone="info">{{ orig.status }}</span>
         </div>

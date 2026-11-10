@@ -23,6 +23,8 @@ export interface RouteStop {
   name: string | null;
   customer: string;
   customer_name?: string | null;
+  /** The customer's title (Badria: English name). */
+  customer_title?: string | null;
   mobile_no?: string | null;
   address?: string | null;
   status: "pending" | "in_progress" | "done" | "skipped";

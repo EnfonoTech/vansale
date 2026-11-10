@@ -17,6 +17,7 @@ import { useToastStore } from "@/stores/toasts";
 import { useConfirmStore } from "@/stores/confirm";
 import { useRouteVisitStore } from "@/stores/routeVisit";
 import Icon from "@/components/Icon.vue";
+import CustomerName from "@/components/CustomerName.vue";
 
 /**
  * RouteTodayView — post-Apr 22 rewrite.
@@ -93,7 +94,7 @@ async function onStart(stop: RouteStop) {
     }
     if (isOnline()) await startVisit(stop.customer);
     visit.start(stop);
-    toasts.info(`Visit started \u00b7 ${stop.customer_name || stop.customer}`);
+    toasts.info(`Visit started \u00b7 ${stop.customer_title || stop.customer_name || stop.customer}`);
   } catch (e) {
     toasts.error(e instanceof Error ? e.message : String(e));
   }
@@ -135,7 +136,7 @@ async function onEnd() {
  * in_progress.
  */
 async function onCompleteStop(stop: RouteStop) {
-  const label = stop.customer_name || stop.customer;
+  const label = stop.customer_title || stop.customer_name || stop.customer;
   const ok = await confirm.ask({
     title: `Mark ${label} complete?`,
     message: "Closes this stop with no invoice or payment. Use this for courtesy visits or when nothing was transacted.",
@@ -162,7 +163,7 @@ async function onCompleteStop(stop: RouteStop) {
 }
 
 async function onSkip(stop: RouteStop) {
-  const label = stop.customer_name || stop.customer;
+  const label = stop.customer_title || stop.customer_name || stop.customer;
   const ok = await confirm.ask({
     title: `Skip ${label}?`,
     message: "Marks this stop as skipped. You can still visit the customer manually.",
@@ -301,10 +302,10 @@ const todayLabel = computed(() => {
           type="button"
           class="stop-head link"
           @click="openCustomer(s.customer)"
-          :aria-label="`Open customer ${s.customer_name || s.customer}`"
+          :aria-label="`Open customer ${s.customer_title || s.customer_name || s.customer}`"
         >
           <div class="body">
-            <strong class="truncate">{{ s.customer_name || s.customer }}</strong>
+            <CustomerName :title="s.customer_title" :name="s.customer_name" :id="s.customer" />
             <span class="muted xsmall" v-if="s.mobile_no">{{ s.mobile_no }}</span>
             <span class="muted xsmall" v-if="s.address">{{ s.address }}</span>
           </div>
@@ -381,7 +382,7 @@ const todayLabel = computed(() => {
         <Icon name="map-pin" :size="20" />
         <div>
           <span class="muted xsmall">Active visit</span>
-          <strong>{{ visit.active.stop.customer_name || visit.active.stop.customer }}</strong>
+          <strong>{{ visit.active.stop.customer_title || visit.active.stop.customer_name || visit.active.stop.customer }}</strong>
         </div>
       </div>
       <p class="muted small">

@@ -13,6 +13,7 @@ import Icon from "@/components/Icon.vue";
 import SarSymbol from "@/components/SarSymbol.vue";
 import { vDecimals } from "@/components/decimals";
 import { confirmSubmit, withCurrency } from "@/stores/confirm";
+import { customerLine } from "@/app/customerName";
 
 const route = useRoute();
 const router = useRouter();
@@ -135,7 +136,7 @@ async function doRefund() {
   if (a != null && !(a > 0)) { toasts.warn("Refund amount must be more than 0"); return; }
   if (a != null && a > max + 0.005) { toasts.warn("Refund amount can't be more than the credit"); return; }
   const ok = await confirmSubmit("Refund the customer?", [
-    inv.value.customer_name,
+    customerLine(inv.value.customer_title, inv.value.customer_name, inv.value.customer),
     `${withCurrency(fmt(a ?? max))} · ${refundMode.value}`,
   ], "Yes, refund");
   if (!ok) return;
@@ -215,7 +216,7 @@ function editDraft() {
 async function submitInvoice() {
   if (!inv.value || busy.value) return;
   const ok = await confirmSubmit(`Submit ${inv.value.name}?`, [
-    inv.value.customer_name,
+    customerLine(inv.value.customer_title, inv.value.customer_name, inv.value.customer),
     `${withCurrency(fmt(inv.value.grand_total))}`,
   ]);
   if (!ok) return;
@@ -282,7 +283,7 @@ async function deleteInvoice() {
           <div>
             <span class="muted xsmall">{{ inv.is_return ? "Credit note" : "Invoice" }}</span>
             <h2 class="inv-name">{{ inv.name }}</h2>
-            <span class="muted small">{{ inv.posting_date }} · {{ inv.customer_name }}</span>
+            <span class="muted small">{{ inv.posting_date }} · {{ customerLine(inv.customer_title, inv.customer_name, inv.customer) }}</span>
           </div>
           <span class="pill" :data-tone="tone(inv.status)">{{ inv.status }}</span>
         </div>
