@@ -1,0 +1,201 @@
+<!-- Payable Confirmation — Print Format for the ACCOUNTS PAYABLE report.
+
+     A payable confirmation certificate sent to a supplier at a cut-off date: it states what
+     we believe we owe them and carries a counter-block for the supplier to confirm the same
+     figure is receivable to them. Modelled on the certificate Steel Force already issues
+     (PAYABLE CONFIRMATION - STEEL FORCE, 16 May 2026) so the wording suppliers receive does
+     not change.
+
+        Print Format For : Report
+        Report           : Accounts Payable
+        Print Format Type: JS          (client-side micro-template, plain JS)
+        Custom Format    : ticked
+        PDF Generator    : wkhtmltopdf
+
+     ONE CERTIFICATE PER SUPPLIER. Filter the report to a single Party for one certificate;
+     leave the filter off and every supplier with a balance gets their own page.
+
+     THE AMOUNT IS COMPANY CURRENCY. ERPNext keeps `outstanding` on this report in the party
+     account currency, which is the company currency here, so a supplier billed in SAR or AED
+     still confirms the BHD figure the ledger carries. The currency code beside it is read
+     from the row rather than assumed.
+
+     Leave "With Letter head" UNTICKED — the artwork is fetched and drawn by this template,
+     and ticking the box makes the print wrapper draw it a second time.
+
+     NO APOSTROPHES anywhere in this file. frappe.template.compile quotes literal text with
+     single quotes and escapes only the FIRST apostrophe in each run, so a second one ends
+     the string early and the format dies with "missing ) after argument list".
+-->
+<style>
+    .print-format {
+        page-size: A4;
+        orientation: Portrait;
+        margin-top: 10mm;
+        margin-bottom: 12mm;
+        margin-left: 14mm;
+        margin-right: 14mm;
+        font-family: Helvetica, Arial, "DejaVu Sans", sans-serif;
+        font-size: 10.5pt;
+        color: #1a1a1a;
+        line-height: 1.6;
+    }
+
+    @page { size: A4 portrait; margin: 12mm; }
+
+    .conf { page-break-after: always; }
+    .conf:last-child { page-break-after: auto; }
+
+    .conf-date { margin-bottom: 8mm; }
+
+    .conf-subject { margin-bottom: 8mm; }
+    .conf-subject b { text-decoration: underline; }
+
+    .conf-body p { margin: 0 0 4mm 0; }
+    .conf-amount { font-weight: 700; }
+
+    .conf-sign { margin-top: 10mm; }
+    .conf-sign .line { margin-bottom: 1.5mm; }
+    .conf-sign .for { font-weight: 700; }
+    /* room for the physical signature and company stamp */
+    .conf-stamp-space { height: 24mm; }
+    .conf-signature-rule {
+        display: inline-block;
+        border-bottom: 0.8pt solid #333;
+        min-width: 55mm;
+        margin-bottom: 1.5mm;
+    }
+
+    .conf-rule { border-top: 0.8pt solid #333; margin: 6mm 0 8mm 0; }
+
+    .letter-head, .letter-head-footer { text-align: center; }
+    .letter-head { margin-bottom: 6mm; }
+    .letter-head-footer { margin-top: 6mm; }
+    .letter-head img, .letter-head-footer img { max-width: 100%; height: auto; }
+
+    /* A Letter Head positions its artwork with position:fixed, which takes it out of the
+       flow and repaints it over every page, hiding the letter underneath. Putting it back
+       in the flow prints it once, at the top, with the letter below it. */
+    @media print {
+        .letter-head .header,
+        .letter-head-footer .footer { position: static !important; }
+    }
+</style>
+
+{%
+    /* ---- balances by supplier; the report total row carries no party ---- */
+    var rows = (data || []).filter(function (row) { return row && row.party; });
+
+    var order = [];
+    var balances = {};
+    for (var i = 0; i < rows.length; i++) {
+        var key = rows[i].party;
+        if (!balances[key]) {
+            balances[key] = {
+                party: key,
+                name: rows[i].supplier_name || rows[i].party,
+                currency: rows[i].currency || "",
+                outstanding: 0
+            };
+            order.push(key);
+        }
+        balances[key].outstanding += flt(rows[i].outstanding);
+    }
+
+    var letters = [];
+    for (var o = 0; o < order.length; o++) {
+        var entry = balances[order[o]];
+        /* a supplier whose balance nets to nothing has nothing to confirm */
+        if (Math.abs(flt(entry.outstanding)) >= 0.005) { letters.push(entry); }
+    }
+
+    var money = function (value, currency) {
+        return cstr(currency) + " " + format_number(flt(value), get_number_format(currency));
+    };
+    var on_date = function (value) { return value ? frappe.datetime.str_to_user(value) : ""; };
+
+    var company = filters.company || "";
+    var as_on = on_date(filters.report_date);
+    var today_str = on_date(frappe.datetime.get_today());
+
+    /* ---- letter head artwork, drawn here so the certificate carries it whether it is
+            printed from the button or exported as a PDF ---- */
+    var lh_header = "", lh_footer = "";
+    var with_letter_head = print_settings && print_settings.with_letter_head;
+    try {
+        if (!with_letter_head) {
+            frappe.call({
+                method: "vansale.sf_trading.api.statement_of_account.get_letter_head_artwork",
+                args: {
+                    letter_head: (print_settings && print_settings.letter_head_name) || null,
+                    company: filters.company || null,
+                },
+                async: false,
+                callback: function (r) {
+                    var art = (r && r.message) || {};
+                    lh_header = cstr(art.header_image);
+                    lh_footer = cstr(art.footer_image);
+                }
+            });
+        }
+    } catch (letter_head_error) { lh_header = ""; lh_footer = ""; }
+%}
+
+{% if (!letters.length) { %}
+    <p>{%= __("No supplier carries a balance for these filters.") %}</p>
+{% } %}
+
+{% for (var l = 0; l < letters.length; l++) { %}
+    {% var letter = letters[l]; %}
+    <div class="conf">
+        {% if (lh_header) { %}
+        <div class="letter-head"><div class="header"><img src="{{ lh_header }}"></div></div>
+        {% } %}
+
+        <div class="conf-date">{{ today_str }}</div>
+
+        <div class="conf-subject">
+            {%= __("SUB") %}: <b>{%= __("Payable Confirmation certificate as on") %} {{ as_on }}.</b>
+        </div>
+
+        <div class="conf-body">
+            <p>{%= __("Dear Sir,") %}</p>
+            <p>
+                {%= __("As per our records, balance due to") %}
+                <span class="conf-amount">{{ letter.name }}</span>
+                {%= __("is") %}
+                <span class="conf-amount">{%= money(letter.outstanding, letter.currency) %}</span>
+                {%= __("as on") %} {{ as_on }}.
+            </p>
+            <p>{%= __("Kindly confirm the same.") %}</p>
+        </div>
+
+        <div class="conf-sign">
+            <div class="line for">{%= __("For") %}: {{ company }}</div>
+            <div class="conf-stamp-space"></div>
+            <div class="line"><b>{%= __("Authorized Signatory") %}</b></div>
+        </div>
+
+        <div class="conf-rule"></div>
+
+        <div class="conf-body">
+            <p>
+                <span class="conf-amount">{{ letter.name }}</span>
+                {%= __("confirms that") %}
+                <span class="conf-amount">{%= money(letter.outstanding, letter.currency) %}</span>
+                {%= __("is receivable to the Company as on") %} {{ as_on }}.
+            </p>
+        </div>
+
+        <div class="conf-sign">
+            <div class="line for">{%= __("For") %}: {{ letter.name }}</div>
+            <div class="conf-stamp-space"></div>
+            <div class="line"><span class="conf-signature-rule"></span></div>
+            <div class="line"><b>{%= __("Authorized Signatory") %}</b></div>
+        </div>
+
+        {% if (lh_footer) { %}
+        <div class="letter-head-footer"><div class="footer"><img src="{{ lh_footer }}"></div></div>
+        {% } %}
+    </div>
+{% } %}

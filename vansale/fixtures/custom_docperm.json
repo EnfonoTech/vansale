@@ -1,0 +1,26 @@
+[
+ {
+  "amend": 0,
+  "cancel": 0,
+  "create": 1,
+  "delete": 0,
+  "docstatus": 0,
+  "doctype": "Custom DocPerm",
+  "email": 0,
+  "export": 0,
+  "if_owner": 0,
+  "import": 0,
+  "modified": "2026-08-20 20:03:11.561108",
+  "name": "ch4gvhjnge",
+  "parent": "Driver",
+  "permlevel": 0,
+  "print": 0,
+  "read": 1,
+  "report": 1,
+  "role": "Sales User",
+  "select": 1,
+  "share": 0,
+  "submit": 0,
+  "write": 0
+ }
+]

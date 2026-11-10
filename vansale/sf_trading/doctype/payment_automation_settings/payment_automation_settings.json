@@ -1,0 +1,413 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "creation": "2026-07-26 11:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "enabled",
+  "company",
+  "column_break_head",
+  "party_type",
+  "title",
+  "levels_section",
+  "auto_create_advice",
+  "auto_submit_advice",
+  "column_break_levels",
+  "auto_create_payment_entry",
+  "auto_submit_payment_entry",
+  "dry_run",
+  "schedule_section",
+  "processing_time",
+  "last_execution",
+  "column_break_sched",
+  "automate_on_monday",
+  "automate_on_tuesday",
+  "automate_on_wednesday",
+  "automate_on_thursday",
+  "automate_on_friday",
+  "automate_on_saturday",
+  "automate_on_sunday",
+  "selection_section",
+  "due_date_offset",
+  "minimum_amount",
+  "min_ageing",
+  "column_break_sel",
+  "cost_center",
+  "branch",
+  "include_orders",
+  "exclude_foreign_currency",
+  "guards_section",
+  "ignore_blocked_parties",
+  "max_parties_per_run",
+  "column_break_guards",
+  "advice_threshold",
+  "submit_threshold",
+  "payment_entry_threshold",
+  "defaults_section",
+  "mode_of_payment",
+  "bank_account",
+  "column_break_defaults",
+  "approver",
+  "remarks",
+  "notify_section",
+  "notify_roles",
+  "column_break_notify",
+  "email_template",
+  "notify_on_nothing_to_do"
+ ],
+ "fields": [
+  {
+   "default": "0",
+   "description": "Nothing runs until this is ticked.",
+   "fieldname": "enabled",
+   "fieldtype": "Check",
+   "label": "Enabled"
+  },
+  {
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Company",
+   "options": "Company",
+   "reqd": 1
+  },
+  {
+   "fieldname": "column_break_head",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "Supplier",
+   "fieldname": "party_type",
+   "fieldtype": "Select",
+   "label": "Party Type",
+   "options": "Supplier\nCustomer",
+   "reqd": 1
+  },
+  {
+   "description": "How this run appears in logs and notifications.",
+   "fieldname": "title",
+   "fieldtype": "Data",
+   "label": "Title"
+  },
+  {
+   "description": "Each step only happens if the one before it did. Turn on as much as you trust.",
+   "fieldname": "levels_section",
+   "fieldtype": "Section Break",
+   "label": "What the run does"
+  },
+  {
+   "default": "1",
+   "description": "Sweep outstanding invoices and raise one draft advice per party.",
+   "fieldname": "auto_create_advice",
+   "fieldtype": "Check",
+   "label": "1. Create Payment Advice"
+  },
+  {
+   "default": "0",
+   "fieldname": "auto_submit_advice",
+   "fieldtype": "Check",
+   "label": "2. Submit Payment Advice"
+  },
+  {
+   "fieldname": "column_break_levels",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "0",
+   "description": "Requires the advice to be submitted.",
+   "fieldname": "auto_create_payment_entry",
+   "fieldtype": "Check",
+   "label": "3. Create Payment Entry"
+  },
+  {
+   "default": "0",
+   "description": "This moves money. Leave off unless the thresholds below are deliberate.",
+   "fieldname": "auto_submit_payment_entry",
+   "fieldtype": "Check",
+   "label": "4. Submit Payment Entry"
+  },
+  {
+   "default": "0",
+   "description": "Work out what would happen and report it, without creating anything.",
+   "fieldname": "dry_run",
+   "fieldtype": "Check",
+   "label": "Dry Run (log only)"
+  },
+  {
+   "fieldname": "schedule_section",
+   "fieldtype": "Section Break",
+   "label": "When it runs"
+  },
+  {
+   "default": "07:00:00",
+   "description": "The run fires on the first scheduler tick at or after this time.",
+   "fieldname": "processing_time",
+   "fieldtype": "Time",
+   "label": "Processing Time"
+  },
+  {
+   "fieldname": "last_execution",
+   "fieldtype": "Datetime",
+   "label": "Last Execution",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_sched",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "1",
+   "fieldname": "automate_on_monday",
+   "fieldtype": "Check",
+   "label": "Monday"
+  },
+  {
+   "default": "1",
+   "fieldname": "automate_on_tuesday",
+   "fieldtype": "Check",
+   "label": "Tuesday"
+  },
+  {
+   "default": "1",
+   "fieldname": "automate_on_wednesday",
+   "fieldtype": "Check",
+   "label": "Wednesday"
+  },
+  {
+   "default": "1",
+   "fieldname": "automate_on_thursday",
+   "fieldtype": "Check",
+   "label": "Thursday"
+  },
+  {
+   "default": "0",
+   "fieldname": "automate_on_friday",
+   "fieldtype": "Check",
+   "label": "Friday"
+  },
+  {
+   "default": "0",
+   "fieldname": "automate_on_saturday",
+   "fieldtype": "Check",
+   "label": "Saturday"
+  },
+  {
+   "default": "1",
+   "fieldname": "automate_on_sunday",
+   "fieldtype": "Check",
+   "label": "Sunday"
+  },
+  {
+   "fieldname": "selection_section",
+   "fieldtype": "Section Break",
+   "label": "Which invoices"
+  },
+  {
+   "default": "0",
+   "description": "Include invoices due within this many days. 0 = due today or earlier.",
+   "fieldname": "due_date_offset",
+   "fieldtype": "Int",
+   "label": "Due Date Offset"
+  },
+  {
+   "default": "1",
+   "description": "Skip a party whose total falls below this \u2014 rounding residue, not a payable.",
+   "fieldname": "minimum_amount",
+   "fieldtype": "Currency",
+   "label": "Minimum Amount"
+  },
+  {
+   "default": "0",
+   "fieldname": "min_ageing",
+   "fieldtype": "Int",
+   "label": "Ageing Over (days)"
+  },
+  {
+   "fieldname": "column_break_sel",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "cost_center",
+   "fieldtype": "Link",
+   "label": "Cost Center",
+   "options": "Cost Center"
+  },
+  {
+   "fieldname": "branch",
+   "fieldtype": "Link",
+   "label": "Branch",
+   "options": "Branch"
+  },
+  {
+   "default": "0",
+   "fieldname": "include_orders",
+   "fieldtype": "Check",
+   "label": "Include Orders To Be Billed"
+  },
+  {
+   "default": "0",
+   "description": "Skip invoices not in the company currency.",
+   "fieldname": "exclude_foreign_currency",
+   "fieldtype": "Check",
+   "label": "Exclude Foreign Currency"
+  },
+  {
+   "fieldname": "guards_section",
+   "fieldtype": "Section Break",
+   "label": "Guards"
+  },
+  {
+   "default": "0",
+   "description": "Off means an on-hold supplier is skipped, which is usually what you want.",
+   "fieldname": "ignore_blocked_parties",
+   "fieldtype": "Check",
+   "label": "Ignore Hold / Blocked Status"
+  },
+  {
+   "default": "25",
+   "description": "Hard cap per run, so a bad filter cannot raise hundreds of advices.",
+   "fieldname": "max_parties_per_run",
+   "fieldtype": "Int",
+   "label": "Max Parties Per Run"
+  },
+  {
+   "fieldname": "column_break_guards",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "Skip any party whose advice total would exceed this. Blank = no ceiling.",
+   "fieldname": "advice_threshold",
+   "fieldtype": "Currency",
+   "label": "Advice Threshold"
+  },
+  {
+   "description": "Advices above this are left as drafts even when auto-submit is on.",
+   "fieldname": "submit_threshold",
+   "fieldtype": "Currency",
+   "label": "Submit Threshold"
+  },
+  {
+   "description": "Payment Entries above this are left as drafts even when auto-submit is on.",
+   "fieldname": "payment_entry_threshold",
+   "fieldtype": "Currency",
+   "label": "Payment Entry Threshold"
+  },
+  {
+   "fieldname": "defaults_section",
+   "fieldtype": "Section Break",
+   "label": "Advice defaults"
+  },
+  {
+   "fieldname": "mode_of_payment",
+   "fieldtype": "Link",
+   "label": "Mode Of Payment",
+   "options": "Mode of Payment"
+  },
+  {
+   "description": "Company bank account stamped on every advice this run creates.",
+   "fieldname": "bank_account",
+   "fieldtype": "Link",
+   "label": "Bank Account",
+   "options": "Bank Account"
+  },
+  {
+   "fieldname": "column_break_defaults",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "Stamped as approver on every advice the run raises. Automated submits run as the scheduler, not this person.",
+   "fieldname": "approver",
+   "fieldtype": "Link",
+   "label": "Approver",
+   "options": "User"
+  },
+  {
+   "fieldname": "remarks",
+   "fieldtype": "Small Text",
+   "label": "Remarks"
+  },
+  {
+   "fieldname": "notify_section",
+   "fieldtype": "Section Break",
+   "label": "Notification"
+  },
+  {
+   "description": "Chime, desk bell and (if email is configured) a summary.",
+   "fieldname": "notify_roles",
+   "fieldtype": "Table MultiSelect",
+   "label": "Notify Roles",
+   "options": "Payment Automation Notify Role"
+  },
+  {
+   "fieldname": "column_break_notify",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "Optional. Used for the email summary when an outgoing account exists.",
+   "fieldname": "email_template",
+   "fieldtype": "Link",
+   "label": "Email Template",
+   "options": "Email Template"
+  },
+  {
+   "default": "0",
+   "description": "Off means quiet runs stay quiet.",
+   "fieldname": "notify_on_nothing_to_do",
+   "fieldtype": "Check",
+   "label": "Notify On Nothing To Do"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-07-26 11:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Sf Trading",
+ "name": "Payment Automation Settings",
+ "naming_rule": "By script",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Accounts Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Finance Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}

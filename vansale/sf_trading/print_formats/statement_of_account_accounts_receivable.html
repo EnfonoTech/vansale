@@ -1,0 +1,783 @@
+<!-- Statement of Account — Print Format for the ACCOUNTS RECEIVABLE report.
+
+     This file is the source of the "Statement of Account" Print Format record
+     on the site. The record is the live copy; keep the two in step.
+
+        Print Format For : Report
+        Report           : Accounts Receivable
+        Print Format Type: JS          (client-side micro-template, plain JS)
+        Custom Format    : ticked
+        PDF Generator    : wkhtmltopdf
+
+     Use from Accounts Receivable > PDF or Print. Leave "With Letter head"
+     UNTICKED: the artwork is drawn below, and ticking it makes the print
+     wrapper emit its own #header-html, which would displace this one.
+
+     One statement per customer
+     --------------------------
+     The report can hold one customer, several, or every customer when Party is
+     left empty — 175 of them on this site. So the statement is not built from
+     "the customer": rows are grouped by their own party field and each customer
+     prints as a separate statement on its own sheet, with its own customer
+     block, totals and ageing band. Reading the customer off the first row, as
+     this format first did, put one customer name above another customer
+     figures whenever more than one was in the report.
+
+     That also makes Group By Customer work: with it ticked erpnext orders rows
+     by party and appends a bold subtotal row per party plus a final one
+     labelled Total, and those subtotals are printed here in preference to a
+     recomputation, so the paper agrees with the screen.
+
+     The customer block is not in the report output. It is read with four
+     batched lookups — Customer, Customer Credit Limit, Sales Team, Address —
+     no matter how many customers print, never one call per row. Child tables
+     are queried with parent: "Customer", which frappe.client.get_list requires.
+
+     Row shape, confirmed against this bench (erpnext 15.116):
+       posting_date, due_date, voucher_type, voucher_no, cost_center, po_no,
+       invoiced, paid, credit_note, outstanding, age, range1..range5, currency,
+       party, customer_name, remarks
+     Subtotal rows carry party + bold, and no voucher_no.
+
+     Ageing headings come from report.columns, so they follow the Ageing Range
+     filters set on the report itself instead of being hardcoded. The band leads
+     with Not Due: set_ageing() zeroes every bucket on an item whose due date
+     has not arrived, so without that cell it reads short of the total.
+
+     Page furniture: this bench runs wkhtmltopdf 0.12.6 against unpatched Qt,
+     which ignores --header-html, so headers cannot repeat per page and page
+     numbers are unavailable. The header therefore prints inline, once per
+     statement. Do NOT move it into a #header-html div — frappe would lift it
+     out of the body and wkhtmltopdf would then discard it.
+
+     NO APOSTROPHES anywhere in this file. frappe.template.compile quotes
+     literal text with single quotes and escapes only the FIRST apostrophe in
+     each literal run, so a second one ends the string early and the format dies
+     with "missing ) after argument list".
+-->
+<style>
+    /* wkhtmltopdf reads page setup from rules on .print-format (see
+       frappe/utils/pdf.py, get_print_format_styles). Margins stay small — the
+       header rides in the table head, not in a reserved page margin. */
+    .print-format {
+        page-size: A4;
+        orientation: Portrait;
+        margin-top: 8mm;
+        margin-bottom: 10mm;
+        margin-left: 7mm;
+        margin-right: 7mm;
+        font-family: Helvetica, Arial, "DejaVu Sans", sans-serif;
+        font-size: 7.5pt;
+        color: #16181d;
+    }
+
+    /* The dialog offers Landscape; this statement is designed for portrait. */
+    .print-format.landscape { width: auto; }
+
+    .soa-head {
+        font-family: Helvetica, Arial, "DejaVu Sans", sans-serif;
+        font-size: 7.5pt;
+        color: #16181d;
+    }
+
+    @page { size: A4 portrait; margin: 8mm; }
+
+    .soa * { box-sizing: border-box; }
+
+    .soa, .soa-cols {
+        width: 100%;
+        border-collapse: collapse;
+        table-layout: fixed;
+        font-variant-numeric: tabular-nums;
+    }
+
+    /* Nested tables need the fixed layout too, or wkhtmltopdf sizes them from
+       their content and long Arabic lines overflow the cell instead of wrapping. */
+    .soa-mast, .soa-info, .soa-box, .soa-note { table-layout: fixed; }
+
+    /* ---------- masthead ---------- */
+    .soa-mast { width: 100%; border-collapse: collapse; }
+    .soa-mast td { vertical-align: middle; padding: 0 0 2mm 0; border: 0; }
+    .soa-logo img { max-height: 15mm; max-width: 60mm; }
+    .soa-org { font-size: 10.5pt; font-weight: 700; text-align: center; letter-spacing: .2px; }
+    .soa-doc-title {
+        text-align: right;
+        font-size: 11.5pt;
+        font-weight: 700;
+        white-space: nowrap;
+        letter-spacing: .2px;
+    }
+    .soa-doc-title .ar { font-weight: 600; }
+    .soa-rule { height: 1.4pt; background: #1b2a4a; margin-bottom: 2mm; }
+
+    /* ---------- the two info boxes ---------- */
+    .soa-info { width: 100%; border-collapse: collapse; }
+    .soa-info > tbody > tr > td { padding: 0; border: 0; vertical-align: top; }
+
+    .soa-box { width: 100%; border-collapse: collapse; }
+    .soa-box td {
+        border: 0.5pt solid #9aa3b0;
+        padding: 1.1mm 1.6mm;
+        vertical-align: middle;
+    }
+    /* Arabic sits above its English label, as on the agreed sample. Floating the
+       two onto one line clips whichever runs long in a narrow box. */
+    /* This bench has no Arabic font installed — fc-list :lang=ar returns only
+       DejaVu Sans, whose Arabic runs wide. Cells therefore clip rather than let
+       a long string spill over its neighbour, and the Arabic is set a size down. */
+    .soa-box .lbl { background: #f2f4f7; overflow: hidden; }
+    .soa-box .en { display: block; font-weight: 700; font-size: 7.2pt; line-height: 1.2; }
+    .soa-box .ar {
+        display: block;
+        font-size: 6pt;
+        color: #5b6472;
+        direction: rtl;
+        text-align: right;
+        line-height: 1.15;
+        white-space: nowrap;
+        overflow: hidden;
+    }
+    .soa-box .val { font-size: 7.6pt; overflow: hidden; word-wrap: break-word; }
+    .soa-box .val-ar {
+        display: block;
+        direction: rtl;
+        font-size: 6.8pt;
+        color: #303743;
+        line-height: 1.2;
+        overflow: hidden;
+    }
+
+    /* ---------- the notice strip ---------- */
+    .soa-note { width: 100%; border-collapse: collapse; margin: 2mm 0 2.5mm 0; }
+    .soa-note td {
+        border: 0;
+        padding: 0.4mm 0;
+        font-size: 6.4pt;
+        vertical-align: top;
+        line-height: 1.35;
+        white-space: normal;
+        word-wrap: break-word;
+    }
+    .soa-note .blue { color: #1b2a4a; }
+    .soa-note .ar-line { text-align: right; direction: rtl; }
+    .soa-note .red { color: #b3121b; font-weight: 700; }
+
+    /* ---------- the ledger grid ----------
+       Every rule below uses child combinators. The header band nests tables
+       inside this one, and browsers wrap their rows in an implicit <tbody>, so
+       a descendant selector like `.soa tbody td` would also hit the info boxes
+       and clip them. */
+        .soa-cols th {
+        background: #1b2a4a;
+        color: #fff;
+        border: 0.5pt solid #1b2a4a;
+        padding: 1.1mm 1.2mm;
+        font-size: 6.4pt;
+        font-weight: 700;
+        line-height: 1.25;
+        text-align: center;
+        vertical-align: middle;
+    }
+    .soa-cols th .ar { display: block; font-weight: 500; font-size: 5.6pt; opacity: .85; }
+
+    /* Text columns wrap; they must never ellipsize. Column widths are
+       percentages of whatever width the print job ends up with, and that varies
+       with the paper, the margins and the scale chosen in the print dialog — so
+       a width that fits here can clip elsewhere. Wrapping degrades to a second
+       line instead of silently hiding a voucher number. Dates and amounts have
+       known widths and stay on one line. */
+    .soa > tbody > tr > td {
+        border: 0.5pt solid #c3c9d2;
+        padding: 0.9mm 1.2mm;
+        font-size: 7pt;
+        vertical-align: middle;
+        white-space: normal;
+        overflow-wrap: anywhere;
+        word-break: break-word;
+    }
+    .soa > tbody > tr > td.nowrap { white-space: nowrap; overflow-wrap: normal; word-break: normal; }
+    .soa > tbody > tr:nth-child(even) > td { background: #f7f8fa; }
+    .soa > tbody > tr { page-break-inside: avoid; }
+
+    .num { text-align: right; }
+    .mid { text-align: center; }
+    .overdue { color: #b3121b; font-weight: 700; }
+    .muted { color: #6b7280; }
+
+    /* ---------- closing blocks ---------- */
+    .soa-close { width: 100%; border-collapse: collapse; table-layout: fixed; margin-top: 2.5mm; }
+    .soa-close td { border: 0.5pt solid #c3c9d2; padding: 1.2mm 1.4mm; font-size: 7.2pt; }
+    .soa-close .legend { border-color: #c3c9d2; color: #48505e; font-size: 6.6pt; }
+    .soa-close .tot-lbl { background: #f2f4f7; font-weight: 700; font-size: 7.8pt; }
+    .soa-close .tot-val { background: #f2f4f7; font-weight: 700; font-size: 7.8pt; text-align: right; }
+
+    .soa-age { width: 100%; border-collapse: collapse; table-layout: fixed; margin-top: 2.5mm; }
+    .soa-age th {
+        background: #f2f4f7;
+        border: 0.5pt solid #9aa3b0;
+        padding: 1.1mm;
+        font-size: 6.8pt;
+        font-weight: 700;
+        text-align: center;
+    }
+    .soa-age td {
+        border: 0.5pt solid #9aa3b0;
+        padding: 1.3mm;
+        font-size: 7.4pt;
+        text-align: center;
+    }
+    .soa-age .notdue { background: #fbfbfc; }
+
+    /* Each customer prints as its own statement, on its own sheet. */
+    .soa-statement + .soa-statement { page-break-before: always; }
+
+    .soa-warn {
+        border: 0.6pt solid #b3121b;
+        background: #fdf3f3;
+        color: #b3121b;
+        padding: 1.6mm 2mm;
+        margin-bottom: 2.5mm;
+        font-size: 7.2pt;
+        font-weight: 700;
+    }
+
+    /* Letter head artwork drawn by this format, full width, per statement. */
+    .soa-lh { margin-bottom: 2.5mm; }
+    .soa-lh img { width: 100%; max-width: 100%; }
+    .soa-lh-foot { margin-top: 3.5mm; }
+    .soa-lh-foot img { width: 100%; max-width: 100%; }
+
+    /* ---------- never slice a block across a page ----------
+       The closing blocks were being cut at the page boundary: the ageing band
+       heading printed at the foot of one sheet and its figures on the next, and
+       once the band came away on its own with the Total left behind. A
+       statement that splits mid-band reads as damaged, so legend, totals,
+       ageing band and the footer artwork travel together as one unit, and the
+       customer block is likewise unbreakable. Only the ledger rows may flow
+       across pages, which is what they are for. */
+    .soa-tail { page-break-inside: avoid; break-inside: avoid; }
+    .soa-head { page-break-inside: avoid; break-inside: avoid; }
+    .soa-close, .soa-age { page-break-inside: avoid; break-inside: avoid; }
+    .soa-lh, .soa-lh-foot { page-break-inside: avoid; break-inside: avoid; }
+
+    /* The wrapper prints a "Page N of M" line. Nothing can fill those numbers
+       here: the browser never substitutes them, and this wkhtmltopdf ignores
+       --footer-html entirely, so it prints as a bare "Page of". Hidden only
+       where it renders inline, by an id the PDF footer document does not carry
+       — install the patched wkhtmltox and the real footer keeps its numbers. */
+    #footer-html .page-number { display: none !important; }
+
+    .soa-empty { padding: 8mm 0; text-align: center; font-size: 8.5pt; color: #6b7280; }
+
+    /* The artwork this template draws itself, at full content width so it reads the
+       same as the band the print wrapper draws when a letter head is picked. */
+    .letter-head, .letter-head-footer { text-align: center; }
+    .letter-head { margin-bottom: 3mm; }
+    .letter-head-footer { margin-top: 4mm; }
+    .letter-head img, .letter-head-footer img { max-width: 100%; height: auto; }
+
+    /* ---------- letter head placement ----------
+       The Letter Head record positions its artwork with position:fixed, which
+       takes it out of the flow: the browser then repaints it over every page
+       and the statement disappears underneath — the masthead and the first row
+       of each info box at the top, the totals and ageing band at the bottom.
+
+       Reserving the band with repeating thead/tfoot spacers was tried and
+       costs a blank first page: Chrome starts a table carrying a thead on a
+       fresh sheet, with spacers of any height, tfoot before or after tbody.
+
+       Putting the artwork back in the flow is what works. It then prints once,
+       at the top, with the statement below it and nothing overlapping. This
+       styles the printed copy only; the Letter Head record is untouched. */
+    @media print {
+        .letter-head .header,
+        .letter-head-footer .footer {
+            position: static !important;
+        }
+        .letter-head { margin-bottom: 3mm; }
+        .letter-head-footer { margin-top: 4mm; }
+    }
+</style>
+{%
+    var all_rows = data || [];
+    var detail_rows = all_rows.filter(function (row) { return row && row.voucher_no; });
+
+    var nf_of = function (currency) { return get_number_format(currency); };
+    var on_date = function (value) { return value ? frappe.datetime.str_to_user(value) : ""; };
+    var branch_of = function (value) { return cstr(value).split(" - ")[0]; };
+
+    var type_code = function (row) {
+        if (row.voucher_type === "Payment Entry") { return "PY"; }
+        if (row.voucher_type === "Journal Entry") { return "AD"; }
+        if (flt(row.credit_note) > 0 || flt(row.invoiced) < 0) { return "CR"; }
+        return "IN";
+    };
+
+    /* Group By Customer makes erpnext append a bold subtotal row per party and
+       a final one labelled Total. Printing those keeps paper and screen equal. */
+    var subtotals = {};
+    for (var k = 0; k < all_rows.length; k++) {
+        var mark = all_rows[k];
+        if (!mark || mark.voucher_no || !mark.party || mark.party === "Total") { continue; }
+        subtotals[cstr(mark.party)] = mark;
+    }
+
+    /* one statement per customer, in the order the report produced them */
+    var order = [];
+    var grouped = {};
+    for (var g = 0; g < detail_rows.length; g++) {
+        var key = cstr(detail_rows[g].party);
+        if (!grouped[key]) { grouped[key] = []; order.push(key); }
+        grouped[key].push(detail_rows[g]);
+    }
+
+    /* A run with Party left empty covers every customer on the site. Printing
+       hundreds of statements by accident helps nobody, so this stops at a
+       hundred and says so on the page rather than truncating quietly. */
+    var MAX_STATEMENTS = 100;
+    var customer_count = order.length;
+    var truncated = customer_count > MAX_STATEMENTS;
+    if (truncated) { order = order.slice(0, MAX_STATEMENTS); }
+
+    /* ---- customer block: four batched lookups, whatever the customer count ---- */
+    var customers = {}, credit_limits = {}, collectors = {}, addresses = {};
+    try {
+        if (order.length) {
+            frappe.call({
+                method: "frappe.client.get_list",
+                args: {
+                    doctype: "Customer",
+                    filters: [["name", "in", order]],
+                    fields: ["name", "customer_name", "tax_id", "custom_vat_registration_number",
+                             "customer_name_in_arabic", "custom_customer_name_arabic",
+                             "custom_commercial_registration_number", "payment_terms",
+                             "customer_primary_address", "primary_address"],
+                    limit_page_length: 0
+                },
+                async: false,
+                callback: function (r) {
+                    var list = (r && r.message) || [];
+                    for (var c1 = 0; c1 < list.length; c1++) { customers[list[c1].name] = list[c1]; }
+                }
+            });
+        }
+    } catch (customer_error) { customers = {}; }
+
+    try {
+        if (order.length) {
+            frappe.call({
+                method: "frappe.client.get_list",
+                args: {
+                    doctype: "Customer Credit Limit",
+                    filters: [["parent", "in", order]],
+                    fields: ["parent", "company", "credit_limit"],
+                    parent: "Customer",
+                    limit_page_length: 0
+                },
+                async: false,
+                callback: function (r) {
+                    var list = (r && r.message) || [];
+                    for (var c2 = 0; c2 < list.length; c2++) {
+                        if (!filters.company || list[c2].company === filters.company) {
+                            credit_limits[list[c2].parent] = list[c2].credit_limit;
+                        }
+                    }
+                }
+            });
+        }
+    } catch (limit_error) { credit_limits = {}; }
+
+    try {
+        if (order.length) {
+            frappe.call({
+                method: "frappe.client.get_list",
+                args: {
+                    doctype: "Sales Team",
+                    filters: [["parent", "in", order]],
+                    fields: ["parent", "sales_person"],
+                    parent: "Customer",
+                    limit_page_length: 0
+                },
+                async: false,
+                callback: function (r) {
+                    var list = (r && r.message) || [];
+                    for (var c3 = 0; c3 < list.length; c3++) {
+                        if (!collectors[list[c3].parent]) { collectors[list[c3].parent] = list[c3].sales_person; }
+                    }
+                }
+            });
+        }
+    } catch (team_error) { collectors = {}; }
+
+    try {
+        var address_names = [];
+        for (var a1 = 0; a1 < order.length; a1++) {
+            var cust1 = customers[order[a1]] || {};
+            if (!cust1.primary_address && cust1.customer_primary_address) { address_names.push(cust1.customer_primary_address); }
+        }
+        if (address_names.length) {
+            frappe.call({
+                method: "frappe.client.get_list",
+                args: {
+                    doctype: "Address",
+                    filters: [["name", "in", address_names]],
+                    fields: ["name", "address_line1", "address_line2", "city", "pincode"],
+                    limit_page_length: 0
+                },
+                async: false,
+                callback: function (r) {
+                    var list = (r && r.message) || [];
+                    for (var c4 = 0; c4 < list.length; c4++) {
+                        addresses[list[c4].name] = [list[c4].address_line1, list[c4].address_line2, list[c4].city, list[c4].pincode].filter(Boolean).join(", ");
+                    }
+                }
+            });
+        }
+    } catch (address_error) { addresses = {}; }
+
+    /* ---- ageing headings, from the report columns ---- */
+    var bucket_labels = [];
+    for (var c = 0; c < (columns || []).length; c++) {
+        if (cstr(columns[c].fieldname).indexOf("range") === 0) { bucket_labels.push(columns[c].label + " " + __("Days")); }
+    }
+    if (!bucket_labels.length) {
+        bucket_labels = ["0-30 " + __("Days"), "31-60 " + __("Days"), "61-90 " + __("Days"), "91-120 " + __("Days"), "121-Above " + __("Days")];
+    }
+    bucket_labels = [__("Not Due")].concat(bucket_labels);
+
+    /* ---- one statement per customer ---- */
+    var statements = [];
+    for (var o = 0; o < order.length; o++) {
+        var party = order[o];
+        var party_rows = grouped[party] || [];
+        var cust = customers[party] || {};
+        var sub = subtotals[party];
+
+        var invoiced = 0, credited = 0, outstanding = 0, earliest = "";
+        var buckets = [0, 0, 0, 0, 0, 0];
+        for (var t = 0; t < party_rows.length; t++) {
+            invoiced += flt(party_rows[t].invoiced);
+            credited += flt(party_rows[t].paid) + flt(party_rows[t].credit_note);
+            outstanding += flt(party_rows[t].outstanding);
+
+            var aged = 0;
+            for (var b = 0; b < 5; b++) {
+                var bucket = flt(party_rows[t]["range" + (b + 1)]);
+                aged += bucket;
+                buckets[b + 1] += bucket;
+            }
+            buckets[0] += flt(party_rows[t].outstanding) - aged;
+
+            if (!earliest || (party_rows[t].posting_date && party_rows[t].posting_date < earliest)) {
+                earliest = party_rows[t].posting_date;
+            }
+        }
+
+        /* prefer the subtotal erpnext itself produced */
+        if (sub) {
+            invoiced = flt(sub.invoiced);
+            credited = flt(sub.paid) + flt(sub.credit_note);
+            outstanding = flt(sub.outstanding);
+        }
+
+        var ccy = party_rows.length ? cstr(party_rows[0].currency) : "";
+        statements.push({
+            party: party,
+            label: cust.customer_name || (party_rows.length ? cstr(party_rows[0].customer_name) : "") || party,
+            name_ar: cust.customer_name_in_arabic || cust.custom_customer_name_arabic || "",
+            vat_no: cust.tax_id || cust.custom_vat_registration_number || "",
+            cr_no: cust.custom_commercial_registration_number || "",
+            terms: cust.payment_terms || "",
+            address: cstr(cust.primary_address).replace(/<br>/g, ", ") || addresses[cust.customer_primary_address] || "",
+            collector: collectors[party] || "",
+            credit_limit: flt(credit_limits[party]),
+            rows: party_rows,
+            ccy: ccy,
+            nf: nf_of(ccy),
+            invoiced: invoiced,
+            credited: credited,
+            outstanding: outstanding,
+            buckets: buckets,
+            earliest: earliest
+        });
+    }
+
+    /* ---- letter head artwork ----
+       Drawn here in every case, ticked or not, and once per statement.
+
+       Leaving it to the print wrapper does not work on this bench. With the box
+       ticked the wrapper emits the artwork inside #header-html, and this
+       wkhtmltopdf is built against unpatched Qt, which answers --header-html
+       with "not support using unpatched qt, and will be ignored" — so the PDF
+       came out with no letter head at all. In the browser the wrapper prints it
+       once at the top of the document, which since statements became one per
+       customer meant only the first customer got it.
+
+       Where the markup comes from depends on the box. With it ticked,
+       query_report.js has already fetched the letter head and REPLACED
+       print_settings.letter_head with the rendered object {header, footer}
+       (see render_report_letterhead). Passing that object back as a name filter
+       is what produced "check the manual that corresponds to your MariaDB
+       server version ... near header: <style>" — a dict reached SQL as a name.
+       So the object is used as it stands, and only the unticked case looks the
+       letter head up, by name or by the company default. */
+    var logo = "", logo_footer = "";
+    var with_letter_head = print_settings && print_settings.with_letter_head;
+    var absolute = function (src) {
+        /* The PDF renders server side with no page of its own to resolve
+           against, so a site-relative src would come out blank. */
+        return src.indexOf("/") === 0 ? frappe.urllib.get_base_url() + src : src;
+    };
+    var first_image = function (markup) {
+        var found = cstr(markup).match(/<img[^>]+src=["']([^"']+)["']/i);
+        return found ? absolute(found[1]) : "";
+    };
+
+    var chosen_head = print_settings && print_settings.letter_head;
+    try {
+        if (chosen_head && typeof chosen_head === "object") {
+            logo = first_image(chosen_head.header);
+            logo_footer = first_image(chosen_head.footer);
+        } else {
+            var head_name = (typeof chosen_head === "string" && chosen_head)
+                ? chosen_head
+                : cstr(print_settings && print_settings.letter_head_name);
+            frappe.call({
+                method: "frappe.client.get_value",
+                args: {
+                    doctype: "Letter Head",
+                    filters: head_name ? { name: head_name } : { is_default: 1, disabled: 0 },
+                    fieldname: ["content", "footer"]
+                },
+                async: false,
+                callback: function (r) {
+                    logo = first_image(r && r.message && r.message.content);
+                    logo_footer = first_image(r && r.message && r.message.footer);
+                }
+            });
+        }
+    } catch (letter_head_error) {
+        /* Never break the statement over artwork, but do not hide the reason:
+           a swallowed failure here printed statements with no letter head and
+           nothing to show for it. */
+        console.error("Statement of Account: letter head unavailable", letter_head_error);
+        logo = "";
+        logo_footer = "";
+    }
+
+    var company = filters.company || "";
+%}
+
+{% if (logo || logo_footer) { %}
+<style>
+    /* This format draws the letter head itself, once per statement. Hide the
+       copies the print wrapper adds so the artwork never doubles up. */
+    .letter-head, .letter-head-footer { display: none !important; }
+</style>
+{% } %}
+
+{% if (truncated) { %}
+<div class="soa-warn">
+    {%= __("This report covers {0} customers. Only the first {1} statements are printed — narrow the Party filter to print the rest.", [customer_count, MAX_STATEMENTS]) %}
+</div>
+{% } %}
+
+{% if (!statements.length) { %}
+<div class="soa-empty">{%= __("Nothing outstanding for the selected filters.") %}</div>
+{% } %}
+
+{% for (var s = 0; s < statements.length; s++) { %}
+{% var st = statements[s]; %}
+{% var amt = function (value) { return format_number(flt(value), st.nf); }; %}
+<div class="soa-statement">
+    {% if (logo) { %}<div class="soa-lh"><img src="{{ logo }}"></div>{% } %}
+
+    <div class="soa-head">
+        <table class="soa-mast">
+            <tr>
+                <td style="width: 60mm"></td>
+                <td style="width: 66mm" class="soa-org">{% if (!logo) { %}{{ company }}{% } %}</td>
+                <td style="width: 70mm" class="soa-doc-title">
+                    {%= __("Statement of Account") %} <span class="ar">/ كشف حساب</span>
+                </td>
+            </tr>
+        </table>
+        <div class="soa-rule"></div>
+
+        <table class="soa-info">
+            <tr>
+                <td style="width: 68mm">
+                    <table class="soa-box">
+                        <tr>
+                            <td class="lbl" style="width: 30mm">
+                                <span class="ar">من الفترة</span><span class="en">{%= __("Period From") %}</span>
+                            </td>
+                            <td class="val">{%= on_date(st.earliest) %}</td>
+                        </tr>
+                        <tr>
+                            <td class="lbl">
+                                <span class="ar">إلى الفترة</span><span class="en">{%= __("To Period") %}</span>
+                            </td>
+                            <td class="val">{%= on_date(filters.report_date) %}</td>
+                        </tr>
+                        <tr>
+                            <td class="lbl">
+                                <span class="ar">الحد الائتماني</span><span class="en">{%= __("Credit Limit") %}</span>
+                            </td>
+                            <td class="val">{%= st.credit_limit ? amt(st.credit_limit) + " " + st.ccy : "" %}</td>
+                        </tr>
+                        <tr>
+                            <td class="lbl">
+                                <span class="ar">السجل التجاري</span><span class="en">{%= __("Customer CR No.") %}</span>
+                            </td>
+                            <td class="val">{{ st.cr_no }}</td>
+                        </tr>
+                    </table>
+                </td>
+                <td style="width: 3mm"></td>
+                <td style="width: 125mm">
+                    <table class="soa-box">
+                        <tr>
+                            <td class="lbl" style="width: 27mm">
+                                <span class="ar">السادة</span><span class="en">{%= __("M/s") %}</span>
+                            </td>
+                            <td class="val" style="width: 43mm">
+                                {% if (st.name_ar) { %}<span class="val-ar">{{ st.name_ar }}</span>{% } %}
+                                {{ st.label }}
+                            </td>
+                            <td class="lbl" style="width: 27mm">
+                                <span class="ar">فترة السداد</span><span class="en">{%= __("Payment Term") %}</span>
+                            </td>
+                            <td class="val" style="width: 28mm">{{ st.terms }}</td>
+                        </tr>
+                        <tr>
+                            <td class="lbl">
+                                <span class="ar">رقم العميل</span><span class="en">{%= __("Customer ID") %}</span>
+                            </td>
+                            <td class="val">{{ st.party }}</td>
+                            <td class="lbl">
+                                <span class="ar">المحصل</span><span class="en">{%= __("Collector") %}</span>
+                            </td>
+                            <td class="val">{{ st.collector }}</td>
+                        </tr>
+                        <tr>
+                            <td class="lbl">
+                                <span class="ar">العنوان</span><span class="en">{%= __("Address") %}</span>
+                            </td>
+                            <td class="val" colspan="3">{{ st.address }}</td>
+                        </tr>
+                        <tr>
+                            <td class="lbl">
+                                <span class="ar">الرقم الضريبي</span><span class="en">{%= __("Customer VAT No.") %}</span>
+                            </td>
+                            <td class="val" colspan="3">{{ st.vat_no }}</td>
+                        </tr>
+                    </table>
+                </td>
+            </tr>
+        </table>
+
+        <table class="soa-note">
+            <tr>
+                <td class="blue" colspan="2">
+                    {%= __("This account is considered correct and approved by you if no objections are received within 15 days of the above issue date.") %}
+                </td>
+            </tr>
+            <tr>
+                <td class="blue ar-line" colspan="2" dir="rtl">
+                    يُعتبر هذا الحساب صحيحاً ومعتمداً من جانبكم في حال عدم تلقينا أي اعتراض خلال 15 يوماً من تاريخ الإصدار المذكور أعلاه.
+                </td>
+            </tr>
+            <tr>
+                <td class="red" style="width: 108mm">{%= __("PLEASE MAKE CHEQUE PAYABLE TO") %} {{ company }}</td>
+                <td class="red ar-line" style="width: 88mm" dir="rtl">يرجى إصدار الشيك باسم</td>
+            </tr>
+        </table>
+
+        <table class="soa-cols">
+            <colgroup>
+                <col style="width: 9.5%"><col style="width: 9.5%"><col style="width: 5.5%">
+                <col style="width: 19%"><col style="width: 5.5%"><col style="width: 4.5%">
+                <col style="width: 8%"><col style="width: 12%"><col style="width: 12%">
+                <col style="width: 14.5%">
+            </colgroup>
+            <tr>
+                <th>{%= __("Date") %}<span class="ar">التاريخ</span></th>
+                <th>{%= __("Due Date") %}<span class="ar">تاريخ الاستحقاق</span></th>
+                <th>{%= __("Branch") %}<span class="ar">الفرع</span></th>
+                <th>{%= __("Document No") %}<span class="ar">رقم المستند</span></th>
+                <th>{%= __("Type") %}<span class="ar">النوع</span></th>
+                <th>{%= __("Age") %}<span class="ar">العمر</span></th>
+                <th>{%= __("LPO") %}<span class="ar">أمر الشراء</span></th>
+                <th>{%= __("Invoiced") %}<span class="ar">مدين</span></th>
+                <th>{%= __("Paid / Credit") %}<span class="ar">دائن</span></th>
+                <th>{%= __("Outstanding") %}<span class="ar">الرصيد</span></th>
+            </tr>
+        </table>
+    </div>
+
+    <table class="soa">
+        <colgroup>
+            <col style="width: 9.5%"><col style="width: 9.5%"><col style="width: 5.5%">
+            <col style="width: 19%"><col style="width: 5.5%"><col style="width: 4.5%">
+            <col style="width: 8%"><col style="width: 12%"><col style="width: 12%">
+            <col style="width: 14.5%">
+        </colgroup>
+        <tbody>
+            {% for (var i = 0; i < st.rows.length; i++) { %}
+                {% var row = st.rows[i]; %}
+                <tr>
+                    <td class="nowrap">{%= on_date(row.posting_date) %}</td>
+                    <td class="nowrap">{%= on_date(row.due_date) %}</td>
+                    <td class="mid">{{ branch_of(row.cost_center) }}</td>
+                    <td>{{ row.voucher_no || "" }}</td>
+                    <td class="mid">{%= type_code(row) %}</td>
+                    <td class="mid overdue">{%= flt(row.age) > 0 ? cint(row.age) : "" %}</td>
+                    <td class="muted">{{ row.po_no || "" }}</td>
+                    <td class="num nowrap">{%= amt(row.invoiced) %}</td>
+                    <td class="num nowrap">{%= amt(flt(row.paid) + flt(row.credit_note)) %}</td>
+                    <td class="num nowrap">{%= amt(row.outstanding) %}</td>
+                </tr>
+            {% } %}
+        </tbody>
+    </table>
+
+    <div class="soa-tail">
+    <table class="soa-close">
+        <colgroup>
+            <col style="width: 61.5%"><col style="width: 12%"><col style="width: 12%"><col style="width: 14.5%">
+        </colgroup>
+        <tr>
+            <td class="legend" colspan="4">
+                {%= __("PY - Payment, IN - Invoice, CR - Credit, DB - Debit Note, TR - Return, AD - Financial Adjustment") %}
+            </td>
+        </tr>
+        <tr>
+            <td class="tot-lbl">{%= __("Total") %} <span dir="rtl">الاجمالي</span></td>
+            <td class="tot-val">{%= amt(st.invoiced) %}</td>
+            <td class="tot-val">{%= amt(st.credited) %}</td>
+            <td class="tot-val">{%= amt(st.outstanding) %}</td>
+        </tr>
+    </table>
+
+    <table class="soa-age">
+        <thead>
+            <tr>
+                {% for (var h = 0; h < bucket_labels.length; h++) { %}
+                    <th>{{ bucket_labels[h] }}</th>
+                {% } %}
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                {% for (var v = 0; v < st.buckets.length; v++) { %}
+                    <td class="{%= v === 0 ? "notdue" : "" %}">{%= amt(st.buckets[v]) %}</td>
+                {% } %}
+            </tr>
+        </tbody>
+    </table>
+
+    {% if (logo_footer) { %}<div class="soa-lh-foot"><img src="{{ logo_footer }}"></div>{% } %}
+    </div>
+</div>
+{% } %}

@@ -1,0 +1,494 @@
+Sf Trading (Steelforce-Trading) — Feature Documentation
+
+App name: sf_trading | Version: 0.1.3 | Publisher: Enfono | License: MIT
+Description: "Trading Feature for Steel Force" — a custom Frappe/ERPNext app that adds
+multi-branch trading, inter-company, and Saudi-VAT-compliance features on top of standard
+Selling, Buying, and Stock modules.
+
+================================================================================
+1. MULTI-BRANCH OPERATIONS
+================================================================================
+
+The app treats Branch as a first-class accounting dimension and builds a full
+branch-scoping layer on top of it.
+
+- Branch as Accounting Dimension (inter_branch.py): On every app migration, ensures
+  ERPNext's "Branch" Accounting Dimension exists and is enabled, which adds a `branch`
+  field to all transaction doctypes (Sales/Purchase Orders, Invoices, Receipts, Delivery
+  Notes, Quotations, etc.). Also auto-grants read access on the Branch doctype to all
+  authenticated users so Link-field validation doesn't block regular staff.
+
+- Branch Configuration (DocType): Central per-branch config linking a Branch to a
+  Company, plus four child tables:
+    - Warehouses — which warehouses belong to the branch.
+    - Cost Centers — which cost centers belong to the branch.
+    - Modes of Payment — allow-list of Cash/Bank payment modes for the branch, with
+      per-row flags "For Return" and "For PDC".
+    - Users — which users are members of the branch, with a Role Profile and an
+      "Is Default Branch" flag.
+
+- Auto-resolve branch from warehouse: auto_set_branch_from_warehouse fills in a
+  document's `branch` field automatically by matching its warehouse (header
+  set_warehouse/from_warehouse, or first item row) against the Branch Configuration
+  Warehouse list — only when the field is blank, and skipped for Administrators/System
+  Managers.
+
+- Dimension propagation: propagate_dimensions_to_items pushes header-level branch,
+  cost_center, and project down into every item row (and cost_center into tax rows)
+  on save, so child rows never disagree with the header.
+
+- Branch-driven letter head: set_letter_head_from_branch applies the Branch master's
+  custom letter head to a document automatically when its branch is set.
+
+- Branch-scoped payment modes: override_payment_accounts_from_branch constrains Sales
+  Invoice payment rows to the resolved branch's allowed Cash/Bank Modes of Payment —
+  swapping disallowed rows to the branch default, dropping a payment type entirely if
+  the branch has none configured, and updating the row's account to match the invoice's
+  company. Bypassed for Administrator/System Manager/Sales Manager/Sales Master Manager.
+
+- Client-side sync (accounting_dimension_sync.js): Changing Branch on a form auto-pulls
+  its default cost center/warehouse; changing any header dimension pushes it to all item
+  rows; new rows inherit current header dimensions.
+
+- get_branch_dimension_defaults (whitelisted): returns letter head + first configured
+  cost center/warehouse for a branch, used to refill form defaults when the branch changes.
+
+--------------------------------------------------------------------------------
+1b. AUTOMATED USER PROVISIONING VIA BRANCH CONFIGURATION
+--------------------------------------------------------------------------------
+
+This is the core engine behind the whole branch-access model: Branch Configuration's
+controller (branch_configuration.py) automatically provisions and revokes User
+Permissions and Roles as branch membership changes, so admins never touch User
+Permission or Role records by hand.
+
+- On save (create_permissions): for every user listed in a Branch Configuration,
+  automatically creates non-default User Permissions for: the Branch, the branch's
+  Letter Head (if any), the Company, every configured Warehouse, every configured
+  Cost Center (plus the company's root/default cost center, needed for tax templates),
+  and every configured Mode of Payment. If the user's row has a role_profile, every
+  role in that Role Profile is granted directly (raw Has Role insert via SQL,
+  deliberately bypassing user_doc.save() so Frappe's own User.validate role-profile
+  sync can't wipe roles accumulated from OTHER Branch Configurations the same user
+  belongs to).
+
+- Single default branch per user: if a user is marked is_default_branch in one config,
+  that flag is automatically cleared on every other Branch Configuration the same user
+  appears in.
+
+- Default permission normalization (_normalize_user_defaults): a user can belong to
+  multiple Branch Configurations, but only one should supply their default
+  Branch/Company/Warehouse/Cost Center/Mode of Payment. On every save, the "primary"
+  config (the one flagged is_default_branch, or else the earliest-created) is
+  recomputed and its values are marked is_default=1 on the underlying User Permissions,
+  with all others reset to 0 — so defaults never end up split across branches.
+
+- Safe teardown on before_save: when a user is removed from a Branch Configuration
+  (or the branch/company changes, or a Mode of Payment row is dropped), the
+  corresponding User Permissions and Role-Profile-granted roles are only deleted if
+  no other Branch Configuration for that user still grants the same value
+  (_safe_delete_permission, _maybe_remove_roles_from_profile) — so overlapping branch
+  memberships are never accidentally under-revoked.
+
+- Validation: a Branch Configuration cannot reference a Warehouse or Cost Center that
+  belongs to a different Company than the one selected on the config.
+
+- User type safety: a user granted a Role Profile through Branch Configuration is
+  force-promoted to System User if not already, so the roles actually take effect.
+
+Net effect: assigning/removing a user (and optionally a Role Profile) on a Branch
+Configuration record is the single action that drives that user's entire ERPNext
+access scope (branch, company, warehouses, cost centers, payment modes, letter head,
+and roles) — a lightweight, config-driven alternative to manually managing User
+Permissions per user.
+
+================================================================================
+2. INTER-COMPANY / INTER-BRANCH TRADING
+================================================================================
+
+- Inter Company Branch (DocType): Defines a named "virtual branch" used for
+  inter-company transactions, with a child table (Inter Company Branch Cost Center)
+  mapping Company -> Cost Center -> Warehouse.
+
+- Auto-create Inter Company Purchase Invoice (inter_company.py, on Sales Invoice
+  on_submit): When a Sales Invoice is billed to an internal customer
+  (is_internal_customer + represents_company), automatically generates and inserts
+  (as draft) the corresponding Inter Company Purchase Invoice:
+    - Copies bill number/date from the source Sales Invoice.
+    - Applies cost center/warehouse strictly from the selected Inter Company Branch
+      mapping (never from user session defaults or item defaults) — throws a clear
+      error if stock-updating and no warehouse is configured for that branch/company pair.
+    - Auto-fills the default Purchase Taxes and Charges template for the buying company.
+    - Guards against duplicate creation (checks for an existing PI referencing the
+      source SI).
+    - Runs non-blocking: logs errors and shows a warning instead of failing the Sales
+      Invoice submit.
+
+- Session-default isolation (overrides/defaults.py, overrides/get_item_details.py):
+  Monkey-patches frappe.defaults.get_defaults and ERPNext's warehouse-resolution logic
+  during inter-company PI creation so the new PI never silently inherits the creating
+  user's session warehouse/cost-center defaults — only branch-mapped values are used.
+
+- Cross-company sanity checks: _warehouse_belongs_to_company /
+  _cost_center_belongs_to_company validate that resolved warehouses/cost centers
+  actually belong to the target company before applying them, clearing anything invalid.
+
+- Client-side branch filter (sales_invoice_inter_company.js): Filters the Inter
+  Company Branch field by the invoice's buying company.
+
+- Inter Company Branch also exposes a whitelisted get_branches_for_company search
+  used to filter the branch picker by company.
+
+================================================================================
+3. CUSTOMER & SUPPLIER ONBOARDING (SAUDI VAT/CRN COMPLIANCE)
+================================================================================
+
+- Quick "Create Customer" / "Create Supplier" dialogs (create_customer.js /
+  create_supplier.js, backed by api/customer.py and api/supplier.py), available
+  directly from Sales Invoice/Order/Quotation/Delivery Note and Purchase
+  Invoice/Order/Receipt:
+    - B2C (Individual): only Name + Mobile required.
+    - B2B (Company): Name + Mobile + VAT + optional CRN + full address block.
+    - Saudi Arabia-specific rules (when the company's country is Saudi Arabia):
+        - Mobile number must have >= 10 digits.
+        - VAT Registration Number must match 3XXXXXXXXXXXX3 (15 digits, starting
+          and ending with 3).
+        - Address Line 1, Building Number, District, City, and 5-digit Postal Code
+          are mandatory for B2B.
+    - VAT duplicate protection: blocks creating a second customer/supplier with a
+      VAT number already in use, unless overridden by a Sales/Purchase Manager or
+      System Manager with a documented reason (allow_duplicate_vat +
+      duplicate_vat_reason).
+    - Creates the primary Address record and links it to the new party.
+
+- Customer attachment enforcement (customer_override.py): if a Customer has a VAT
+  Registration Number set, at least one file attachment is required (skipped on the
+  very first save, since the attachment UI only appears post-insert).
+
+- Custom fields added to Customer: custom_vat_registration_number,
+  custom_commercial_registration_number, custom_company, custom_branch_access.
+
+================================================================================
+4. CUSTOMER CREDIT & BRANCH ACCESS CONTROL
+================================================================================
+
+- Customer Branch Access (child table DocType): lists which Branches a credit
+  customer is allowed to transact under.
+
+- Credit-limit -> branch-access enforcement (customer_permission.py):
+    - validate_credit_branch_access: a Customer cannot have a Credit Limit > 0
+      without at least one Branch Access row.
+    - auto_add_branch_on_credit_limit: when a credit limit is newly set (new row,
+      or changed from 0 -> positive), automatically appends the current user's
+      assigned branches to Branch Access (manual edits on later saves are preserved).
+    - permission_query_conditions_for_customer: for users restricted by Company
+      User Permission, hides customers with no custom_company, and further
+      restricts credit customers to only those whose Branch Access includes one
+      of the user's permitted branches.
+    - customer_query_credit_branch (whitelisted search): custom Customer
+      link-query used on Sales Invoice — returns only credit customers whose
+      Branch Access includes the invoice's branch and whose company matches.
+
+- Available credit lookup (sales_invoice_payment.py — get_available_credit):
+  computes remaining credit = Customer Credit Limit minus sum of outstanding
+  amounts on submitted Sales Invoices with custom_payment_mode = "Credit".
+
+- Item visibility by company (branch_defaults.py — item_permission_query): for
+  users restricted by Company User Permission, only shows Items that have an Item
+  Default for one of their permitted companies (bypassed for Administrator/System
+  Manager, and for autocomplete link searches which are pre-filtered elsewhere).
+
+- Cash-mode credit-limit bypass (overrides/sales_invoice_class.py —
+  CustomSalesInvoice): overrides ERPNext's SalesInvoice class so credit-limit
+  validation is skipped entirely when custom_payment_mode = "Cash".
+
+================================================================================
+5. SELLING PRICE GOVERNANCE (MINIMUM MARGIN ENFORCEMENT)
+================================================================================
+
+- Item Group minimum margin (custom_min_margin_pct field on Item Group, inherited
+  up the group tree).
+
+- Price List minimum-price enforcement flag (custom_enforce_min_price on Price
+  List): when set, the price list rate becomes a hard floor that replaces
+  cost-based checks.
+
+- get_min_selling_price (whitelisted, used for live client validation): computes
+  the minimum allowed selling rate as the greater of (a) last purchase rate x
+  (1 + margin %) and (b) warehouse valuation rate x (1 + margin %), converted to
+  transaction currency — or simply the price-list rate if minimum-price
+  enforcement is on.
+
+- validate_selling_price (save-time hook on Sales Invoice/Order/Quotation/Delivery
+  Note): hard-blocks saving any item priced below its computed minimum, listing
+  every offending row; skips the cost-based checks for internal (inter-company)
+  customers where relevant.
+
+- selling_price_realtime.js: warns immediately on rate entry if it's below the
+  floor, ahead of the server-side hard block at save.
+
+================================================================================
+6. ITEM SEARCH, STOCK & QUICK-ENTRY TOOLS
+================================================================================
+
+- Stock- and rate-aware item search (api/item_search.py, overriding
+  erpnext.controllers.queries.item_query via override_whitelisted_methods): item
+  autocomplete results are filtered/enriched with live stock and rate, and sorted
+  with a natural-number sort (so "2.6MM" sorts after "2MM", not before).
+
+- redirect_item_query_before_request: a before_request hook that redirects calls
+  to the standard item-query endpoint so the override is always hit.
+
+- Item search cache-busting (item_search_cache_buster.js): clears the Link
+  control's autocomplete cache on focus so item dropdowns always show fresh results.
+
+- sales_invoice_item_search.js: forces every item_code field across major
+  transaction doctypes to use the stock/rate-aware search, filtered by the form's
+  company.
+
+- Warehouse stock lookup (api/warehouse_stock.py — get_item_warehouse_stock):
+  fast, Bin-table-based per-warehouse stock balance for an item, with optional
+  target-warehouse prioritization and pagination.
+
+- Stock Availability button (stock_availability.js): adds a toolbar button on
+  transaction item grids (except Sales Invoice) opening a per-warehouse stock
+  dialog for a selected item.
+
+- Warehouse stock popup on Sales Invoice (warehouse_stock_popup.js,
+  warehouse_qty_realtime.js): shows live stock under the item table and warns in
+  real time if entered qty exceeds available stock (compared in stock UOM).
+
+- Quick Entry (api/quick_entry.py, quick_entry.js): a dialog listing items with
+  current stock, letting users bulk-select items via checkboxes to add to the
+  items table (natural-sorted by item name).
+
+- Barcode scanning (sales_invoice_barcode.js): form-level "Scan Barcode" field and
+  row-level Barcode column trigger ERPNext's barcode scanner to add/increment
+  item rows.
+
+- Empty scan-row cleanup: sales_invoice_override.before_validate strips leftover
+  item rows with no item_code (artifacts of barcode scanning) and requires at
+  least one real item before saving.
+
+================================================================================
+7. PURCHASING FEATURES
+================================================================================
+
+- Last Purchase Rate (api/last_purchase_rate.py, last_purchase_rate.js): button on
+  purchase document item grids showing an item's purchase-rate history from
+  submitted Purchase Invoices, filtered by the user's permitted Companies/Cost
+  Centers.
+
+- Last Selling Rate (api/last_selling_rate.py, last_selling_rate.js): equivalent
+  history lookup from submitted Sales Invoices, for use on selling documents.
+
+- Overbilling prevention (overrides/purchase_invoice.py — validate): blocks a
+  Purchase Invoice from saving if total billed qty (drafts + submitted, excluding
+  itself) against a Purchase Order line would exceed the ordered qty.
+
+- Purchase Receipt billing-approval status sync (overrides/purchase_invoice.py —
+  on_save): updates a custom billing-approval status field on the linked Purchase
+  Receipt after every Purchase Invoice save.
+
+- Auto Purchase Receipt Return on Purchase Invoice Return (api/purchase_return.py):
+  when a Purchase Invoice Return (Debit Note) is submitted, automatically creates
+  and submits a matching Purchase Receipt Return — handling both "PR created the
+  PI" and "PI created first, PR separate" linkage patterns, capping quantities at
+  what's still returnable, and never blocking the PI Return submit on failure
+  (errors are logged + flagged, not raised).
+
+- Cost-center push to tax/item rows (purchase_invoice_cost_center.js): client-side
+  push of header cost center into item/tax rows before save, to avoid permission
+  errors from inherited cost centers a user can't access.
+
+- Simplified Purchase Invoice/Order/Receipt/Quotation UI: dozens of Property
+  Setters hide rarely-used ERPNext fields (rounding, discounts, TDS, shipping
+  rules, incoterms, pricing rules, etc.) to declutter these forms for
+  trading-focused data entry.
+
+================================================================================
+8. MATERIAL REQUEST / STOCK TRANSFER WORKFLOW
+================================================================================
+
+- Material Transfer -> Purchase Request linkage (api/material_request.py):
+    - make_purchase_request_from_mr: converts a submitted "Material Transfer" type
+      Material Request into a new "Purchase" type Material Request, carrying
+      custom_source_mr back-references on each item and defaulting the purchase
+      warehouse to the transfer's source warehouse.
+    - get_mr_purchase_connections: returns all linked, non-cancelled Purchase MRs
+      for a Transfer MR (and which item codes they cover) to drive a
+      "connections" panel in the UI.
+    - create_material_request: directly creates and submits a Material Transfer
+      request between two warehouses given item/qty/date (with full input
+      validation).
+
+- Transfer progress tracking (api/material_request_progress.py —
+  get_transfer_progress): per-item required vs. transferred (via submitted
+  Material Transfer Stock Entries) vs. pending qty and percent-complete.
+
+- Material Request UI enhancements (material_request.js): colored priority
+  indicator (custom_priority field) in the form header, plus an inline "Transfer
+  Status" section showing linked transfer progress.
+
+- Custom fields: custom_priority on Material Request; custom_source_mr on
+  Material Request Item.
+
+================================================================================
+9. QUOTATION -> SALES INVOICE PIPELINE
+================================================================================
+
+- Direct Quotation-to-Invoice conversion (api/quotation.py —
+  make_sales_invoice_from_quotation): maps a Quotation to an unsaved Sales
+  Invoice (customer, currency, price list, accounting dimensions, items with
+  custom_quotation back-reference, taxes), opened client-side for review before
+  saving. Blocks creating a duplicate invoice if one already exists (draft or
+  submitted) for the same quotation.
+
+- Automatic Quotation status tracking: on Sales Invoice submit/cancel,
+  update_quotation_status_from_invoice recalculates each linked Quotation's
+  status as Open / Partially Ordered / Ordered by comparing quoted vs. invoiced
+  quantities per item.
+
+- quotation.js: pushes set_warehouse changes to all item rows; adds a
+  "Create -> Sales Invoice" button that opens the pre-filled invoice without
+  auto-saving.
+
+- Custom fields on Quotation/Quotation Item: branch, cost_center, project,
+  set_warehouse (header) so quotations carry the same accounting dimensions as
+  other transaction docs.
+
+================================================================================
+10. SALES INVOICE / POS-STYLE ENHANCEMENTS
+================================================================================
+
+- Payment popup (sales_invoice_pos_total_popup.js): after save, prompts for
+  payment amounts once the correct grand total is known; respects a manually
+  chosen print format on the Print Invoice button, falling back to the doctype
+  default for auto-print-after-submit.
+
+- Credit-mode customer filter (sales_invoice_credit.js): when payment mode is
+  "Credit", the customer field only lists customers with credit_limit > 0.
+
+- Sales Person auto-fill (sales_invoice_sales_person.js, custom_sales_person
+  field): auto-populates Sales Person / Sales Team from the Customer master.
+
+- Return quantity auto-fix (return_qty_autofix.js): silently negates positive
+  quantities entered on return documents so users never hit ERPNext's "quantity
+  must be negative" error.
+
+- Driver / delivery tracking: custom_driver field on Sales Invoice linking to a
+  Driver doctype (extended with custom_branch and custom_payment_days);
+  validate_driver_payment (in sales_invoice_override.py) validates
+  driver-related payment rules on save.
+
+- Additional Sales Invoice custom fields: custom_sale_type, custom_credit_limit,
+  custom_contact_expairy_date, custom_vat__expairy_date, custom_payment_mode,
+  inter_company_branch; custom_quotation on Sales Invoice Item.
+
+- Print format selection:
+    - Company Print Format (child-table DocType on Company): maps a Document
+      Type to a preferred Print Format per company.
+    - api/company_print_format.py — get_company_print_format: looks up the
+      company's preferred print format for a given document type.
+    - company_print_format.js: filters the Print Format field by Document Type
+      in the Company form's child table.
+    - Company also gets custom_print_formats and
+      custom_delivery_note_print_format fields.
+
+================================================================================
+11. REPORTING
+================================================================================
+
+- DCR Report (vansale/sf_trading/report/dcr_report): a Daily Collection/Cash Report
+  script report over Sales Invoice summarizing income/expense particulars; Gross
+  Margin column restricted to System Manager.
+
+- DCR Detailed (dcr_detailed): transaction-level breakdown — type, document,
+  party, mode of payment, cash vs. bank/card amount split, posting date.
+
+- DCR Detail (dcr_detail): categorizes transactions into a fixed set of report
+  types (Cash Sales, Credit Sales, Sales Return - Cash, VAT Collected on Cash
+  Sales, VAT Applied on Credit Sales, VAT Refund on Sales Return, Credit
+  Purchase, Cash/Bank Receipts & Payments, Internal Transfers, etc.).
+
+- Work Flow Approval (work_flow_approval, ref doctype Workflow): lists documents
+  by owner/company/doctype/workflow state/creation date — a cross-doctype
+  pending-approvals view.
+
+- Workflow approval shortcut badge (workflow_approval_shortcut.js): shows a live
+  pending-count badge next to the "Work Flow Approval" workspace shortcut,
+  matching ERPNext's native shortcut badge style.
+
+================================================================================
+12. PERMISSIONS & ROLES
+================================================================================
+
+- Custom Role: "B2B Creator" (fixture-exported).
+- Item, Customer list/search visibility scoped by Company/Branch User Permissions
+  (see section 4).
+- Branch given blanket read access for all authenticated users (needed for Link
+  validation on transaction docs).
+- Driver doctype: custom permission rows (Custom DocPerm) exported as fixtures.
+
+================================================================================
+13. DATA MIGRATION / PATCHES
+================================================================================
+
+- fix_branch_config_mop_child_table (post-model-sync patch): one-time data-fix
+  patch for the Branch Configuration Mode of Payment child table (e.g. after a
+  schema change).
+
+================================================================================
+14. DOCTYPE SUMMARY
+================================================================================
+
+- Branch Configuration (Master) — Branch -> Company mapping + linked
+  warehouses/cost centers/payment modes/users
+- Branch Configuration Warehouse (Child table) — Warehouses belonging to a branch
+- Branch Configuration Cost Center (Child table) — Cost centers belonging to a
+  branch
+- Branch Configuration Mode of Payment (Child table) — Allowed Cash/Bank payment
+  modes per branch (+ return/PDC flags)
+- Branch Configuration User (Child table) — Users assigned to a branch, with
+  role profile + default-branch flag
+- Inter Company Branch (Master) — Named virtual branch for inter-company
+  transactions
+- Inter Company Branch Cost Center (Child table) — Company -> Cost Center ->
+  Warehouse mapping for an Inter Company Branch
+- Company Print Format (Child table, on Company) — Document Type -> Print
+  Format mapping
+- Customer Branch Access (Child table, on Customer) — Branches a credit
+  customer may transact under
+
+================================================================================
+ARCHITECTURAL NOTES
+================================================================================
+
+- Almost all business logic is wired through hooks.py's doc_events, applied
+  consistently across the sales chain (Quotation -> Sales Order -> Sales Invoice
+  -> Delivery Note) and purchase chain (Supplier Quotation -> Purchase Order ->
+  Purchase Receipt -> Purchase Invoice): dimension propagation, branch
+  auto-detection, and letter-head resolution run identically on all of them.
+
+- Client JS is split between global scripts (loaded on every page, e.g. workflow
+  badge, print-format patch, item-search cache buster), multi-doctype bundles
+  (e.g. last_selling_rate.js across all selling doctypes), and single-doctype
+  bundles loaded via doctype_js (Sales Invoice, Stock Entry, Material Request,
+  Customer, Quotation). The Stock Entry bundle clears from_warehouse/to_warehouse
+  on new documents so stale session-default warehouses don't leak into a fresh
+  transfer. sales_invoice.js is itself a consolidated bundle assembling several
+  standalone source files (barcode, credit filter, inter-company filter, POS
+  popup, sales person, warehouse qty validation).
+
+- Inter Company Branch also exposes a whitelisted get_branches_for_company
+  search used to filter the branch picker by company.
+
+- No scheduler/cron jobs, no custom web pages, and no desktop.py/workspace
+  config — the app relies entirely on hooks, doc events, whitelisted APIs, and
+  client scripts layered onto standard ERPNext doctypes and Frappe's default
+  module page.
+
+- The app leans heavily on monkey-patching (override_whitelisted_methods,
+  override_doctype_class, temporary patches in overrides/defaults.py /
+  overrides/get_item_details.py) rather than forking ERPNext core, keeping it
+  upgrade-safe as long as the patched function signatures remain stable.

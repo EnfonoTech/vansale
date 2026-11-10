@@ -1,0 +1,214 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "creation": "2026-07-26 09:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "reference_doctype",
+  "reference_record",
+  "bill_no",
+  "date",
+  "ageing",
+  "amount",
+  "settled_amount",
+  "net_payable_amount",
+  "reference_status",
+  "payment_term",
+  "allocated_amount",
+  "cost_center",
+  "job_number",
+  "remarks",
+  "currency_section",
+  "currency",
+  "exchange_rate",
+  "column_break_ccy",
+  "amount_in_currency",
+  "settled_amount_in_currency",
+  "net_payable_amount_in_currency"
+ ],
+ "fields": [
+  {
+   "columns": 2,
+   "fieldname": "reference_doctype",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Reference Doctype",
+   "options": "DocType",
+   "reqd": 1
+  },
+  {
+   "columns": 2,
+   "fieldname": "reference_record",
+   "fieldtype": "Dynamic Link",
+   "in_list_view": 1,
+   "label": "Reference Record",
+   "options": "reference_doctype",
+   "reqd": 1
+  },
+  {
+   "columns": 1,
+   "description": "The party's own document number, as recorded on the referenced voucher.",
+   "fieldname": "bill_no",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Supplier Invoice No",
+   "read_only": 1
+  },
+  {
+   "columns": 1,
+   "fieldname": "date",
+   "fieldtype": "Date",
+   "in_list_view": 0,
+   "label": "Date",
+   "read_only": 1
+  },
+  {
+   "columns": 1,
+   "description": "Days between the reference document's due date and today.",
+   "fieldname": "ageing",
+   "fieldtype": "Int",
+   "in_list_view": 1,
+   "label": "Ageing (Days)",
+   "read_only": 1
+  },
+  {
+   "columns": 1,
+   "fieldname": "amount",
+   "fieldtype": "Currency",
+   "in_list_view": 1,
+   "label": "Document Total",
+   "options": "currency",
+   "read_only": 1
+  },
+  {
+   "columns": 1,
+   "fieldname": "settled_amount",
+   "fieldtype": "Currency",
+   "in_list_view": 1,
+   "label": "Settled",
+   "options": "currency",
+   "read_only": 1
+  },
+  {
+   "columns": 2,
+   "fieldname": "net_payable_amount",
+   "fieldtype": "Currency",
+   "in_list_view": 1,
+   "label": "Outstanding (Payable)",
+   "options": "currency",
+   "read_only": 1
+  },
+  {
+   "columns": 1,
+   "description": "Live status of the referenced voucher, refreshed when the advice is saved and after its Payment Entry is submitted or cancelled.",
+   "fieldname": "reference_status",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Voucher Status",
+   "read_only": 1
+  },
+  {
+   "description": "Set when the source invoice allocates by payment terms; carried to the Payment Entry reference.",
+   "fieldname": "payment_term",
+   "fieldtype": "Link",
+   "label": "Payment Term",
+   "options": "Payment Term",
+   "read_only": 1
+  },
+  {
+   "columns": 1,
+   "description": "What this voucher gets from the payment. Leave the column alone and the Payment Amount spreads down the rows; type a figure and it sticks, with the remainder spreading over the rest. A row can never take more than it is owed.",
+   "fieldname": "allocated_amount",
+   "fieldtype": "Currency",
+   "in_list_view": 1,
+   "label": "Allocated",
+   "options": "currency",
+   "read_only": 0
+  },
+  {
+   "fieldname": "cost_center",
+   "fieldtype": "Link",
+   "label": "Cost Center",
+   "options": "Cost Center",
+   "read_only": 1
+  },
+  {
+   "fieldname": "job_number",
+   "fieldtype": "Data",
+   "label": "Job Number",
+   "read_only": 1
+  },
+  {
+   "fieldname": "remarks",
+   "fieldtype": "Small Text",
+   "label": "Remarks"
+  },
+  {
+   "fieldname": "currency_section",
+   "fieldtype": "Section Break",
+   "hidden": 1,
+   "label": "Transaction Currency"
+  },
+  {
+   "description": "Company currency. Amounts on this row are company-currency figures (ERPNext stores invoice outstanding in party account currency).",
+   "fieldname": "currency",
+   "fieldtype": "Link",
+   "hidden": 1,
+   "in_list_view": 0,
+   "label": "Currency",
+   "options": "Currency",
+   "read_only": 1
+  },
+  {
+   "fieldname": "exchange_rate",
+   "fieldtype": "Float",
+   "hidden": 1,
+   "in_list_view": 0,
+   "label": "Exchange Rate",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_ccy",
+   "fieldtype": "Column Break",
+   "hidden": 1
+  },
+  {
+   "fieldname": "amount_in_currency",
+   "fieldtype": "Currency",
+   "hidden": 1,
+   "label": "Amount In Currency",
+   "options": "currency",
+   "read_only": 1
+  },
+  {
+   "fieldname": "settled_amount_in_currency",
+   "fieldtype": "Currency",
+   "hidden": 1,
+   "label": "Settled Amount In Currency",
+   "options": "currency",
+   "read_only": 1
+  },
+  {
+   "fieldname": "net_payable_amount_in_currency",
+   "fieldtype": "Currency",
+   "hidden": 1,
+   "label": "Net Payable Amount In Currency",
+   "options": "currency",
+   "read_only": 1
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "istable": 1,
+ "links": [],
+ "modified": "2026-07-26 09:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Sf Trading",
+ "name": "Payment Advice Reference",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

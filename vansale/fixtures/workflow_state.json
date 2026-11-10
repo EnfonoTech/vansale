@@ -1,0 +1,30 @@
+[
+ {
+  "name": "Approved",
+  "workflow_state_name": "Approved",
+  "icon": "ok-sign",
+  "style": "Success",
+  "doctype": "Workflow State"
+ },
+ {
+  "name": "Draft",
+  "workflow_state_name": "Draft",
+  "icon": "",
+  "style": "",
+  "doctype": "Workflow State"
+ },
+ {
+  "name": "Pending",
+  "workflow_state_name": "Pending",
+  "icon": "question-sign",
+  "style": "",
+  "doctype": "Workflow State"
+ },
+ {
+  "name": "Rejected",
+  "workflow_state_name": "Rejected",
+  "icon": "remove",
+  "style": "Danger",
+  "doctype": "Workflow State"
+ }
+]

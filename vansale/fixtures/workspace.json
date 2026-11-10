@@ -1,0 +1,365 @@
+[
+ {
+  "charts": [],
+  "content": "[{\"type\": \"header\", \"data\": {\"text\": \"<span class=\\\"h4\\\"><b>Supplier Payments</b></span>\", \"col\": 12}}, {\"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Payment Advice\", \"col\": 3}}, {\"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Payment Advice Builder\", \"col\": 3}}, {\"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Payment Automation Settings\", \"col\": 3}}, {\"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"SF Trading User Guide\", \"col\": 3}}, {\"type\": \"spacer\", \"data\": {\"col\": 12}}, {\"type\": \"header\", \"data\": {\"text\": \"<span class=\\\"h4\\\"><b>Reports</b></span>\", \"col\": 12}}, {\"type\": \"card\", \"data\": {\"card_name\": \"Payables\", \"col\": 4}}, {\"type\": \"card\", \"data\": {\"card_name\": \"Cash & Cheques\", \"col\": 4}}, {\"type\": \"card\", \"data\": {\"card_name\": \"Masters\", \"col\": 4}}]",
+  "creation": "2026-07-26 12:30:00.000000",
+  "docstatus": 0,
+  "doctype": "Workspace",
+  "for_user": "",
+  "hide_custom": 0,
+  "icon": "money-coins-1",
+  "idx": 0,
+  "is_hidden": 0,
+  "label": "Supplier Payments",
+  "links": [
+   {
+    "hidden": 0,
+    "is_query_report": 0,
+    "label": "Payables",
+    "link_count": 0,
+    "onboard": 0,
+    "type": "Card Break"
+   },
+   {
+    "dependencies": "",
+    "hidden": 0,
+    "is_query_report": 0,
+    "label": "Payment Advice",
+    "link_count": 0,
+    "link_to": "Payment Advice",
+    "link_type": "DocType",
+    "onboard": 1,
+    "type": "Link"
+   },
+   {
+    "dependencies": "",
+    "hidden": 0,
+    "is_query_report": 1,
+    "label": "Supplier Due Payment Report",
+    "link_count": 0,
+    "link_to": "Supplier Due Payment Report",
+    "link_type": "Report",
+    "onboard": 0,
+    "type": "Link"
+   },
+   {
+    "dependencies": "",
+    "hidden": 0,
+    "is_query_report": 1,
+    "label": "Invoice Due and Overdue Report",
+    "link_count": 0,
+    "link_to": "Invoice Due and Overdue Report",
+    "link_type": "Report",
+    "onboard": 0,
+    "type": "Link"
+   },
+   {
+    "hidden": 0,
+    "is_query_report": 0,
+    "label": "Cash & Cheques",
+    "link_count": 0,
+    "onboard": 0,
+    "type": "Card Break"
+   },
+   {
+    "dependencies": "",
+    "hidden": 0,
+    "is_query_report": 1,
+    "label": "PDC Report",
+    "link_count": 0,
+    "link_to": "PDC Report",
+    "link_type": "Report",
+    "onboard": 0,
+    "type": "Link"
+   },
+   {
+    "dependencies": "",
+    "hidden": 0,
+    "is_query_report": 1,
+    "label": "Loyalty Rewards Report",
+    "link_count": 0,
+    "link_to": "Loyalty Rewards Report",
+    "link_type": "Report",
+    "onboard": 0,
+    "type": "Link"
+   },
+   {
+    "dependencies": "",
+    "hidden": 0,
+    "is_query_report": 0,
+    "label": "Payment Entry",
+    "link_count": 0,
+    "link_to": "Payment Entry",
+    "link_type": "DocType",
+    "onboard": 0,
+    "type": "Link"
+   },
+   {
+    "hidden": 0,
+    "is_query_report": 0,
+    "label": "Masters",
+    "link_count": 0,
+    "onboard": 0,
+    "type": "Card Break"
+   },
+   {
+    "dependencies": "",
+    "hidden": 0,
+    "is_query_report": 0,
+    "label": "Payment Automation Settings",
+    "link_count": 0,
+    "link_to": "Payment Automation Settings",
+    "link_type": "DocType",
+    "onboard": 0,
+    "type": "Link"
+   },
+   {
+    "dependencies": "",
+    "hidden": 0,
+    "is_query_report": 0,
+    "label": "Supplier",
+    "link_count": 0,
+    "link_to": "Supplier",
+    "link_type": "DocType",
+    "onboard": 0,
+    "type": "Link"
+   },
+   {
+    "dependencies": "",
+    "hidden": 0,
+    "is_query_report": 0,
+    "label": "Bank Account",
+    "link_count": 0,
+    "link_to": "Bank Account",
+    "link_type": "DocType",
+    "onboard": 0,
+    "type": "Link"
+   }
+  ],
+  "modified": "2026-07-26 12:30:00.000000",
+  "modified_by": "Administrator",
+  "module": "Sf Trading",
+  "name": "Supplier Payments",
+  "number_cards": [],
+  "owner": "Administrator",
+  "parent_page": "",
+  "public": 1,
+  "quick_lists": [],
+  "roles": [],
+  "sequence_id": 40.0,
+  "shortcuts": [
+   {
+    "color": "Blue",
+    "doc_view": "List",
+    "label": "Payment Advice",
+    "link_to": "Payment Advice",
+    "stats_filter": "{\"status\":[\"in\",[\"Draft\",\"Pending Approval\",\"Approved\"]]}",
+    "type": "DocType"
+   },
+   {
+    "color": "Green",
+    "label": "Payment Advice Builder",
+    "link_to": "payment-advice-builder",
+    "type": "Page"
+   },
+   {
+    "color": "Orange",
+    "doc_view": "List",
+    "label": "Payment Automation Settings",
+    "link_to": "Payment Automation Settings",
+    "type": "DocType"
+   },
+   {
+    "color": "Grey",
+    "label": "SF Trading User Guide",
+    "link_to": "sf-trading-user-guide",
+    "type": "Page"
+   }
+  ],
+  "title": "Supplier Payments"
+ },
+ {
+  "charts": [],
+  "content": "[{\"type\": \"header\", \"data\": {\"text\": \"<span class=\\\"h4\\\"><b>Open Items</b></span>\", \"col\": 12}}, {\"type\": \"number_card\", \"data\": {\"number_card_name\": \"Pending Delivery Value\", \"col\": 3}}, {\"type\": \"number_card\", \"data\": {\"number_card_name\": \"Unbilled Deliveries Value\", \"col\": 3}}, {\"type\": \"number_card\", \"data\": {\"number_card_name\": \"Unbilled Receipts Value\", \"col\": 3}}, {\"type\": \"number_card\", \"data\": {\"number_card_name\": \"Pending Receipt Value\", \"col\": 3}}, {\"type\": \"spacer\", \"data\": {\"col\": 12}}, {\"type\": \"header\", \"data\": {\"text\": \"<span class=\\\"h4\\\"><b>Reports</b></span>\", \"col\": 12}}, {\"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Invoiced Items To Be Delivered\", \"col\": 3}}, {\"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Delivered Items Pending Billing\", \"col\": 3}}, {\"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Received Items Pending Billing\", \"col\": 3}}, {\"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Billed Items Pending Receipt\", \"col\": 3}}, {\"type\": \"spacer\", \"data\": {\"col\": 12}}, {\"type\": \"card\", \"data\": {\"card_name\": \"Sales\", \"col\": 4}}, {\"type\": \"card\", \"data\": {\"card_name\": \"Purchase\", \"col\": 4}}]",
+  "creation": "2026-08-09 13:00:00.000000",
+  "docstatus": 0,
+  "doctype": "Workspace",
+  "for_user": "",
+  "hide_custom": 0,
+  "icon": "list",
+  "idx": 0,
+  "is_hidden": 0,
+  "label": "Open Items",
+  "links": [
+   {
+    "dependencies": "",
+    "hidden": 0,
+    "is_query_report": 0,
+    "label": "Sales",
+    "link_count": 3,
+    "link_to": null,
+    "link_type": null,
+    "onboard": 0,
+    "type": "Card Break"
+   },
+   {
+    "dependencies": "",
+    "hidden": 0,
+    "is_query_report": 1,
+    "label": "Customer Open Items Summary",
+    "link_count": 0,
+    "link_to": "Customer Open Items Summary",
+    "link_type": "Report",
+    "onboard": 0,
+    "type": "Link"
+   },
+   {
+    "dependencies": "",
+    "hidden": 0,
+    "is_query_report": 1,
+    "label": "Invoiced Items To Be Delivered",
+    "link_count": 0,
+    "link_to": "Invoiced Items To Be Delivered",
+    "link_type": "Report",
+    "onboard": 0,
+    "type": "Link"
+   },
+   {
+    "dependencies": "",
+    "hidden": 0,
+    "is_query_report": 1,
+    "label": "Delivered Items Pending Billing",
+    "link_count": 0,
+    "link_to": "Delivered Items Pending Billing",
+    "link_type": "Report",
+    "onboard": 0,
+    "type": "Link"
+   },
+   {
+    "dependencies": "",
+    "hidden": 0,
+    "is_query_report": 0,
+    "label": "Purchase",
+    "link_count": 5,
+    "link_to": null,
+    "link_type": null,
+    "onboard": 0,
+    "type": "Card Break"
+   },
+   {
+    "dependencies": "",
+    "hidden": 0,
+    "is_query_report": 1,
+    "label": "Supplier Open Items Summary",
+    "link_count": 0,
+    "link_to": "Supplier Open Items Summary",
+    "link_type": "Report",
+    "onboard": 0,
+    "type": "Link"
+   },
+   {
+    "dependencies": "",
+    "hidden": 0,
+    "is_query_report": 1,
+    "label": "Received Items Pending Billing",
+    "link_count": 0,
+    "link_to": "Received Items Pending Billing",
+    "link_type": "Report",
+    "onboard": 0,
+    "type": "Link"
+   },
+   {
+    "dependencies": "",
+    "hidden": 0,
+    "is_query_report": 1,
+    "label": "Billed Items Pending Receipt",
+    "link_count": 0,
+    "link_to": "Billed Items Pending Receipt",
+    "link_type": "Report",
+    "onboard": 0,
+    "type": "Link"
+   },
+   {
+    "dependencies": "",
+    "hidden": 0,
+    "is_query_report": 1,
+    "label": "Purchase Register Extended",
+    "link_count": 0,
+    "link_to": "Purchase Register Extended",
+    "link_type": "Report",
+    "onboard": 0,
+    "type": "Link"
+   },
+   {
+    "dependencies": "",
+    "hidden": 0,
+    "is_query_report": 1,
+    "label": "Pending Advance PO",
+    "link_count": 0,
+    "link_to": "Pending Advance PO",
+    "link_type": "Report",
+    "onboard": 0,
+    "type": "Link"
+   }
+  ],
+  "modified": "2026-08-13 02:30:00.000000",
+  "modified_by": "Administrator",
+  "module": "Sf Trading",
+  "name": "Open Items",
+  "number_cards": [
+   {
+    "label": "Pending Delivery Value",
+    "number_card_name": "Pending Delivery Value"
+   },
+   {
+    "label": "Unbilled Deliveries Value",
+    "number_card_name": "Unbilled Deliveries Value"
+   },
+   {
+    "label": "Unbilled Receipts Value",
+    "number_card_name": "Unbilled Receipts Value"
+   },
+   {
+    "label": "Pending Receipt Value",
+    "number_card_name": "Pending Receipt Value"
+   }
+  ],
+  "owner": "Administrator",
+  "parent_page": "",
+  "public": 1,
+  "quick_lists": [],
+  "roles": [],
+  "sequence_id": 41.0,
+  "shortcuts": [
+   {
+    "color": "Blue",
+    "doc_view": "",
+    "label": "Invoiced Items To Be Delivered",
+    "link_to": "Invoiced Items To Be Delivered",
+    "type": "Report"
+   },
+   {
+    "color": "Green",
+    "doc_view": "",
+    "label": "Delivered Items Pending Billing",
+    "link_to": "Delivered Items Pending Billing",
+    "type": "Report"
+   },
+   {
+    "color": "Orange",
+    "doc_view": "",
+    "label": "Received Items Pending Billing",
+    "link_to": "Received Items Pending Billing",
+    "type": "Report"
+   },
+   {
+    "color": "Grey",
+    "doc_view": "",
+    "label": "Billed Items Pending Receipt",
+    "link_to": "Billed Items Pending Receipt",
+    "type": "Report"
+   }
+  ],
+  "title": "Open Items"
+ }
+]

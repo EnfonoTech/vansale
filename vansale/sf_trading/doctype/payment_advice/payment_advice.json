@@ -1,0 +1,586 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "naming_series:",
+ "creation": "2026-07-26 09:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "section_break_main",
+  "naming_series",
+  "payment_advice_type",
+  "transaction_date",
+  "column_break_main",
+  "company",
+  "mode_of_payment",
+  "status",
+  "workflow_state",
+  "approval_route",
+  "auto_generated",
+  "party_section",
+  "party_type",
+  "party",
+  "column_break_party",
+  "party_name",
+  "references_section",
+  "payment_advice_reference",
+  "transaction_details_section",
+  "amount",
+  "amount_to_be_settled",
+  "amount_to_be_settled_in_words",
+  "amount_paid",
+  "column_break_amounts",
+  "payment_amount",
+  "pending_amount",
+  "currency_section",
+  "transaction_currency",
+  "exchange_rate",
+  "column_break_currency",
+  "amount_in_trans_cur",
+  "amount_paid_in_trans_curr",
+  "amount_to_be_settled_trans_curr",
+  "amount_words_trans_curr",
+  "bank_account_details_section",
+  "bank_account",
+  "reference_no",
+  "reference_date",
+  "column_break_bank",
+  "bank",
+  "bank_account_no",
+  "account",
+  "iban",
+  "branch_code",
+  "swift_no",
+  "dimensions_section",
+  "branch",
+  "cost_center",
+  "column_break_dimensions",
+  "project",
+  "approval_section",
+  "approver",
+  "column_break_approval",
+  "remarks",
+  "payment_section",
+  "payment_entry",
+  "column_break_payment",
+  "payment_entry_date",
+  "amended_from"
+ ],
+ "fields": [
+  {
+   "fieldname": "section_break_main",
+   "fieldtype": "Section Break"
+  },
+  {
+   "default": "PA-.YY.-.####",
+   "fieldname": "naming_series",
+   "fieldtype": "Select",
+   "label": "Naming Series",
+   "options": "PA-.YY.-.####",
+   "reqd": 1
+  },
+  {
+   "default": "Outward",
+   "fieldname": "payment_advice_type",
+   "fieldtype": "Select",
+   "in_standard_filter": 1,
+   "label": "Payment Advice Type",
+   "options": "Outward\nInward",
+   "reqd": 1
+  },
+  {
+   "default": "Today",
+   "fieldname": "transaction_date",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "label": "Transaction Date",
+   "reqd": 1
+  },
+  {
+   "fieldname": "column_break_main",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "Payment Entry is created for this company. Defaults to your user's company on a new advice.",
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Company",
+   "options": "Company",
+   "reqd": 1
+  },
+  {
+   "fieldname": "mode_of_payment",
+   "fieldtype": "Link",
+   "label": "Mode Of Payment",
+   "options": "Mode of Payment"
+  },
+  {
+   "allow_on_submit": 1,
+   "default": "Draft",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Status",
+   "options": "Draft\nPending Approval\nApproved\nPartly Paid\nPaid\nCancelled",
+   "read_only": 1
+  },
+  {
+   "allow_on_submit": 1,
+   "description": "Maintained by the PM Workflow when one is active for Payment Advice.",
+   "fieldname": "workflow_state",
+   "fieldtype": "Link",
+   "hidden": 0,
+   "in_standard_filter": 1,
+   "label": "Workflow State",
+   "no_copy": 1,
+   "options": "Workflow State",
+   "read_only": 1
+  },
+  {
+   "fieldname": "approval_route",
+   "fieldtype": "Select",
+   "label": "Approval Route",
+   "options": "\nAccountant\nPurchase Manager\nHO Accounts\nFinance",
+   "read_only": 1,
+   "no_copy": 1,
+   "in_standard_filter": 1,
+   "description": "Worked out from the references when the advice is saved, and read by the approval workflow to decide who signs it off."
+  },
+  {
+   "default": "0",
+   "description": "Set when this advice was raised by the payment automation, not by a user.",
+   "fieldname": "auto_generated",
+   "fieldtype": "Check",
+   "label": "Auto Generated",
+   "read_only": 1
+  },
+  {
+   "fieldname": "party_section",
+   "fieldtype": "Section Break",
+   "label": "Party"
+  },
+  {
+   "default": "Supplier",
+   "fieldname": "party_type",
+   "fieldtype": "Select",
+   "in_standard_filter": 1,
+   "label": "Party Type",
+   "options": "Supplier\nCustomer",
+   "reqd": 1
+  },
+  {
+   "fieldname": "party",
+   "fieldtype": "Dynamic Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Party",
+   "options": "party_type",
+   "reqd": 1
+  },
+  {
+   "fieldname": "column_break_party",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "party_name",
+   "fieldtype": "Data",
+   "label": "Party Name",
+   "read_only": 1
+  },
+  {
+   "fieldname": "references_section",
+   "fieldtype": "Section Break",
+   "label": "References"
+  },
+  {
+   "fieldname": "payment_advice_reference",
+   "fieldtype": "Table",
+   "label": "Payment Advice Reference",
+   "options": "Payment Advice Reference",
+   "reqd": 1
+  },
+  {
+   "fieldname": "transaction_details_section",
+   "fieldtype": "Section Break",
+   "label": "Amounts"
+  },
+  {
+   "fieldname": "amount",
+   "fieldtype": "Currency",
+   "label": "Total Reference Amount",
+   "options": "Company:company:default_currency",
+   "read_only": 1
+  },
+  {
+   "fieldname": "amount_to_be_settled",
+   "fieldtype": "Currency",
+   "label": "Amount To Be Settled",
+   "options": "Company:company:default_currency",
+   "read_only": 1
+  },
+  {
+   "fieldname": "amount_to_be_settled_in_words",
+   "fieldtype": "Data",
+   "label": "Amount To Be Settled In Words",
+   "read_only": 1
+  },
+  {
+   "fieldname": "amount_paid",
+   "fieldtype": "Currency",
+   "label": "Amount Paid",
+   "options": "Company:company:default_currency",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_amounts",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "Amount this advice authorises for payment. Allocated across the references in order.",
+   "fieldname": "payment_amount",
+   "fieldtype": "Currency",
+   "in_list_view": 1,
+   "label": "Payment Amount",
+   "options": "Company:company:default_currency",
+   "reqd": 1
+  },
+  {
+   "fieldname": "pending_amount",
+   "fieldtype": "Currency",
+   "label": "Pending Amount",
+   "options": "Company:company:default_currency",
+   "read_only": 1
+  },
+  {
+   "description": "Retained for data continuity; the advice works in company currency.",
+   "fieldname": "currency_section",
+   "fieldtype": "Section Break",
+   "hidden": 1,
+   "label": "Transaction Currency"
+  },
+  {
+   "description": "Retained for data continuity; the advice works in company currency.",
+   "fieldname": "transaction_currency",
+   "fieldtype": "Link",
+   "hidden": 1,
+   "label": "Transaction Currency",
+   "options": "Currency"
+  },
+  {
+   "description": "Retained for data continuity; the advice works in company currency.",
+   "fieldname": "exchange_rate",
+   "fieldtype": "Float",
+   "hidden": 1,
+   "label": "Exchange Rate"
+  },
+  {
+   "description": "Retained for data continuity; the advice works in company currency.",
+   "fieldname": "column_break_currency",
+   "fieldtype": "Column Break",
+   "hidden": 1
+  },
+  {
+   "description": "Retained for data continuity; the advice works in company currency.",
+   "fieldname": "amount_in_trans_cur",
+   "fieldtype": "Currency",
+   "hidden": 1,
+   "label": "Amount In Trans Cur",
+   "options": "transaction_currency",
+   "read_only": 1
+  },
+  {
+   "description": "Retained for data continuity; the advice works in company currency.",
+   "fieldname": "amount_paid_in_trans_curr",
+   "fieldtype": "Currency",
+   "hidden": 1,
+   "label": "Amount Paid In Trans Curr",
+   "options": "transaction_currency",
+   "read_only": 1
+  },
+  {
+   "description": "Retained for data continuity; the advice works in company currency.",
+   "fieldname": "amount_to_be_settled_trans_curr",
+   "fieldtype": "Currency",
+   "hidden": 1,
+   "label": "Amount To Be Settled Trans Curr",
+   "options": "transaction_currency",
+   "read_only": 1
+  },
+  {
+   "description": "Retained for data continuity; the advice works in company currency.",
+   "fieldname": "amount_words_trans_curr",
+   "fieldtype": "Data",
+   "hidden": 1,
+   "label": "Amount Words Trans Curr",
+   "read_only": 1
+  },
+  {
+   "fieldname": "bank_account_details_section",
+   "fieldtype": "Section Break",
+   "label": "Bank Account"
+  },
+  {
+   "fieldname": "bank_account",
+   "fieldtype": "Link",
+   "label": "Bank Account",
+   "options": "Bank Account"
+  },
+  {
+   "allow_on_submit": 1,
+   "depends_on": "eval:doc.mode_of_payment || doc.bank_account",
+   "description": "Mandatory when the paying/receiving account is a Bank account, as in Payment Entry.",
+   "fieldname": "reference_no",
+   "fieldtype": "Data",
+   "label": "Reference No"
+  },
+  {
+   "allow_on_submit": 1,
+   "depends_on": "eval:doc.mode_of_payment || doc.bank_account",
+   "description": "Mandatory when the paying/receiving account is a Bank account, as in Payment Entry.",
+   "fieldname": "reference_date",
+   "fieldtype": "Date",
+   "label": "Reference Date"
+  },
+  {
+   "fieldname": "column_break_bank",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fetch_from": "bank_account.bank",
+   "fieldname": "bank",
+   "fieldtype": "Link",
+   "label": "Bank",
+   "options": "Bank",
+   "read_only": 1
+  },
+  {
+   "fetch_from": "bank_account.bank_account_no",
+   "fieldname": "bank_account_no",
+   "fieldtype": "Data",
+   "label": "Bank Account No",
+   "read_only": 1
+  },
+  {
+   "fetch_from": "bank_account.account",
+   "fieldname": "account",
+   "fieldtype": "Data",
+   "label": "Account",
+   "read_only": 1
+  },
+  {
+   "fetch_from": "bank_account.iban",
+   "fieldname": "iban",
+   "fieldtype": "Data",
+   "label": "Iban",
+   "read_only": 1
+  },
+  {
+   "fetch_from": "bank_account.branch_code",
+   "fieldname": "branch_code",
+   "fieldtype": "Data",
+   "label": "Branch Code",
+   "read_only": 1
+  },
+  {
+   "fetch_from": "bank.swift_number",
+   "fieldname": "swift_no",
+   "fieldtype": "Data",
+   "label": "Swift No",
+   "read_only": 1
+  },
+  {
+   "fieldname": "dimensions_section",
+   "fieldtype": "Section Break",
+   "label": "Accounting Dimensions"
+  },
+  {
+   "description": "Taken from the vouchers being paid; drives the default cost centre via Branch Configuration.",
+   "fieldname": "branch",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Branch",
+   "options": "Branch"
+  },
+  {
+   "fieldname": "cost_center",
+   "fieldtype": "Link",
+   "label": "Cost Center",
+   "options": "Cost Center"
+  },
+  {
+   "fieldname": "column_break_dimensions",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "project",
+   "fieldtype": "Link",
+   "label": "Project",
+   "options": "Project"
+  },
+  {
+   "fieldname": "approval_section",
+   "fieldtype": "Section Break",
+   "label": "Approval"
+  },
+  {
+   "description": "Only this user may submit the advice.",
+   "fieldname": "approver",
+   "fieldtype": "Link",
+   "label": "Approver",
+   "options": "User"
+  },
+  {
+   "fieldname": "column_break_approval",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "remarks",
+   "fieldtype": "Text",
+   "label": "Remarks"
+  },
+  {
+   "fieldname": "payment_section",
+   "fieldtype": "Section Break",
+   "label": "Payment Entry"
+  },
+  {
+   "allow_on_submit": 1,
+   "fieldname": "payment_entry",
+   "fieldtype": "Link",
+   "label": "Payment Entry",
+   "options": "Payment Entry",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_payment",
+   "fieldtype": "Column Break"
+  },
+  {
+   "allow_on_submit": 1,
+   "fieldname": "payment_entry_date",
+   "fieldtype": "Date",
+   "label": "Payment Entry Date",
+   "read_only": 1
+  },
+  {
+   "fieldname": "amended_from",
+   "fieldtype": "Link",
+   "label": "Amended From",
+   "no_copy": 1,
+   "options": "Payment Advice",
+   "print_hide": 1,
+   "read_only": 1
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "is_submittable": 1,
+ "links": [],
+ "modified": "2026-07-30 07:00:00",
+ "modified_by": "Administrator",
+ "module": "Sf Trading",
+ "name": "Payment Advice",
+ "naming_rule": "By \"Naming Series\" field",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "amend": 1,
+   "cancel": 1,
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Accounts Manager",
+   "share": 1,
+   "submit": 1,
+   "write": 1
+  },
+  {
+   "amend": 1,
+   "cancel": 1,
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Accountant",
+   "share": 1,
+   "submit": 1,
+   "write": 1
+  },
+  {
+   "amend": 1,
+   "cancel": 1,
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Finance Manager",
+   "share": 1,
+   "submit": 1,
+   "write": 1
+  },
+  {
+   "amend": 1,
+   "cancel": 1,
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "HO Accounts",
+   "share": 1,
+   "submit": 1,
+   "write": 1
+  },
+  {
+   "amend": 1,
+   "cancel": 1,
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Purchase Manager",
+   "share": 1,
+   "submit": 1,
+   "write": 1
+  },
+  {
+   "amend": 1,
+   "cancel": 1,
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "submit": 1,
+   "write": 1
+  }
+ ],
+ "search_fields": "party,party_name,status,payment_amount",
+ "show_title_field_in_link": 1,
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "party_name",
+ "track_changes": 1
+}

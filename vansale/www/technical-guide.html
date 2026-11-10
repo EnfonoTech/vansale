@@ -1,0 +1,889 @@
+<!-- technical-guide.html
+     The page shell — styles, sidebar, search and section behaviour — is the same one
+     user-guide.html uses. The two are generated from one source and differ only in their
+     labels, so a change to how the guides look or search belongs in BOTH files.
+     Content lives in docs/TECHNICAL_GUIDE.md; the controller is technical_guide.py
+     (underscore — a hyphenated www controller is never imported). -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{{ title }}</title>
+  <!-- Enfono standard: branded favicon on every www page. Point at a small (~96px)
+       client logo. Host in site public files (/files/<name>.png) or app assets
+       (/assets/<app>/images/<name>.png). Replace generic Frappe/Vite/Expo icons. -->
+  <link rel="icon" type="image/png" href="/files/app-favicon.png" />
+  <style>
+    /* ── Reset & Base ──────────────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html { scroll-behavior: smooth; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      font-size: 15px;
+      line-height: 1.7;
+      color: #1a1a2e;
+      background: #f5f6fa;
+      display: flex;
+      min-height: 100vh;
+    }
+
+    /* ── Sidebar ────────────────────────────────────────────────────────── */
+    .sidebar {
+      width: 260px;
+      min-height: 100vh;
+      background: #1a1a2e;
+      color: #c8cfe8;
+      position: fixed;
+      top: 0; left: 0;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      z-index: 100;
+    }
+    .sidebar-brand {
+      padding: 24px 20px 16px;
+      border-bottom: 1px solid rgba(255,255,255,0.08);
+    }
+    .sidebar-brand .logo-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 4px;
+    }
+    .sidebar-brand .logo-icon {
+      width: 36px; height: 36px;
+      background: linear-gradient(135deg, #2563eb, #7c3aed);
+      border-radius: 8px;
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0;
+    }
+    .sidebar-brand .logo-icon svg { width: 20px; height: 20px; stroke: #fff; fill: none; }
+    .sidebar-brand h1 { font-size: 15px; font-weight: 700; color: #fff; letter-spacing: -0.3px; }
+    .sidebar-brand p  { font-size: 11px; color: #6b7299; margin-top: 2px; }
+
+    .sidebar-nav { padding: 12px 0; flex: 1; }
+    .nav-group-label {
+      font-size: 10px; font-weight: 700; letter-spacing: 1.2px;
+      text-transform: uppercase; color: #4a5180;
+      padding: 12px 20px 4px;
+    }
+    .nav-item {
+      display: flex; align-items: center; gap: 10px;
+      padding: 8px 20px;
+      color: #9ba3c8;
+      text-decoration: none;
+      font-size: 13.5px;
+      border-left: 3px solid transparent;
+      transition: all 0.15s;
+    }
+    .nav-item:hover, .nav-item.active {
+      background: rgba(255,255,255,0.06);
+      color: #fff;
+      border-left-color: #2563eb;
+    }
+    .nav-item svg { width: 16px; height: 16px; stroke: currentColor; fill: none; flex-shrink: 0; }
+
+    .sidebar-footer {
+      padding: 16px 20px;
+      border-top: 1px solid rgba(255,255,255,0.08);
+      font-size: 11px;
+      color: #4a5180;
+    }
+    .sidebar-footer a { color: #6b7299; text-decoration: none; }
+
+    /* ── Main Content ───────────────────────────────────────────────────── */
+    .main {
+      margin-left: 260px;
+      flex: 1;
+      padding: 0;
+      min-height: 100vh;
+    }
+
+    .page-header {
+      background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+      color: #fff;
+      padding: 48px 48px 40px;
+      position: relative;
+      overflow: hidden;
+    }
+    .page-header::after {
+      content: '';
+      position: absolute;
+      right: -60px; top: -60px;
+      width: 300px; height: 300px;
+      background: radial-gradient(circle, rgba(37,99,235,0.3) 0%, transparent 70%);
+      border-radius: 50%;
+    }
+    .page-header .tag {
+      display: inline-block;
+      background: rgba(37,99,235,0.3);
+      border: 1px solid rgba(37,99,235,0.5);
+      color: #93c5fd;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      padding: 3px 10px;
+      border-radius: 20px;
+      margin-bottom: 12px;
+    }
+    .page-header h1 { font-size: 32px; font-weight: 800; letter-spacing: -0.5px; margin-bottom: 8px; }
+    .page-header p  { font-size: 15px; color: #93afd4; max-width: 560px; }
+    .page-header .meta {
+      display: flex; gap: 20px; margin-top: 20px; flex-wrap: wrap;
+    }
+    .page-header .meta-item {
+      display: flex; align-items: center; gap: 6px;
+      font-size: 12px; color: #64748b;
+    }
+    .page-header .meta-item svg { width: 14px; height: 14px; stroke: #4a7fb5; fill: none; }
+
+    .content-body { padding: 40px 48px; max-width: 900px; }
+
+    /* ── Section ───────────────────────────────────────────────────────── */
+    .section { margin-bottom: 56px; scroll-margin-top: 24px; }
+    .section-title {
+      display: flex; align-items: center; gap: 12px;
+      font-size: 22px; font-weight: 800;
+      color: #1a1a2e; margin-bottom: 6px;
+      letter-spacing: -0.3px;
+    }
+    .section-title .icon-wrap {
+      width: 38px; height: 38px;
+      border-radius: 10px;
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0;
+    }
+    .section-title .icon-wrap svg { width: 20px; height: 20px; stroke: #fff; fill: none; }
+    .section-subtitle {
+      color: #64748b; font-size: 14px; margin-bottom: 24px;
+      padding-left: 50px;
+    }
+
+    /* ── Flow Steps ─────────────────────────────────────────────────────── */
+    .steps { position: relative; }
+    .step {
+      display: flex; gap: 20px;
+      margin-bottom: 8px;
+      position: relative;
+    }
+    .step-left {
+      display: flex; flex-direction: column; align-items: center;
+      flex-shrink: 0; width: 36px;
+    }
+    .step-num {
+      width: 36px; height: 36px;
+      border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 13px; font-weight: 800;
+      flex-shrink: 0; position: relative; z-index: 1;
+    }
+    .step-line {
+      width: 2px; flex: 1; min-height: 20px;
+      background: #e2e8f0; margin-top: 4px; margin-bottom: 4px;
+    }
+    .step:last-child .step-line { display: none; }
+    .step-body {
+      background: #fff;
+      border: 1px solid #e8ecf4;
+      border-radius: 12px;
+      padding: 16px 20px;
+      flex: 1;
+      margin-bottom: 12px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+    }
+    .step-body h3 {
+      font-size: 14px; font-weight: 700;
+      color: #1a1a2e; margin-bottom: 8px;
+    }
+    .step-body p { font-size: 13.5px; color: #475569; margin-bottom: 6px; }
+    .step-body ul { padding-left: 18px; }
+    .step-body li { font-size: 13.5px; color: #475569; margin-bottom: 3px; }
+    .step-body li strong { color: #1e293b; }
+
+    /* ── Info box ───────────────────────────────────────────────────────── */
+    .info-box {
+      border-radius: 10px;
+      padding: 14px 16px;
+      margin: 12px 0;
+      font-size: 13px;
+      display: flex; gap: 10px; align-items: flex-start;
+    }
+    .info-box svg { width: 16px; height: 16px; flex-shrink: 0; margin-top: 1px; }
+    .info-box.blue  { background: #eff6ff; border: 1px solid #bfdbfe; color: #1e40af; }
+    .info-box.blue svg { stroke: #2563eb; fill: none; }
+    .info-box.green { background: #f0fdf4; border: 1px solid #bbf7d0; color: #166534; }
+    .info-box.green svg { stroke: #16a34a; fill: none; }
+    .info-box.amber { background: #fffbeb; border: 1px solid #fde68a; color: #92400e; }
+    .info-box.amber svg { stroke: #d97706; fill: none; }
+    .info-box.red   { background: #fef2f2; border: 1px solid #fecaca; color: #991b1b; }
+    .info-box.red svg { stroke: #dc2626; fill: none; }
+
+    /* ── Field Table ─────────────────────────────────────────────────────── */
+    .field-table { width: 100%; border-collapse: collapse; font-size: 13px; margin: 12px 0; }
+    .field-table th {
+      background: #f1f5f9;
+      padding: 8px 12px;
+      text-align: left;
+      font-weight: 700;
+      color: #475569;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      border-bottom: 1px solid #e2e8f0;
+    }
+    .field-table td {
+      padding: 9px 12px;
+      border-bottom: 1px solid #f1f5f9;
+      vertical-align: top;
+    }
+    .field-table tr:last-child td { border-bottom: none; }
+    .field-table tr:hover td { background: #f8fafc; }
+    .field-table .field-name { font-weight: 600; color: #1e293b; }
+    .field-table .field-auto {
+      display: inline-flex; align-items: center; gap: 4px;
+      background: #eff6ff; color: #1d4ed8;
+      font-size: 10px; font-weight: 700; letter-spacing: 0.5px;
+      padding: 2px 6px; border-radius: 4px; text-transform: uppercase;
+    }
+    .field-table .field-req {
+      display: inline-flex; align-items: center; gap: 4px;
+      background: #fef2f2; color: #dc2626;
+      font-size: 10px; font-weight: 700;
+      padding: 2px 6px; border-radius: 4px;
+    }
+
+    /* ── Status Badges ───────────────────────────────────────────────────── */
+    .badge-grid { display: flex; flex-wrap: wrap; gap: 10px; margin: 12px 0; }
+    .badge {
+      display: inline-flex; align-items: center; gap: 7px;
+      padding: 6px 14px; border-radius: 20px;
+      font-size: 13px; font-weight: 600;
+    }
+    .badge .dot { width: 8px; height: 8px; border-radius: 50%; }
+    .badge.grey   { background: #f1f5f9; color: #475569; }
+    .badge.grey .dot   { background: #94a3b8; }
+    .badge.blue   { background: #eff6ff; color: #1e40af; }
+    .badge.blue .dot   { background: #3b82f6; }
+    .badge.purple { background: #f5f3ff; color: #5b21b6; }
+    .badge.purple .dot { background: #7c3aed; }
+    .badge.orange { background: #fffbeb; color: #92400e; }
+    .badge.orange .dot { background: #f59e0b; }
+    .badge.green  { background: #f0fdf4; color: #166534; }
+    .badge.green .dot  { background: #16a34a; }
+    .badge.red    { background: #fef2f2; color: #991b1b; }
+    .badge.red .dot    { background: #ef4444; }
+
+    /* ── Report Cards ────────────────────────────────────────────────────── */
+    .report-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 16px; margin: 16px 0; }
+    .report-card {
+      background: #fff;
+      border: 1px solid #e8ecf4;
+      border-radius: 12px;
+      padding: 20px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+    }
+    .report-card .report-icon {
+      width: 40px; height: 40px;
+      border-radius: 10px;
+      display: flex; align-items: center; justify-content: center;
+      margin-bottom: 12px;
+    }
+    .report-card .report-icon svg { width: 22px; height: 22px; stroke: #fff; fill: none; }
+    .report-card h3 { font-size: 15px; font-weight: 700; color: #1a1a2e; margin-bottom: 6px; }
+    .report-card p  { font-size: 13px; color: #64748b; line-height: 1.5; margin-bottom: 10px; }
+    .report-card .filters-label { font-size: 11px; font-weight: 700; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; }
+    .filter-tag {
+      display: inline-block;
+      background: #f1f5f9;
+      color: #475569;
+      font-size: 11px;
+      padding: 2px 8px;
+      border-radius: 4px;
+      margin: 2px;
+    }
+
+    /* ── Navigation table ────────────────────────────────────────────────── */
+    .nav-table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+    .nav-table td { padding: 10px 14px; border-bottom: 1px solid #f1f5f9; }
+    .nav-table tr:last-child td { border-bottom: none; }
+    .nav-table .path {
+      font-family: "SFMono-Regular", Consolas, monospace;
+      font-size: 12px;
+      color: #2563eb;
+      background: #eff6ff;
+      padding: 3px 8px;
+      border-radius: 5px;
+    }
+    .nav-table tr:hover td { background: #f8fafc; }
+
+    /* ── Flow Diagram ────────────────────────────────────────────────────── */
+    .flow-diagram {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      flex-wrap: wrap;
+      margin: 16px 0;
+    }
+    .flow-node {
+      padding: 8px 16px;
+      border-radius: 8px;
+      font-size: 13px;
+      font-weight: 600;
+    }
+    .flow-arrow {
+      font-size: 18px;
+      color: #94a3b8;
+    }
+
+    /* ── Callout blocks ──────────────────────────────────────────────────── */
+    .callout {
+      border-left: 4px solid;
+      padding: 14px 18px;
+      border-radius: 0 10px 10px 0;
+      margin: 16px 0;
+      font-size: 13.5px;
+    }
+    .callout.blue  { border-color: #3b82f6; background: #eff6ff; color: #1e3a8a; }
+    .callout.green { border-color: #16a34a; background: #f0fdf4; color: #14532d; }
+    .callout h4    { font-size: 13px; font-weight: 700; margin-bottom: 4px; }
+
+    /* ── Code ────────────────────────────────────────────────────────────── */
+    code {
+      font-family: "SFMono-Regular", Consolas, monospace;
+      background: #f1f5f9;
+      color: #0f172a;
+      font-size: 12.5px;
+      padding: 1px 6px;
+      border-radius: 4px;
+    }
+
+    /* ── Access box ──────────────────────────────────────────────────────── */
+    .access-box {
+      background: #1a1a2e;
+      border-radius: 12px;
+      padding: 24px;
+      color: #e2e8f0;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      margin: 16px 0;
+    }
+    .access-box .access-item label {
+      display: block;
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      color: #4a5180;
+      margin-bottom: 4px;
+    }
+    .access-box .access-item value {
+      display: block;
+      font-family: "SFMono-Regular", Consolas, monospace;
+      font-size: 14px;
+      color: #93c5fd;
+    }
+    .access-box .access-item value.url { color: #34d399; text-decoration: none; }
+
+    /* ── Roles table ────────────────────────────────────────────────────── */
+    .roles-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    .roles-table th {
+      background: #1a1a2e; color: #9ba3c8;
+      padding: 10px 14px;
+      text-align: left;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .roles-table td { padding: 9px 14px; border-bottom: 1px solid #f1f5f9; }
+    .roles-table tr:hover td { background: #f8fafc; }
+    .perm-yes { color: #16a34a; font-weight: 700; }
+    .perm-no  { color: #d1d5db; }
+
+    /* ── Divider ─────────────────────────────────────────────────────────── */
+    .divider { border: none; border-top: 1px solid #e8ecf4; margin: 40px 0; }
+
+    /* ── Color coding for section icons ─────────────────────────────────── */
+    .ic-blue   { background: linear-gradient(135deg, #3b82f6, #1d4ed8); }
+    .ic-purple { background: linear-gradient(135deg, #7c3aed, #4c1d95); }
+    .ic-teal   { background: linear-gradient(135deg, #0891b2, #0e7490); }
+    .ic-green  { background: linear-gradient(135deg, #16a34a, #14532d); }
+    .ic-amber  { background: linear-gradient(135deg, #d97706, #92400e); }
+    .ic-rose   { background: linear-gradient(135deg, #e11d48, #9f1239); }
+    .ic-indigo { background: linear-gradient(135deg, #4f46e5, #312e81); }
+
+    /* ── Print ───────────────────────────────────────────────────────────── */
+    @media print {
+      .sidebar { display: none; }
+      .main { margin-left: 0; }
+      .page-header { background: #1a1a2e !important; -webkit-print-color-adjust: exact; }
+    }
+
+    /* ── Responsive ──────────────────────────────────────────────────────── */
+    @media (max-width: 768px) {
+      .sidebar { width: 100%; min-height: auto; position: relative; }
+      .main { margin-left: 0; }
+      .content-body { padding: 24px 20px; }
+      .page-header { padding: 32px 24px; }
+      .access-box { grid-template-columns: 1fr; }
+      .report-cards { grid-template-columns: 1fr; }
+    }
+  </style>
+
+<style>
+/* ── Rendered-markdown typography ────────────────────────────────────────────
+   The house stylesheet was written for hand-authored .section markup. Everything
+   below styles what md_to_html actually emits, so the guide breathes: real cell
+   padding, vertical rhythm between blocks, and tables that scroll instead of
+   crushing their columns on a narrow screen. */
+.content-body { padding: 44px 52px 72px; max-width: 1060px; }
+
+.content-body > h1:first-child { display: none; }   /* the page header already says it */
+
+.content-body h2 {
+  font-size: 1.6rem; font-weight: 700; line-height: 1.3;
+  margin: 3.2rem 0 1.1rem; padding-bottom: .6rem;
+  border-bottom: 2px solid #e6eaf0; color: #14213d; scroll-margin-top: 24px;
+}
+.content-body h2:first-of-type { margin-top: .6rem; }
+.content-body h3 {
+  font-size: 1.18rem; font-weight: 650; margin: 2.4rem 0 .7rem;
+  color: #1c3559; scroll-margin-top: 24px;
+}
+.content-body h4 {
+  font-size: 1rem; font-weight: 650; margin: 1.7rem 0 .5rem; color: #33507a;
+  text-transform: none; letter-spacing: 0;
+}
+
+.content-body p { margin: 0 0 1.15rem; line-height: 1.75; font-size: .95rem; color: #2c3b52; }
+.content-body strong { color: #14213d; font-weight: 650; }
+.content-body hr { border: 0; border-top: 1px solid #e6eaf0; margin: 2.8rem 0; }
+
+.content-body ul, .content-body ol { margin: 0 0 1.3rem; padding-left: 1.5rem; }
+.content-body li { margin-bottom: .55rem; line-height: 1.7; font-size: .95rem; color: #2c3b52; }
+.content-body li > strong:first-child { display: inline-block; margin-bottom: .15rem; }
+.content-body ol > li { padding-left: .2rem; }
+
+/* tables: the main offender — no padding, no separation, no scroll */
+.content-body .table-wrap { overflow-x: auto; margin: 1.4rem 0 2.2rem;
+  border: 1px solid #e2e8f0; border-radius: 10px; background: #fff;
+  box-shadow: 0 1px 2px rgba(20,33,61,.04); }
+.content-body table { width: 100%; border-collapse: separate; border-spacing: 0;
+  font-size: .89rem; margin: 0; }
+.content-body thead th {
+  background: #f4f7fb; color: #14213d; font-weight: 650; text-align: left;
+  padding: .8rem 1rem; border-bottom: 1px solid #e2e8f0; white-space: nowrap;
+}
+.content-body tbody td {
+  padding: .78rem 1rem; border-bottom: 1px solid #eef2f7; vertical-align: top;
+  line-height: 1.6; color: #2c3b52;
+}
+.content-body tbody tr:last-child td { border-bottom: 0; }
+.content-body tbody tr:nth-child(even) { background: #fafbfd; }
+.content-body tbody td:first-child { font-weight: 550; color: #14213d; }
+.content-body table.table-bordered { border: 0; }
+
+/* code + the flow diagrams written as fenced blocks */
+.content-body code {
+  background: #f1f4f9; color: #1c3559; padding: .12rem .38rem;
+  border-radius: 4px; font-size: .85em; border: 1px solid #e6eaf0;
+}
+.content-body pre {
+  background: #14213d; color: #e8eef7; padding: 1.1rem 1.25rem; border-radius: 10px;
+  overflow-x: auto; margin: 1.3rem 0 2rem; line-height: 1.6; font-size: .85rem;
+}
+.content-body pre code { background: none; border: 0; color: inherit; padding: 0; }
+
+.content-body blockquote {
+  margin: 1.4rem 0 2rem; padding: .9rem 1.2rem; border-left: 3px solid #4a7fb5;
+  background: #f4f8fc; border-radius: 0 8px 8px 0; color: #1c3559;
+}
+.content-body a { color: #2f6fb3; text-decoration: none; border-bottom: 1px solid #cfe0f0; }
+.content-body a:hover { border-bottom-color: #2f6fb3; }
+
+@media (max-width: 900px) {
+  .content-body { padding: 28px 20px 56px; }
+  .content-body h2 { font-size: 1.35rem; margin-top: 2.4rem; }
+}
+
+/* ── Search ──────────────────────────────────────────────────────────────────
+   A handbook is only as good as the reader's ability to land on the one
+   paragraph they need. The box filters the sidebar and the body together, so
+   what is listed is exactly what is left on the page. */
+.search-wrap { padding: 14px 16px 10px; border-bottom: 1px solid rgba(255,255,255,.08); }
+.search-box { position: relative; }
+.search-box input {
+  width: 100%; padding: 8px 28px 8px 30px;
+  background: rgba(255,255,255,.07); border: 1px solid rgba(255,255,255,.12);
+  border-radius: 8px; color: #fff; font-size: 13px; font-family: inherit;
+}
+.search-box input::placeholder { color: #6b7299; }
+/* the browser draws its own clear cross on a search input; ours is the one that
+   also resets the page, so hide the native one rather than show two */
+.search-box input::-webkit-search-cancel-button,
+.search-box input::-webkit-search-decoration { -webkit-appearance: none; appearance: none; }
+.search-box input:focus { outline: none; border-color: #2563eb; background: rgba(255,255,255,.1); }
+.search-box .s-icon { position: absolute; left: 9px; top: 50%; transform: translateY(-50%);
+  color: #6b7299; font-size: 13px; pointer-events: none; }
+.search-box .s-clear { position: absolute; right: 6px; top: 50%; transform: translateY(-50%);
+  background: none; border: 0; color: #6b7299; cursor: pointer; font-size: 15px;
+  padding: 2px 5px; line-height: 1; display: none; }
+.search-box .s-clear:hover { color: #fff; }
+.search-hint { font-size: 10.5px; color: #4a5180; margin-top: 6px; }
+.search-count { font-size: 11px; color: #93c5fd; margin-top: 6px; display: none; }
+
+/* ── Sidebar nav: two levels, second level folds away ───────────────────── */
+.nav-sub { display: none; }
+.nav-item.open + .nav-sub, .nav-sub.show { display: block; }
+.nav-item.sub { padding-left: 42px; font-size: 12.5px; color: #7b83ab; }
+.nav-item.active { background: rgba(37,99,235,.16); color: #fff; border-left-color: #2563eb; }
+.nav-item .nav-caret { margin-left: auto; font-size: 9px; color: #4a5180; transition: transform .15s; }
+.nav-item.open .nav-caret { transform: rotate(90deg); }
+
+/* ── Body sections, built at load so each one can be hidden or folded ───── */
+.guide-sec { margin-bottom: 1rem; }
+/* the heading rules above use :first-of-type, which once every h2 sits in its own
+   wrapper would give all of them the reduced top margin and run the sections together */
+.guide-sec > h2 { margin-top: 3.2rem; }
+.guide-sec:first-of-type > h2 { margin-top: .6rem; }
+.guide-sec.hidden, .guide-sub.hidden { display: none; }
+.guide-sec > h2 { cursor: pointer; }
+.guide-sec > h2::after {
+  content: "–"; float: right; color: #b8c2d4; font-weight: 400; font-size: 1.1rem;
+}
+.guide-sec.folded > h2::after { content: "+"; }
+.guide-sec.folded > *:not(h2) { display: none; }
+
+mark.hit { background: #fde68a; color: #14213d; padding: 0 2px; border-radius: 3px; }
+
+.no-results {
+  display: none; padding: 2.5rem 1rem; text-align: center; color: #64748b;
+  background: #fff; border: 1px dashed #cbd5e1; border-radius: 12px; margin-top: 1.5rem;
+}
+.no-results strong { color: #14213d; }
+
+.to-top {
+  position: fixed; right: 26px; bottom: 26px; width: 42px; height: 42px;
+  border-radius: 50%; border: 0; background: #1a1a2e; color: #fff; cursor: pointer;
+  font-size: 17px; box-shadow: 0 4px 14px rgba(20,33,61,.28); display: none; z-index: 90;
+}
+.to-top:hover { background: #2563eb; }
+
+@media print {
+  .search-wrap, .to-top, .no-results { display: none !important; }
+  .guide-sec.folded > *:not(h2) { display: revert !important; }
+  .guide-sec > h2::after { content: "" !important; }
+}
+</style>
+</head>
+<body>
+
+<!-- ════════════════════════════════════════════════════════
+     SIDEBAR
+═══════════════════════════════════════════════════════════ -->
+<aside class="sidebar">
+  <div class="sidebar-brand">
+    <div class="logo-row">
+      <div class="logo-icon">SF</div>
+      <div>
+        <h1>SF Trading</h1>
+        <p>Technical Guide</p>
+      </div>
+    </div>
+  </div>
+  <div class="search-wrap">
+    <div class="search-box">
+      <span class="s-icon">&#9906;</span>
+      <input type="search" id="guide-search" placeholder="Search the technical guide"
+             autocomplete="off" spellcheck="false" aria-label="Search the technical guide" />
+      <button class="s-clear" id="guide-search-clear" type="button" aria-label="Clear search">&times;</button>
+    </div>
+    <div class="search-hint">Press <code>/</code> to search, <code>Esc</code> to clear</div>
+    <div class="search-count" id="guide-search-count"></div>
+  </div>
+  <nav class="sidebar-nav" id="guide-index">
+    <div class="nav-group-label">On this page</div>
+  </nav>
+  <div class="sidebar-footer">Enfono Technologies</div>
+</aside>
+
+<main class="main">
+  <div class="page-header">
+    <div class="tag">For your system administrator</div>
+    <h1>{{ title }}</h1>
+    <p class="section-subtitle">Steel Force Trading WLL · configuring the live system</p>
+    <div class="meta">
+      <div class="meta-item">Rendered from docs/TECHNICAL_GUIDE.md</div>
+      <div class="meta-item">{{ updated_on }}</div>
+    </div>
+  </div>
+
+  <div class="content-body section" id="guide-body">
+    {{ guide_html }}
+  </div>
+  <div class="no-results" id="guide-no-results">
+    Nothing in this guide matches <strong id="guide-no-results-term"></strong>.<br />
+    Try a shorter word, or a phrase from the error message you are looking at.
+  </div>
+</main>
+
+<button class="to-top" id="guide-to-top" type="button" aria-label="Back to top">&uarr;</button>
+
+<script>
+/* The handbook is one rendered markdown document. Everything below turns that flat
+   run of headings and paragraphs into something a reader can navigate: real sections
+   that fold, a two-level index, and a search that filters the sidebar and the page
+   together so what is listed is exactly what is left. */
+(function () {
+  var body, nav, input, clearBtn, countEl, noRes, noResTerm, toTop;
+  var sections = [], subs = [];
+
+  function slug(text, fallback) {
+    var s = String(text).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+    return s.slice(0, 60) || fallback;
+  }
+
+  /* ── 1. Group the flat output into sections (per h2) and sub-blocks (per h3) ── */
+  function buildSections() {
+    var nodes = Array.prototype.slice.call(body.childNodes);
+    var section = null, sub = null;
+
+    nodes.forEach(function (node) {
+      var isEl = node.nodeType === 1;
+
+      if (isEl && node.tagName === "H2") {
+        section = document.createElement("div");
+        section.className = "guide-sec";
+        node.id = slug(node.textContent, "sec-" + sections.length);
+        body.insertBefore(section, node);
+        section.appendChild(node);
+        sections.push(section);
+        sub = null;
+        return;
+      }
+      if (!section) return;                 // the intro above the first heading stays put
+
+      if (isEl && node.tagName === "H3") {
+        sub = document.createElement("div");
+        sub.className = "guide-sub";
+        node.id = slug(node.textContent, "sub-" + subs.length);
+        section.appendChild(sub);
+        subs.push(sub);
+        sub.appendChild(node);
+        return;
+      }
+      (sub || section).appendChild(node);
+    });
+  }
+
+  /* ── 2. Sidebar index, two levels, the second folded until its section is open ── */
+  function buildIndex() {
+    sections.forEach(function (section) {
+      var h2 = section.querySelector(":scope > h2");
+      var mySubs = Array.prototype.slice.call(section.querySelectorAll(":scope > .guide-sub > h3"));
+
+      var a = document.createElement("a");
+      a.className = "nav-item";
+      a.href = "#" + h2.id;
+      a.textContent = h2.textContent;
+      a.dataset.target = h2.id;
+      if (mySubs.length) {
+        var caret = document.createElement("span");
+        caret.className = "nav-caret";
+        caret.textContent = "▶";
+        a.appendChild(caret);
+      }
+      nav.appendChild(a);
+
+      if (!mySubs.length) return;
+      var group = document.createElement("div");
+      group.className = "nav-sub";
+      mySubs.forEach(function (h3) {
+        var s = document.createElement("a");
+        s.className = "nav-item sub";
+        s.href = "#" + h3.id;
+        s.textContent = h3.textContent;
+        s.dataset.target = h3.id;
+        group.appendChild(s);
+      });
+      nav.appendChild(group);
+    });
+  }
+
+  /* ── 3. Highlighting. Unwrapping marks is safer than restoring saved HTML,
+        because every element reference stays valid. ── */
+  var SKIP = { MARK: 1, PRE: 1, CODE: 1, SCRIPT: 1, STYLE: 1 };
+
+  function unhighlight(root) {
+    root.querySelectorAll("mark.hit").forEach(function (m) {
+      m.parentNode.replaceChild(document.createTextNode(m.textContent), m);
+    });
+    root.normalize();
+  }
+
+  function highlight(root, term) {
+    var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+      acceptNode: function (n) {
+        if (!n.nodeValue.trim()) return NodeFilter.FILTER_REJECT;
+        if (SKIP[n.parentNode.nodeName]) return NodeFilter.FILTER_REJECT;
+        return n.nodeValue.toLowerCase().indexOf(term) === -1
+          ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT;
+      }
+    });
+    var hits = [], node;
+    while ((node = walker.nextNode())) hits.push(node);
+
+    hits.forEach(function (text) {
+      var lower = text.nodeValue.toLowerCase();
+      var frag = document.createDocumentFragment();
+      var at = 0, found;
+      while ((found = lower.indexOf(term, at)) !== -1) {
+        if (found > at) frag.appendChild(document.createTextNode(text.nodeValue.slice(at, found)));
+        var mark = document.createElement("mark");
+        mark.className = "hit";
+        mark.textContent = text.nodeValue.slice(found, found + term.length);
+        frag.appendChild(mark);
+        at = found + term.length;
+      }
+      if (at < text.nodeValue.length) frag.appendChild(document.createTextNode(text.nodeValue.slice(at)));
+      text.parentNode.replaceChild(frag, text);
+    });
+  }
+
+  /* ── 4. Search ── */
+  function ownText(section) {
+    // the section's own words, not counting its sub-blocks
+    var clone = section.cloneNode(true);
+    clone.querySelectorAll(".guide-sub").forEach(function (s) { s.remove(); });
+    return clone.textContent.toLowerCase();
+  }
+
+  function resetSearch() {
+    unhighlight(body);
+    sections.forEach(function (s) { s.classList.remove("hidden"); });
+    subs.forEach(function (s) { s.classList.remove("hidden"); });
+    nav.querySelectorAll(".nav-item").forEach(function (a) { a.style.display = ""; });
+    nav.querySelectorAll(".nav-sub").forEach(function (g) { g.classList.remove("show"); });
+    countEl.textContent = "";
+    countEl.style.display = "none";
+    noRes.style.display = "none";
+    clearBtn.style.display = "none";
+  }
+
+  function runSearch(raw) {
+    var term = raw.trim().toLowerCase();
+    clearBtn.style.display = term ? "block" : "none";
+    if (term.length < 2) { resetSearch(); return; }
+
+    unhighlight(body);
+    var secMatches = 0, subMatches = 0, visibleIds = {};
+
+    sections.forEach(function (section) {
+      var mySubs = Array.prototype.slice.call(section.querySelectorAll(":scope > .guide-sub"));
+      var selfHit = ownText(section).indexOf(term) !== -1;
+      var subHits = 0;
+
+      mySubs.forEach(function (sub) {
+        var hit = sub.textContent.toLowerCase().indexOf(term) !== -1;
+        sub.classList.toggle("hidden", !hit && !selfHit);
+        if (hit) {
+          subHits++;
+          visibleIds[sub.querySelector("h3").id] = 1;
+          highlight(sub, term);
+        }
+      });
+
+      var keep = selfHit || subHits > 0;
+      section.classList.toggle("hidden", !keep);
+      if (keep) {
+        section.classList.remove("folded");           // never hide a match behind a fold
+        secMatches++;
+        subMatches += subHits;
+        visibleIds[section.querySelector(":scope > h2").id] = 1;
+        if (selfHit) highlight(section, term);
+      }
+    });
+
+    // the index shows only what survived
+    nav.querySelectorAll(".nav-item").forEach(function (a) {
+      a.style.display = visibleIds[a.dataset.target] ? "" : "none";
+    });
+    nav.querySelectorAll(".nav-sub").forEach(function (g) { g.classList.add("show"); });
+
+    var said = secMatches + (secMatches === 1 ? " section" : " sections");
+    if (subMatches) said += ", " + subMatches + (subMatches === 1 ? " topic" : " topics");
+    countEl.textContent = secMatches ? said : "nothing found";
+    countEl.style.display = "block";
+    noResTerm.textContent = '"' + raw.trim() + '"';
+    noRes.style.display = secMatches ? "none" : "block";
+  }
+
+  /* ── 5. Which section am I reading ── */
+  function trackActive() {
+    if (!("IntersectionObserver" in window)) return;
+    var heads = body.querySelectorAll(".guide-sec > h2, .guide-sub > h3");
+    var seen = new IntersectionObserver(function (entries) {
+      entries.forEach(function (e) {
+        if (!e.isIntersecting) return;
+        nav.querySelectorAll(".nav-item.active").forEach(function (a) { a.classList.remove("active"); });
+        var link = nav.querySelector('.nav-item[data-target="' + e.target.id + '"]');
+        if (!link) return;
+        link.classList.add("active");
+        var group = link.classList.contains("sub") ? link.parentNode : link.nextElementSibling;
+        if (group && group.classList.contains("nav-sub")) group.classList.add("show");
+      });
+    }, { rootMargin: "-10% 0px -80% 0px" });
+    heads.forEach(function (h) { seen.observe(h); });
+  }
+
+  function wire() {
+    input.addEventListener("input", function () { runSearch(input.value); });
+    clearBtn.addEventListener("click", function () { input.value = ""; resetSearch(); input.focus(); });
+
+    document.addEventListener("keydown", function (e) {
+      if (e.key === "/" && document.activeElement !== input) { e.preventDefault(); input.focus(); }
+      if (e.key === "Escape" && document.activeElement === input) { input.value = ""; resetSearch(); input.blur(); }
+    });
+
+    // fold a section by clicking its heading, so a long page can be collapsed to its index
+    sections.forEach(function (section) {
+      section.querySelector(":scope > h2").addEventListener("click", function () {
+        section.classList.toggle("folded");
+      });
+    });
+
+    nav.addEventListener("click", function (e) {
+      var link = e.target.closest(".nav-item");
+      if (!link || link.classList.contains("sub")) return;
+      var group = link.nextElementSibling;
+      if (group && group.classList.contains("nav-sub")) group.classList.add("show");
+    });
+
+    window.addEventListener("scroll", function () {
+      toTop.style.display = window.scrollY > 600 ? "block" : "none";
+    });
+    toTop.addEventListener("click", function () { window.scrollTo({ top: 0, behavior: "smooth" }); });
+  }
+
+  document.addEventListener("DOMContentLoaded", function () {
+    body = document.getElementById("guide-body");
+    nav = document.getElementById("guide-index");
+    input = document.getElementById("guide-search");
+    clearBtn = document.getElementById("guide-search-clear");
+    countEl = document.getElementById("guide-search-count");
+    noRes = document.getElementById("guide-no-results");
+    noResTerm = document.getElementById("guide-no-results-term");
+    toTop = document.getElementById("guide-to-top");
+    if (!body || !nav) return;
+
+    buildSections();
+    buildIndex();
+    trackActive();
+    wire();
+  });
+})();
+</script>
+</body>
+</html>

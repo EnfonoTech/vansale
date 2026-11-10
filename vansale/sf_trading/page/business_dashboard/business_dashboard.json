@@ -1,0 +1,24 @@
+{
+ "content": null,
+ "creation": "2026-08-02 05:00:00.000000",
+ "docstatus": 0,
+ "doctype": "Page",
+ "idx": 0,
+ "modified": "2026-08-02 05:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Sf Trading",
+ "name": "business-dashboard",
+ "owner": "Administrator",
+ "page_name": "business-dashboard",
+ "roles": [
+  {"role": "Accounts Manager"},
+  {"role": "Accounts User"},
+  {"role": "Bahrain Accountant"},
+  {"role": "General Manager"},
+  {"role": "Finance Manager"}
+ ],
+ "script": null,
+ "standard": "Yes",
+ "style": null,
+ "title": "Business Dashboard"
+}

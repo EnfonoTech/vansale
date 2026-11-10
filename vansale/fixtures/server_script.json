@@ -1,0 +1,16 @@
+[
+ {
+  "name": "comment",
+  "script_type": "DocType Event",
+  "reference_doctype": "Purchase Invoice",
+  "event_frequency": "All",
+  "doctype_event": "After Save",
+  "allow_guest": 0,
+  "disabled": 1,
+  "script": "# Check if rejection reason exists in doc\nrejection_reason = doc.get(\"rejection_reason\") or doc.get(\"remarks\")\n\nif rejection_reason and doc.docstatus == 0:\n    frappe.get_doc({\n        \"doctype\": \"Comment\",\n        \"comment_type\": \"Comment\",\n        \"reference_doctype\": doc.doctype,\n        \"reference_name\": doc.name,\n        \"content\": f\"Rejected: {rejection_reason}\",\n        \"comment_by\": frappe.session.user\n    }).insert(ignore_permissions=True)\n    frappe.db.commit()\n    # Clear to prevent duplicate on next save\n    frappe.db.set_value(doc.doctype, doc.name, \"remarks\", \"\")",
+  "enable_rate_limit": 0,
+  "rate_limit_count": 5,
+  "rate_limit_seconds": 86400,
+  "doctype": "Server Script"
+ }
+]

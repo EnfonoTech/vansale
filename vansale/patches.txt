@@ -1,4 +1,14 @@
 # Patches executed in sequence on `bench migrate`.
 # Append `module.path.function_name` per line.
+
+[pre_model_sync]
+vansale.patches.v1_1.adopt_sf_trading_module
 vansale.patches.v1_0.install_vansale_tax_invoice
 vansale.patches.v1_0.reset_pins_to_four_digit
+
+[post_model_sync]
+# merged from the sf_trading app
+vansale.sf_trading.patches.v0_1.rename_invoice_due_overdue_report
+vansale.sf_trading.patches.fix_branch_config_mop_child_table
+vansale.sf_trading.patches.v0_1.approver_employee_to_user
+vansale.sf_trading.patches.v0_1.loyalty_invoice_to_journal_rows

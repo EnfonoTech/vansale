@@ -1,0 +1,456 @@
+<!-- Payables Ageing Summary — Print Format for the ACCOUNTS PAYABLE SUMMARY report.
+
+     This file is the source of the "Payables Ageing Summary" Print Format
+     record on the site. The record is the live copy; keep the two in step.
+
+        Print Format For : Report
+        Report           : Accounts Payable Summary
+        Print Format Type: JS          (client-side micro-template, plain JS)
+        Custom Format    : ticked
+        PDF Generator    : wkhtmltopdf
+
+     Unlike the Statement of Account, this is a COMPANY-WIDE listing: one line
+     per party, every party in the filter. It is not addressed to anybody, so
+     there is no supplier block and no party filter is expected.
+
+     Landscape by design. frappe/public/js/frappe/microtemplate.js render_grid
+     already forces landscape once a report has more than ten columns, and this
+     one has sixteen, so the wrapper and this stylesheet agree.
+
+     Page furniture
+     --------------
+     The column band lives in a real <thead>, so the browser and wkhtmltopdf
+     both repeat it on every page — a long party listing runs to several sheets.
+     This template deliberately does NOT define #header-html or #footer-html:
+     frappe/public/html/print_template.html already emits those around this
+     content when Print Settings has "Repeat Header and Footer", and a second
+     pair collides with it.
+
+     Leave "With Letter head" UNTICKED — the artwork at the top is fetched and
+     drawn here, and ticking the box makes the wrapper draw it a second time.
+
+     NO APOSTROPHES anywhere in this file. frappe.template.compile builds the
+     render function by quoting literal text with single quotes and escapes only
+     the FIRST apostrophe in each literal run, so a second one ends the string
+     early and the format dies with "missing ) after argument list".
+
+     Row shape, confirmed against this bench (erpnext 15.116, live prod data):
+       party_type, party, advance, invoiced, paid, credit_note, outstanding,
+       range1..rangeN, total_due, supplier_group, currency
+     The debit note column keeps the FIELDNAME credit_note — the report only
+     relabels it for a payable, it does not rename the field. party_name only
+     exists when the naming setting is Naming Series; on this site Supplier
+     Name is the naming, so party IS the readable name and the template falls
+     back to it.
+
+     Two figures the report computes that are worth understanding here:
+       total_due = sum(range1..rangeN)
+       ERPNext zeroes every bucket on an item whose due date has not arrived
+       (accounts_receivable.py set_ageing), so
+       NOT DUE = outstanding - total_due, and the two add back to outstanding.
+     Advance is reported separately and has ALREADY been taken out of paid.
+-->
+<style>
+    /* wkhtmltopdf reads page setup from rules on .print-format (see
+       frappe/utils/pdf.py, get_print_format_styles). */
+    .print-format {
+        page-size: A4;
+        orientation: Landscape;
+        margin-top: 8mm;
+        margin-bottom: 10mm;
+        margin-left: 7mm;
+        margin-right: 7mm;
+        font-family: Helvetica, Arial, "DejaVu Sans", sans-serif;
+        font-size: 7.5pt;
+        color: #16181d;
+    }
+
+    .print-format.landscape { width: auto; }
+
+    @page { size: A4 landscape; margin: 8mm; }
+
+    .ags * { box-sizing: border-box; }
+
+    .ags, .ags-mast, .ags-info, .ags-age {
+        width: 100%;
+        border-collapse: collapse;
+        table-layout: fixed;
+        font-variant-numeric: tabular-nums;
+    }
+
+    /* ---------- masthead ---------- */
+    .ags-mast td { vertical-align: middle; padding: 0 0 2mm 0; border: 0; }
+    .ags-org { font-size: 10.5pt; font-weight: 700; letter-spacing: .2px; }
+    .ags-doc-title {
+        text-align: right;
+        font-size: 11.5pt;
+        font-weight: 700;
+        white-space: nowrap;
+        letter-spacing: .2px;
+    }
+    .ags-doc-title .ar { font-weight: 600; }
+    .ags-rule { height: 1.4pt; background: #1b2a4a; margin-bottom: 2mm; }
+
+    /* ---------- the filters band ---------- */
+    .ags-info { margin-bottom: 2.5mm; }
+    .ags-info td {
+        border: 0.5pt solid #9aa3b0;
+        padding: 1.1mm 1.6mm;
+        vertical-align: middle;
+        overflow: hidden;
+    }
+    .ags-info .lbl { background: #f2f4f7; }
+    /* This bench has no Arabic font installed — fc-list :lang=ar returns only
+       DejaVu Sans, whose Arabic runs wide. Cells clip rather than let a long
+       string spill over a neighbour, and the Arabic is set a size down. */
+    .ags-info .en { display: block; font-weight: 700; font-size: 7pt; line-height: 1.2; }
+    .ags-info .ar {
+        display: block;
+        font-size: 5.9pt;
+        color: #5b6472;
+        direction: rtl;
+        text-align: right;
+        line-height: 1.15;
+        white-space: nowrap;
+        overflow: hidden;
+    }
+    .ags-info .val { font-size: 7.4pt; overflow: hidden; word-wrap: break-word; }
+
+    /* ---------- the party grid ---------- */
+    .ags thead th {
+        background: #1b2a4a;
+        color: #fff;
+        border: 0.5pt solid #1b2a4a;
+        padding: 1.1mm 1mm;
+        font-size: 6.2pt;
+        font-weight: 700;
+        line-height: 1.2;
+        text-align: center;
+        vertical-align: middle;
+    }
+    .ags thead th .ar { display: block; font-weight: 500; font-size: 5.4pt; opacity: .85; }
+
+    /* The party name wraps; it must never ellipsize. Column widths are
+       percentages of whatever width the print job ends up with, and that varies
+       with the paper, the margins and the scale chosen in the print dialog — so
+       a width that fits here can clip elsewhere. Wrapping degrades to a second
+       line instead of silently hiding half a name. Amounts have known widths
+       and stay on one line. */
+    .ags > tbody > tr > td {
+        border: 0.5pt solid #c3c9d2;
+        padding: 0.85mm 1mm;
+        font-size: 6.8pt;
+        vertical-align: middle;
+        white-space: normal;
+        overflow-wrap: anywhere;
+        word-break: break-word;
+    }
+    .ags > tbody > tr > td.num {
+        text-align: right;
+        white-space: nowrap;
+        overflow-wrap: normal;
+        word-break: normal;
+    }
+    .ags > tbody > tr:nth-child(even) > td { background: #f7f8fa; }
+    .ags > tbody > tr { page-break-inside: avoid; }
+
+    .mid { text-align: center; }
+    .neg { color: #b3121b; }
+    .muted { color: #6b7280; }
+
+    /* The totals line rides in the body so it lands after the last party
+       rather than repeating at the foot of every page, which is what a
+       <tfoot> would do. */
+    .ags > tbody > tr.ags-total > td {
+        background: #f2f4f7;
+        font-weight: 700;
+        font-size: 7.2pt;
+        border-top: 1pt solid #1b2a4a;
+        page-break-inside: avoid;
+    }
+
+    /* ---------- the ageing distribution band ---------- */
+    .ags-age { margin-top: 3mm; }
+    .ags-age caption {
+        caption-side: top;
+        text-align: left;
+        font-size: 7.4pt;
+        font-weight: 700;
+        padding-bottom: 1mm;
+        color: #1b2a4a;
+    }
+    .ags-age th {
+        background: #f2f4f7;
+        border: 0.5pt solid #9aa3b0;
+        padding: 1.1mm;
+        font-size: 6.6pt;
+        font-weight: 700;
+        text-align: center;
+    }
+    .ags-age td {
+        border: 0.5pt solid #9aa3b0;
+        padding: 1.3mm;
+        font-size: 7.2pt;
+        text-align: center;
+    }
+    .ags-age .notdue { background: #fbfbfc; }
+
+    .ags-empty { padding: 8mm 0; text-align: center; font-size: 8.5pt; color: #6b7280; }
+
+    /* The artwork this template draws itself, at full content width so it reads
+       the same as the band the print wrapper draws when a letter head is picked. */
+    .letter-head, .letter-head-footer { text-align: center; }
+    .letter-head { margin-bottom: 3mm; }
+    .letter-head-footer { margin-top: 4mm; }
+    .letter-head img, .letter-head-footer img { max-width: 100%; height: auto; }
+
+    /* ---------- letter head placement ----------
+       The Letter Head record positions its artwork with position:fixed, which
+       takes it out of the flow: the browser then repaints it over every page
+       and the listing disappears underneath. Putting the artwork back in the
+       flow is what works — it prints once, at the top. This styles the printed
+       copy only; the Letter Head record is untouched. */
+    @media print {
+        .letter-head .header,
+        .letter-head-footer .footer {
+            position: static !important;
+        }
+        .letter-head { margin-bottom: 3mm; }
+        .letter-head-footer { margin-top: 4mm; }
+    }
+</style>
+
+{%
+    /* ---- the party lines; a total row injected by the report, if any, has no party ---- */
+    var rows = (data || []).filter(function (row) { return row && row.party; });
+
+    var ccy = rows.length ? (rows[0].currency || "") : "";
+    var nf = get_number_format(ccy);
+    var amount = function (value) { return format_number(flt(value), nf); };
+    var on_date = function (value) { return value ? frappe.datetime.str_to_user(value) : ""; };
+    var signed = function (value) { return flt(value) < 0 ? "neg" : ""; };
+
+    /* ---- ageing buckets follow the Ageing Range filter, so read them off the
+            report columns rather than hardcoding five ---- */
+    var bucket_fields = [], bucket_labels = [];
+    for (var c = 0; c < (columns || []).length; c++) {
+        var fieldname = cstr(columns[c].fieldname);
+        if (fieldname.indexOf("range") === 0) {
+            bucket_fields.push(fieldname);
+            bucket_labels.push(columns[c].label);
+        }
+    }
+
+    /* ---- totals, summed from the same figures the report produced ---- */
+    var t_advance = 0, t_invoiced = 0, t_paid = 0, t_credit = 0;
+    var t_outstanding = 0, t_not_due = 0, t_total_due = 0;
+    var t_buckets = [];
+    for (var b = 0; b < bucket_fields.length; b++) { t_buckets.push(0); }
+
+    for (var i = 0; i < rows.length; i++) {
+        var row = rows[i];
+        /* Every bucket is zeroed while an item is not yet due, so what the
+           buckets leave out of the outstanding balance is exactly the not due
+           part. total_due is the report own sum of the buckets. */
+        row._not_due = flt(row.outstanding) - flt(row.total_due);
+        row._label = row.party_name || row.party;
+
+        t_advance += flt(row.advance);
+        t_invoiced += flt(row.invoiced);
+        t_paid += flt(row.paid);
+        t_credit += flt(row.credit_note);
+        t_outstanding += flt(row.outstanding);
+        t_not_due += row._not_due;
+        t_total_due += flt(row.total_due);
+        for (var k = 0; k < bucket_fields.length; k++) {
+            t_buckets[k] += flt(row[bucket_fields[k]]);
+        }
+    }
+
+    /* ---- column widths: the party column is fixed, every figure column shares
+            what is left, so a different Ageing Range still lays out evenly ---- */
+    var figure_cols = 7 + bucket_fields.length;
+    var figure_width = (78 / figure_cols).toFixed(3);
+
+    /* ---- letter head artwork, both ends, drawn by this template.
+
+           The print wrapper draws the letter head only when the print dialog has
+           With Letter head ticked, and the footer band only when Repeat Header and
+           Footer is ticked on top of that. Leave the dialog alone - which is the
+           normal way to export - and the listing came out with no artwork at either
+           end. Fetching both ends here makes the two match without anybody having
+           to remember a checkbox, and it is skipped when the dialog is already
+           drawing the artwork so ticking the box never doubles it up. ---- */
+    var lh_header = "", lh_footer = "";
+    var with_letter_head = print_settings && print_settings.with_letter_head;
+    try {
+        if (!with_letter_head) {
+            frappe.call({
+                method: "vansale.sf_trading.api.statement_of_account.get_letter_head_artwork",
+                args: {
+                    letter_head: (print_settings && print_settings.letter_head_name) || null,
+                    company: filters.company || null,
+                },
+                async: false,
+                callback: function (r) {
+                    var art = (r && r.message) || {};
+                    /* Absolute already: wkhtmltopdf renders each band as a document of
+                       its own, with no site to resolve a site-relative src against. */
+                    lh_header = cstr(art.header_image);
+                    lh_footer = cstr(art.footer_image);
+                }
+            });
+        }
+    } catch (letter_head_error) { lh_header = ""; lh_footer = ""; }
+
+    var company = filters.company || "";
+    var ageing_on = filters.ageing_based_on || __("Due Date");
+%}
+
+{% if (lh_header) { %}
+<div class="letter-head"><div class="header"><img src="{{ lh_header }}"></div></div>
+{% } %}
+
+<table class="ags-mast">
+    <tr>
+        <td class="ags-org">{% if (!with_letter_head && !lh_header) { %}{{ company }}{% } %}</td>
+        <td class="ags-doc-title">
+            {%= __("Payables Ageing Summary") %} <span class="ar">/ ملخص أعمار الذمم الدائنة</span>
+        </td>
+    </tr>
+</table>
+<div class="ags-rule"></div>
+
+<table class="ags-info">
+    <colgroup>
+        <col style="width: 11%"><col style="width: 22%">
+        <col style="width: 11%"><col style="width: 17%">
+        <col style="width: 11%"><col style="width: 11%">
+        <col style="width: 8%"><col style="width: 9%">
+    </colgroup>
+    <tr>
+        <td class="lbl">
+            <span class="ar">الشركة</span><span class="en">{%= __("Company") %}</span>
+        </td>
+        <td class="val">{{ company }}</td>
+        <td class="lbl">
+            <span class="ar">كما في تاريخ</span><span class="en">{%= __("As On") %}</span>
+        </td>
+        <td class="val">{%= on_date(filters.report_date) %}</td>
+        <td class="lbl">
+            <span class="ar">أساس الأعمار</span><span class="en">{%= __("Ageing Based On") %}</span>
+        </td>
+        <td class="val">{{ ageing_on }}</td>
+        <td class="lbl">
+            <span class="ar">العملة</span><span class="en">{%= __("Currency") %}</span>
+        </td>
+        <td class="val">{{ ccy }}</td>
+    </tr>
+    {% if (filters.supplier_group || filters.party) { %}
+    <tr>
+        <td class="lbl">
+            <span class="ar">مجموعة الموردين</span><span class="en">{%= __("Supplier Group") %}</span>
+        </td>
+        <td class="val">{{ filters.supplier_group || "" }}</td>
+        <td class="lbl">
+            <span class="ar">المورد</span><span class="en">{%= __("Supplier") %}</span>
+        </td>
+        <td class="val" colspan="5">{{ filters.party || "" }}</td>
+    </tr>
+    {% } %}
+</table>
+
+<table class="ags">
+    <colgroup>
+        <col style="width: 3%">
+        <col style="width: 19%">
+        {% for (var w = 0; w < figure_cols; w++) { %}
+            <col style="width: {%= figure_width %}%">
+        {% } %}
+    </colgroup>
+    <thead>
+        <tr>
+            <th>#</th>
+            <th>{%= __("Supplier") %}<span class="ar">المورد</span></th>
+            <th>{%= __("Advance") %}<span class="ar">دفعة مقدمة</span></th>
+            <th>{%= __("Invoiced") %}<span class="ar">قيمة الفواتير</span></th>
+            <th>{%= __("Paid") %}<span class="ar">المدفوع</span></th>
+            <th>{%= __("Debit Note") %}<span class="ar">إشعار مدين</span></th>
+            <th>{%= __("Outstanding") %}<span class="ar">الرصيد المستحق</span></th>
+            <th>{%= __("Not Due") %}<span class="ar">غير مستحق</span></th>
+            {% for (var h = 0; h < bucket_labels.length; h++) { %}
+                <th>{{ bucket_labels[h] }}<span class="ar">يوم</span></th>
+            {% } %}
+            <th>{%= __("Total Due") %}<span class="ar">إجمالي المستحق</span></th>
+        </tr>
+    </thead>
+
+    <tbody>
+        {% for (var r = 0; r < rows.length; r++) { %}
+            {% var line = rows[r]; %}
+            <tr>
+                <td class="mid muted">{%= r + 1 %}</td>
+                <td>{{ line._label }}</td>
+                <td class="num {%= signed(line.advance) %}">{%= amount(line.advance) %}</td>
+                <td class="num {%= signed(line.invoiced) %}">{%= amount(line.invoiced) %}</td>
+                <td class="num {%= signed(line.paid) %}">{%= amount(line.paid) %}</td>
+                <td class="num {%= signed(line.credit_note) %}">{%= amount(line.credit_note) %}</td>
+                <td class="num {%= signed(line.outstanding) %}">{%= amount(line.outstanding) %}</td>
+                <td class="num {%= signed(line._not_due) %}">{%= amount(line._not_due) %}</td>
+                {% for (var g = 0; g < bucket_fields.length; g++) { %}
+                    <td class="num {%= signed(line[bucket_fields[g]]) %}">{%= amount(line[bucket_fields[g]]) %}</td>
+                {% } %}
+                <td class="num {%= signed(line.total_due) %}">{%= amount(line.total_due) %}</td>
+            </tr>
+        {% } %}
+
+        {% if (!rows.length) { %}
+            <tr><td colspan="{%= 9 + bucket_fields.length %}" class="ags-empty">{%= __("No outstanding balances for these filters.") %}</td></tr>
+        {% } %}
+
+        {% if (rows.length) { %}
+            <tr class="ags-total">
+                <td></td>
+                <td>{%= __("Total") %} <span dir="rtl">الإجمالي</span> ({%= rows.length %} {%= __("parties") %})</td>
+                <td class="num {%= signed(t_advance) %}">{%= amount(t_advance) %}</td>
+                <td class="num {%= signed(t_invoiced) %}">{%= amount(t_invoiced) %}</td>
+                <td class="num {%= signed(t_paid) %}">{%= amount(t_paid) %}</td>
+                <td class="num {%= signed(t_credit) %}">{%= amount(t_credit) %}</td>
+                <td class="num {%= signed(t_outstanding) %}">{%= amount(t_outstanding) %}</td>
+                <td class="num {%= signed(t_not_due) %}">{%= amount(t_not_due) %}</td>
+                {% for (var v = 0; v < t_buckets.length; v++) { %}
+                    <td class="num {%= signed(t_buckets[v]) %}">{%= amount(t_buckets[v]) %}</td>
+                {% } %}
+                <td class="num {%= signed(t_total_due) %}">{%= amount(t_total_due) %}</td>
+            </tr>
+        {% } %}
+    </tbody>
+</table>
+
+{% if (rows.length) { %}
+<table class="ags-age">
+    <caption>{%= __("Ageing Distribution") %} / توزيع الأعمار</caption>
+    <thead>
+        <tr>
+            <th>{%= __("Not Due") %}</th>
+            {% for (var q = 0; q < bucket_labels.length; q++) { %}
+                <th>{{ bucket_labels[q] }} {%= __("Days") %}</th>
+            {% } %}
+            <th>{%= __("Outstanding") %}</th>
+        </tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td class="notdue {%= signed(t_not_due) %}">{%= amount(t_not_due) %}</td>
+            {% for (var p = 0; p < t_buckets.length; p++) { %}
+                <td class="{%= signed(t_buckets[p]) %}">{%= amount(t_buckets[p]) %}</td>
+            {% } %}
+            <td>{%= amount(t_outstanding) %}</td>
+        </tr>
+    </tbody>
+</table>
+{% } %}
+
+{% if (lh_footer) { %}
+<div class="letter-head-footer"><div class="footer"><img src="{{ lh_footer }}"></div></div>
+{% } %}

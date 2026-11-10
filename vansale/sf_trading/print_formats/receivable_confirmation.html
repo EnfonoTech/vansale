@@ -1,0 +1,209 @@
+<!-- Receivable Confirmation — Print Format for the ACCOUNTS RECEIVABLE report.
+
+     A balance confirmation request sent to a customer at a cut-off date: it states what
+     we believe they owe and asks them to agree or explain, with a block for them to sign
+     and return. Modelled on the letter Steel Force already sends (HAVELOCK ONE INTERIORS,
+     28/06/2026) so the wording customers receive does not change.
+
+        Print Format For : Report
+        Report           : Accounts Receivable
+        Print Format Type: JS          (client-side micro-template, plain JS)
+        Custom Format    : ticked
+        PDF Generator    : wkhtmltopdf
+
+     ONE LETTER PER CUSTOMER. Filter the report to a single Party and you get that one
+     letter; leave the filter off and every customer with a balance gets their own page,
+     which is how a reconciliation round actually gets sent out.
+
+     THE AMOUNT IS COMPANY CURRENCY. ERPNext keeps `outstanding` on this report in the
+     party account currency, which is the company currency here, so a customer invoiced in
+     SAR still confirms a BHD figure — the same number the ledger carries. The currency
+     code printed beside it comes from the row rather than being assumed.
+
+     Leave "With Letter head" UNTICKED — the artwork is fetched and drawn by this template,
+     and ticking the box makes the print wrapper draw it a second time.
+
+     NO APOSTROPHES anywhere in this file. frappe.template.compile quotes literal text with
+     single quotes and escapes only the FIRST apostrophe in each run, so a second one ends
+     the string early and the format dies with "missing ) after argument list".
+-->
+<style>
+    .print-format {
+        page-size: A4;
+        orientation: Portrait;
+        margin-top: 10mm;
+        margin-bottom: 12mm;
+        margin-left: 14mm;
+        margin-right: 14mm;
+        font-family: Helvetica, Arial, "DejaVu Sans", sans-serif;
+        font-size: 10.5pt;
+        color: #1a1a1a;
+        line-height: 1.6;
+    }
+
+    @page { size: A4 portrait; margin: 12mm; }
+
+    .conf { page-break-after: always; }
+    .conf:last-child { page-break-after: auto; }
+
+    .conf-date { margin-bottom: 6mm; }
+    .conf-party { font-weight: 700; margin-bottom: 8mm; }
+
+    .conf-title {
+        text-align: center;
+        font-weight: 700;
+        text-decoration: underline;
+        letter-spacing: .3px;
+        margin-bottom: 8mm;
+    }
+
+    .conf-body p { margin: 0 0 4mm 0; }
+    .conf-amount { font-weight: 700; }
+
+    .conf-sign { margin-top: 10mm; }
+    .conf-sign .line { margin-bottom: 1.5mm; }
+    /* room for the physical signature and company stamp */
+    .conf-stamp-space { height: 22mm; }
+
+    .conf-rule { border-top: 0.8pt solid #333; margin: 4mm 0 6mm 0; }
+
+    .conf-reply p { margin: 0 0 6mm 0; }
+    .conf-fields { width: 100%; border-collapse: collapse; margin-top: 4mm; }
+    .conf-fields td { padding: 4mm 4mm 4mm 0; vertical-align: bottom; font-size: 10.5pt; }
+    .conf-fill { display: inline-block; border-bottom: 0.8pt solid #333; min-width: 38mm; }
+    .conf-fill.wide { min-width: 95mm; }
+
+    .letter-head, .letter-head-footer { text-align: center; }
+    .letter-head { margin-bottom: 6mm; }
+    .letter-head-footer { margin-top: 6mm; }
+    .letter-head img, .letter-head-footer img { max-width: 100%; height: auto; }
+
+    /* A Letter Head positions its artwork with position:fixed, which takes it out of the
+       flow and repaints it over every page, hiding the letter underneath. Putting it back
+       in the flow prints it once, at the top, with the letter below it. */
+    @media print {
+        .letter-head .header,
+        .letter-head-footer .footer { position: static !important; }
+    }
+</style>
+
+{%
+    /* ---- balances by customer; the report total row carries no party ---- */
+    var rows = (data || []).filter(function (row) { return row && row.party; });
+
+    var order = [];
+    var balances = {};
+    for (var i = 0; i < rows.length; i++) {
+        var key = rows[i].party;
+        if (!balances[key]) {
+            balances[key] = {
+                party: key,
+                name: rows[i].customer_name || rows[i].party,
+                currency: rows[i].currency || "",
+                outstanding: 0
+            };
+            order.push(key);
+        }
+        balances[key].outstanding += flt(rows[i].outstanding);
+    }
+
+    var letters = [];
+    for (var o = 0; o < order.length; o++) {
+        var entry = balances[order[o]];
+        /* a customer whose balance nets to nothing has nothing to confirm */
+        if (Math.abs(flt(entry.outstanding)) >= 0.005) { letters.push(entry); }
+    }
+
+    var money = function (value, currency) {
+        return format_number(flt(value), get_number_format(currency)) + " " + cstr(currency);
+    };
+    var on_date = function (value) { return value ? frappe.datetime.str_to_user(value) : ""; };
+
+    var company = filters.company || "";
+    var as_on = on_date(filters.report_date);
+    var today_str = on_date(frappe.datetime.get_today());
+
+    /* ---- letter head artwork, drawn here so the letter carries it whether it is
+            printed from the button or exported as a PDF, without anybody having to
+            remember the dialog checkbox ---- */
+    var lh_header = "", lh_footer = "";
+    var with_letter_head = print_settings && print_settings.with_letter_head;
+    try {
+        if (!with_letter_head) {
+            frappe.call({
+                method: "vansale.sf_trading.api.statement_of_account.get_letter_head_artwork",
+                args: {
+                    letter_head: (print_settings && print_settings.letter_head_name) || null,
+                    company: filters.company || null,
+                },
+                async: false,
+                callback: function (r) {
+                    var art = (r && r.message) || {};
+                    lh_header = cstr(art.header_image);
+                    lh_footer = cstr(art.footer_image);
+                }
+            });
+        }
+    } catch (letter_head_error) { lh_header = ""; lh_footer = ""; }
+%}
+
+{% if (!letters.length) { %}
+    <p>{%= __("No customer carries a balance for these filters.") %}</p>
+{% } %}
+
+{% for (var l = 0; l < letters.length; l++) { %}
+    {% var letter = letters[l]; %}
+    <div class="conf">
+        {% if (lh_header) { %}
+        <div class="letter-head"><div class="header"><img src="{{ lh_header }}"></div></div>
+        {% } %}
+
+        <div class="conf-date">{%= __("Date") %}: {{ today_str }}</div>
+        <div class="conf-party">{%= __("M/s.") %} {{ letter.name }}</div>
+
+        <div class="conf-title">{%= __("BALANCE CONFIRMATION REQUEST") %}</div>
+
+        <div class="conf-body">
+            <p>{%= __("Dear Sir,") %}</p>
+            <p>
+                {%= __("As a part of our internal reconciliation procedures, please confirm the balance due to us") %}
+                - <span class="conf-amount">{%= money(letter.outstanding, letter.currency) %}</span>
+                {%= __("as on") %} <span class="conf-amount">{{ as_on }}</span>
+                {%= __("by indicating below whether the amount agrees with your records. If it is not in agreement with your records, please explain in the space provided.") %}
+            </p>
+            <p>{%= __("Please note that this is not a request for payment.") %}</p>
+            <p>{%= __("Thank you for your cooperation.") %}</p>
+        </div>
+
+        <div class="conf-sign">
+            <div class="line">{%= __("Sincerely,") %}</div>
+            <div class="line">{%= __("For") %} {{ company }}</div>
+            <div class="conf-stamp-space"></div>
+            <div class="line">{%= __("Accounts Department") %}</div>
+        </div>
+
+        <div class="conf-rule"></div>
+
+        <div class="conf-reply">
+            <p>{%= __("We hereby confirm that the above balance agrees / does not agree with our records.") %}</p>
+            <table class="conf-fields">
+                <tr>
+                    <td>{%= __("Name") %}: <span class="conf-fill"></span></td>
+                    <td>{%= __("Signed") %}: <span class="conf-fill"></span></td>
+                    <td>{%= __("Position") %}: <span class="conf-fill"></span></td>
+                </tr>
+                <tr>
+                    <td>{%= __("Date") %}: <span class="conf-fill"></span></td>
+                    <td colspan="2">{%= __("Company Stamp") %}: <span class="conf-fill"></span></td>
+                </tr>
+                <tr>
+                    <td colspan="3">{%= __("Remarks If any") %} <span class="conf-fill wide"></span></td>
+                </tr>
+            </table>
+        </div>
+
+        {% if (lh_footer) { %}
+        <div class="letter-head-footer"><div class="footer"><img src="{{ lh_footer }}"></div></div>
+        {% } %}
+    </div>
+{% } %}
