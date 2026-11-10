@@ -67,6 +67,9 @@ def global_flags() -> dict:
         "allow_delete_draft_payment": True,
         # Yes / No before posting an invoice, return, payment or refund.
         "confirm_before_submit": False,
+        # Van stock in the app: Bin (ERPNext's running totals, fast) or the
+        # Stock Ledger (what the Stock Balance report and submit check use).
+        "stock_source": "Bin",
         "invoice_print_format": None,
         "receipt_print_format": None,
         "allow_split_payment": False,
@@ -96,6 +99,7 @@ def global_flags() -> dict:
             "cash_payment_entry_status",
             "collection_payment_entry_status",
             "apply_discount_on",
+            "stock_source",
             "default_payment_type",
             "invoice_print_format",
             "receipt_print_format",

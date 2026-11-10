@@ -59,6 +59,48 @@ def check_item_allowed(item_code: str) -> None:
 
 
 @frappe.whitelist(methods=["GET"])
+def warehouse_stock(warehouse: str, item_codes: list[str] | None = None) -> dict[str, dict]:
+    """item_code → {"qty", "value"} in `warehouse`, from Vansale Settings
+    "Stock figures from":
+
+      * Bin: ERPNext's running totals (fast; what the Item page shows).
+      * Stock Ledger: the movements added up to now — what the Stock Balance
+        report and ERPNext's submit check use. Bin can drift from it (a
+        stock repost that failed or is stuck), so the app showed stock the
+        invoice then could not submit.
+
+    The ledger is read per item through its (item_code, warehouse, …) index;
+    the van's items come from its Bin rows (one per item ever moved there),
+    so a large ledger is never scanned by warehouse."""
+    from vansale.vansale.doctype.vansale_settings.vansale_settings import global_flags
+
+    bin_filters: dict = {"warehouse": warehouse}
+    if item_codes is not None:
+        if not item_codes:
+            return {}
+        bin_filters["item_code"] = ["in", list(item_codes)]
+    bins = frappe.get_all(
+        "Bin", filters=bin_filters, fields=["item_code", "actual_qty", "stock_value"], limit_page_length=0
+    )
+    if global_flags().get("stock_source") != "Stock Ledger":
+        return {b.item_code: {"qty": flt(b.actual_qty), "value": flt(b.stock_value)} for b in bins}
+    codes = list(item_codes) if item_codes is not None else [b.item_code for b in bins]
+    if not codes:
+        return {}
+    out = {c: {"qty": 0.0, "value": 0.0} for c in codes}
+    for r in frappe.db.sql(
+        """SELECT item_code, SUM(actual_qty) AS qty, SUM(stock_value_difference) AS value
+           FROM `tabStock Ledger Entry`
+           WHERE item_code IN %(codes)s AND warehouse = %(wh)s AND is_cancelled = 0
+             AND posting_datetime <= %(now)s
+           GROUP BY item_code""",
+        {"codes": tuple(codes), "wh": warehouse, "now": frappe.utils.now_datetime()},
+        as_dict=True,
+    ):
+        out[r.item_code] = {"qty": flt(r.qty), "value": flt(r.value)}
+    return out
+
+
 def list_mine(
     limit: int = 100,
     search: Optional[str] = None,
@@ -85,14 +127,7 @@ def list_mine(
     """
     filters: dict = {"disabled": 0, "has_variants": 0, "is_sales_item": 1}
     if warehouse and cint(only_in_stock):
-        allowed = set(
-            frappe.get_all(
-                "Bin",
-                filters={"warehouse": warehouse, "actual_qty": [">", 0]},
-                pluck="item_code",
-                limit_page_length=0,
-            )
-        )
+        allowed = {code for code, st in warehouse_stock(warehouse).items() if st["qty"] > 0}
         # Non-stock items (delivery charge, service lines) have no Bin row
         # and no valuation requirement — excluding them would hide
         # legitimate sellables. Union them in rather than adding a second
@@ -140,16 +175,9 @@ def list_mine(
     )
     if warehouse and rows:
         codes = [r["item_code"] for r in rows]
-        balances = {
-            b.item_code: float(b.actual_qty or 0)
-            for b in frappe.get_all(
-                "Bin",
-                filters={"warehouse": warehouse, "item_code": ["in", codes]},
-                fields=["item_code", "actual_qty"],
-            )
-        }
+        balances = warehouse_stock(warehouse, codes)
         for r in rows:
-            r["stock_qty"] = balances.get(r["item_code"], 0.0)
+            r["stock_qty"] = balances.get(r["item_code"], {}).get("qty", 0.0)
         add_sales_units(rows)
     return rows
 
@@ -363,7 +391,8 @@ def stock_balance(warehouse: str, limit: int = 500) -> list[dict]:
         (warehouse, int(limit)),
         as_dict=True,
     )
+    stock = warehouse_stock(warehouse, [r["item_code"] for r in rows])
     for r in rows:
-        r["actual_qty"] = float(r.get("actual_qty") or 0)
+        r["actual_qty"] = stock.get(r["item_code"], {}).get("qty", 0.0)
     add_sales_units(rows)
     return rows
