@@ -57,6 +57,28 @@ LIB_PACKAGES = {
     "libcups": "libcups2", "libdrm": "libdrm2", "libgtk-3": "libgtk-3-0",
 }
 
+# Ubuntu 24.04 / Debian 13 renamed packages for the 64-bit time_t change
+# ("t64"). apt picks most of the new names by itself, but `libasound2` is a
+# virtual package there and apt refuses it ("no installation candidate").
+T64_RENAMES = {"libasound2": "libasound2t64"}
+
+
+def _apt_name(pkg: str) -> str:
+    """The package name this server's apt installs."""
+    new = T64_RENAMES.get(pkg)
+    if not new or not shutil.which("apt-cache"):
+        return pkg
+    try:
+        found = subprocess.run(["apt-cache", "show", new], capture_output=True, timeout=30).returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        return pkg
+    return new if found else pkg
+
+
+def apt_command() -> str:
+    return "sudo apt-get update && sudo apt-get install -y " + " ".join(_apt_name(p) for p in APT_PACKAGES)
+
+
 FONTCONFIG_RULE = f"""<?xml version="1.0"?>
 <!DOCTYPE fontconfig SYSTEM "fonts.dtd">
 <!-- Installed by Vansale ("Set up PDF engine"). Arabic text in formats that ask
@@ -166,7 +188,7 @@ def _missing_packages(exe: str) -> list[str]:
         if "not found" not in line:
             continue
         lib = line.split("=>")[0].strip().split(".so")[0]
-        pkg = next((p for prefix, p in LIB_PACKAGES.items() if lib.startswith(prefix)), lib)
+        pkg = _apt_name(next((p for prefix, p in LIB_PACKAGES.items() if lib.startswith(prefix)), lib))
         if pkg not in missing:
             missing.append(pkg)
     return missing
@@ -218,7 +240,7 @@ def status() -> dict:
         "chromium": exe,
         "chromium_runs": runs,
         "missing_packages": missing,
-        "apt_command": "sudo apt-get update && sudo apt-get install -y " + " ".join(APT_PACKAGES),
+        "apt_command": apt_command(),
         "arabic_font": font,
         # DejaVu Sans is the stock fallback: much wider than the browser's Arial.
         "arabic_font_ok": bool(font) and not font.startswith("DejaVu"),
