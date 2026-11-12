@@ -12,19 +12,23 @@ PDF engine", without root and without other apps:
     English falls back to Liberation Sans (Arial's widths); Arabic fell back to
     DejaVu Sans, much wider, so lines wrapped where the browser print did not.
     Noto Naskh Arabic (SIL Open Font License, in `pdf_fonts/`) keeps the
-    browser print's line breaks; it goes into the bench user's font folder
-    with a fontconfig rule. A server that has real Arial keeps using it.
+    browser print's line breaks. It goes into `<bench>/chromium/fonts` with
+    `<bench>/chromium/fonts.conf` (system fonts + it + the rule), which every
+    Chromium run is given (`chromium_env`). Not the home folder: under
+    supervisor the bench has no HOME, and fontconfig then ignores ~/.config
+    and ~/.local/share/fonts. A server that has real Arial keeps using it.
   * System libraries Chromium links against (libnss3, …) need root: the check
     lists the missing packages and the apt command.
 
 Fonts are installed again on every migrate while the setting is on, so a
-container rebuilt with an empty home folder gets them back.
+rebuilt container gets them back.
 """
 
 from __future__ import annotations
 
 import os
 import platform
+import pwd
 import shutil
 import subprocess
 import tempfile
@@ -79,23 +83,27 @@ def apt_command() -> str:
     return "sudo apt-get update && sudo apt-get install -y " + " ".join(_apt_name(p) for p in APT_PACKAGES)
 
 
-FONTCONFIG_RULE = f"""<?xml version="1.0"?>
+FONTS_CONF = """<?xml version="1.0"?>
 <!DOCTYPE fontconfig SYSTEM "fonts.dtd">
-<!-- Installed by Vansale ("Set up PDF engine"). Arabic text in formats that ask
-     for Arial / Helvetica / sans-serif on a server without Arial: {FONT_FAMILY},
-     which keeps the browser print's line breaks, not DejaVu Sans. -->
+<!-- Written by Vansale ("Set up PDF engine") for its Chromium PDFs: the system's
+     fonts, plus {family} for Arabic text in formats that ask for Arial /
+     Helvetica / sans-serif on a server without Arial (it keeps the browser
+     print's line breaks; DejaVu Sans does not). -->
 <fontconfig>
+  <include ignore_missing="yes">/etc/fonts/fonts.conf</include>
+  <dir>{font_dir}</dir>
+  <cachedir>{cache_dir}</cachedir>
   <!-- Real Arial first (when installed), then Arial's metric twin for Latin,
        then the Arabic font — ahead of the generic sans-serif list (DejaVu). -->
   <alias binding="strong"><family>Arial</family>
-    <prefer><family>Arial</family><family>Liberation Sans</family><family>{FONT_FAMILY}</family></prefer></alias>
+    <prefer><family>Arial</family><family>Liberation Sans</family><family>{family}</family></prefer></alias>
   <alias binding="strong"><family>Helvetica</family>
-    <prefer><family>Arial</family><family>Liberation Sans</family><family>{FONT_FAMILY}</family></prefer></alias>
+    <prefer><family>Arial</family><family>Liberation Sans</family><family>{family}</family></prefer></alias>
   <alias binding="strong"><family>sans-serif</family>
-    <prefer><family>Arial</family><family>Liberation Sans</family><family>{FONT_FAMILY}</family></prefer></alias>
+    <prefer><family>Arial</family><family>Liberation Sans</family><family>{family}</family></prefer></alias>
   <match target="pattern">
     <test name="lang" compare="contains"><string>ar</string></test>
-    <edit name="family" mode="prepend" binding="strong"><string>{FONT_FAMILY}</string></edit>
+    <edit name="family" mode="prepend" binding="strong"><string>{family}</string></edit>
   </match>
 </fontconfig>
 """
@@ -156,26 +164,64 @@ def download_chromium() -> str:
     return _bench_chromium()
 
 
-def _font_dirs() -> tuple[str, str]:
-    home = os.path.expanduser("~")
-    return (
-        os.path.join(home, ".local", "share", "fonts", "vansale"),
-        os.path.join(home, ".config", "fontconfig", "conf.d"),
-    )
+def _chromium_root() -> str:
+    return os.path.dirname(os.path.dirname(_bench_chromium()))
+
+
+def _font_dir() -> str:
+    return os.path.join(_chromium_root(), "fonts")
+
+
+def _fonts_conf() -> str:
+    return os.path.join(_chromium_root(), "fonts.conf")
+
+
+def chromium_env() -> dict:
+    """Environment for every Chromium run: Vansale's font config, and a HOME
+    (supervisor starts the bench without one; Chromium wants it)."""
+    env = dict(os.environ)
+    if not env.get("HOME"):
+        try:
+            env["HOME"] = pwd.getpwuid(os.getuid()).pw_dir
+        except KeyError:
+            pass
+    if os.path.isfile(_fonts_conf()):
+        env["FONTCONFIG_FILE"] = _fonts_conf()
+    return env
 
 
 def install_fonts() -> None:
-    """Bundled Arabic font + fontconfig rule into the bench user's folders."""
-    font_dir, conf_dir = _font_dirs()
+    """Bundled Arabic font + fontconfig file into <bench>/chromium."""
+    font_dir, conf = _font_dir(), _fonts_conf()
+    cache_dir = os.path.join(_chromium_root(), "fontcache")
     os.makedirs(font_dir, exist_ok=True)
-    os.makedirs(conf_dir, exist_ok=True)
+    os.makedirs(cache_dir, exist_ok=True)
     source = frappe.get_app_path("vansale", "pdf_fonts")
     for name in FONT_FILES:
         shutil.copyfile(os.path.join(source, name), os.path.join(font_dir, name))
-    with open(os.path.join(conf_dir, "60-vansale-pdf.conf"), "w", encoding="utf-8") as fh:
-        fh.write(FONTCONFIG_RULE)
+    with open(conf, "w", encoding="utf-8") as fh:
+        fh.write(FONTS_CONF.format(family=FONT_FAMILY, font_dir=font_dir, cache_dir=cache_dir))
     if shutil.which("fc-cache"):
-        subprocess.run(["fc-cache", "-f", font_dir], capture_output=True, timeout=120, check=False)
+        subprocess.run(
+            ["fc-cache", "-f", font_dir], capture_output=True, timeout=120, check=False, env=chromium_env()
+        )
+    _remove_home_fonts()
+
+
+def _remove_home_fonts() -> None:
+    """The first version put the font and rule in the home folder (unseen by
+    a bench without HOME); remove exactly those files."""
+    try:
+        home = pwd.getpwuid(os.getuid()).pw_dir
+    except KeyError:
+        return
+    rule = os.path.join(home, ".config", "fontconfig", "conf.d", "60-vansale-pdf.conf")
+    if os.path.isfile(rule):
+        os.remove(rule)
+    old_dir = os.path.join(home, ".local", "share", "fonts", "vansale")
+    # (fc-cache adds a hidden .uuid file there)
+    if os.path.isdir(old_dir) and {f for f in os.listdir(old_dir) if not f.startswith(".")} <= set(FONT_FILES):
+        shutil.rmtree(old_dir)
 
 
 def _missing_packages(exe: str) -> list[str]:
@@ -210,7 +256,7 @@ def _arabic_font(exe: str | None) -> str | None:
             subprocess.run(
                 [exe, "--headless", "--no-sandbox", "--disable-gpu", "--no-pdf-header-footer",
                  f"--user-data-dir={os.path.join(tmp, 'profile')}", f"--print-to-pdf={out}", "file://" + src],
-                capture_output=True, timeout=60, check=False,
+                capture_output=True, timeout=60, check=False, env=chromium_env(),
             )
             fonts = (PdfReader(out).pages[0]["/Resources"].get("/Font") or {}).values()
         except Exception:
@@ -229,7 +275,7 @@ def status() -> dict:
             runs = (
                 subprocess.run(
                     [exe, "--headless", "--no-sandbox", "--disable-gpu", "--dump-dom", "about:blank"],
-                    capture_output=True, timeout=30,
+                    capture_output=True, timeout=30, env=chromium_env(),
                 ).returncode
                 == 0
             )

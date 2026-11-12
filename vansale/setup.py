@@ -66,6 +66,7 @@ def after_migrate() -> None:
     _ensure_print_format()
     _ensure_indexes()
     _ensure_van_series()
+    _store_settings_defaults()
     frappe.db.commit()
 
 
@@ -230,6 +231,21 @@ def _ensure_custom_fields() -> None:
     except ImportError:
         return
     create_custom_fields(VANSALE_CUSTOM_FIELDS, update=True)
+
+
+def _store_settings_defaults() -> None:
+    """Store the default of every Vansale Settings field that has no value
+    yet. Frappe does not store a new field's default on an existing single,
+    so the form showed new options blank or unticked (e.g. "Show Share
+    button") and saving the form turned them off. Values already set are
+    left as they are."""
+    if not frappe.db.exists("DocType", "Vansale Settings"):
+        return
+    stored = set(frappe.db.sql_list("SELECT field FROM `tabSingles` WHERE doctype = 'Vansale Settings'"))
+    for df in frappe.get_meta("Vansale Settings").fields:
+        if df.fieldname in stored or df.default in (None, "") or df.fieldtype in frappe.model.no_value_fields:
+            continue
+        frappe.db.set_single_value("Vansale Settings", df.fieldname, df.default)
 
 
 def _ensure_role(role: str, desk_access: int = 1) -> None:

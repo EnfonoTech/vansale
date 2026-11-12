@@ -95,7 +95,7 @@ def _browser_print_pdf(doc, print_format: str | None, no_letterhead: int) -> byt
     apply. None when Chromium is missing or fails — the caller then uses
     Frappe's PDF, so printing keeps working."""
     from vansale.api.customer import _inline_public_images
-    from vansale.pdf_engine import chromium_path
+    from vansale.pdf_engine import chromium_env, chromium_path
 
     exe = chromium_path()
     if not exe:
@@ -118,7 +118,7 @@ def _browser_print_pdf(doc, print_format: str | None, no_letterhead: int) -> byt
                     f"--user-data-dir={os.path.join(tmp, 'profile')}",
                     f"--print-to-pdf={out}", "file://" + src,
                 ],
-                capture_output=True, timeout=60, check=False,
+                capture_output=True, timeout=60, check=False, env=chromium_env(),
             )
         except (OSError, subprocess.TimeoutExpired) as exc:
             frappe.log_error(f"{doc.doctype} {doc.name}: {exc}", "Vansale PDF")
