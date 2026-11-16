@@ -58,7 +58,6 @@ def check_item_allowed(item_code: str) -> None:
         frappe.throw(_("You are not permitted to sell item {0}").format(item_code), frappe.PermissionError)
 
 
-@frappe.whitelist(methods=["GET"])
 def warehouse_stock(warehouse: str, item_codes: list[str] | None = None) -> dict[str, dict]:
     """item_code → {"qty", "value"} in `warehouse`, from Vansale Settings
     "Stock figures from":
@@ -101,6 +100,7 @@ def warehouse_stock(warehouse: str, item_codes: list[str] | None = None) -> dict
     return out
 
 
+@frappe.whitelist(methods=["GET"])
 def list_mine(
     limit: int = 100,
     search: Optional[str] = None,
