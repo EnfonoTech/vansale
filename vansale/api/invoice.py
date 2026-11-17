@@ -19,7 +19,9 @@ from vansale.api.sales_return import refund_owed, resolve_return_reason, return_
 from vansale.api.access import check_read, readable_doc
 from vansale.api.outbox import claim
 from vansale.api.payment import check_mode_allowed
-from vansale.api.me import cash_sale_settings, current_user_sales_person
+from vansale.api.me import cash_sale_settings, current_user_sales_person, update_stock_enabled
+from vansale.api.doc_defaults import apply_van_defaults
+from vansale import steelforce
 
 
 def _user_default(allow: str) -> Optional[str]:
@@ -36,7 +38,9 @@ def _get_default_warehouse(company: str) -> Optional[str]:
     (ERPNext v15 Company has no `default_warehouse` column; reading it crashed
     for any user without a default Warehouse permission.)
     """
-    return _user_default("Warehouse") or frappe.db.get_single_value(
+    from vansale.api.me import van_default
+
+    return van_default("Warehouse") or _user_default("Warehouse") or frappe.db.get_single_value(
         "Stock Settings", "default_warehouse"
     )
 
@@ -48,8 +52,11 @@ def _customer_title(customer: str) -> Optional[str]:
 
 
 def _user_company() -> str:
+    from vansale.api.me import van_default
+
     return (
-        _user_default("Company")
+        van_default("Company")
+        or _user_default("Company")
         or frappe.defaults.get_user_default("Company", frappe.session.user)
         or frappe.db.get_single_value("Global Defaults", "default_company")
     )
@@ -216,6 +223,7 @@ def save(
     discount_amount: Optional[float] = None,  # invoice-level additional discount
     apply_discount_on: Optional[str] = None,  # "Grand Total" | "Net Total"
     payments: Optional[list[dict[str, Any]]] = None,  # split cash: [{mode_of_payment, amount, reference_no}]
+    collect_later: int = 0,  # cash sale left unpaid (setting "Cash sale collection")
 ) -> dict:
     if not client_id:
         frappe.throw(_("client_id is required"))
@@ -246,18 +254,23 @@ def save(
     doc.set_posting_time = 1
     doc.posting_date = posting.date()
     doc.posting_time = posting.strftime("%H:%M:%S")
-    doc.update_stock = int(bool(update_stock))
+    # An order taker's invoice moves no stock (setting "Invoice updates stock").
+    doc.update_stock = int(bool(update_stock)) if update_stock_enabled() else 0
     doc.set_warehouse = set_warehouse
     doc.remarks = remarks
     doc.custom_client_id = client_id  # custom field added via fixture
+    apply_van_defaults(doc)
 
     # Cash / credit. Cash is posted per the "Cash sale posting" setting:
     # POS Invoice → is_pos + payments row; Payment Entry → normal invoice and a
-    # Payment Entry against it on submit.
+    # Payment Entry against it on submit. "Collect later" posts neither: the
+    # invoice stays unpaid for the driver / office to collect.
     pay_type = (payment_type or "").lower()
-    pe_mode = pay_type == "cash" and _cash_via_payment_entry()
-    rows = _payment_rows(mode_of_payment, payments) if pay_type == "cash" else []
-    if pay_type == "cash" and not pe_mode:
+    steelforce.set_payment_mode(doc, pay_type)
+    later = pay_type == "cash" and _collect_later(collect_later)
+    pe_mode = pay_type == "cash" and not later and _cash_via_payment_entry()
+    rows = _payment_rows(mode_of_payment, payments) if pay_type == "cash" and not later else []
+    if pay_type == "cash" and not later and not pe_mode:
         doc.is_pos = 1
         # payments rows filled after insert so grand_total is known.
     if pe_mode:
@@ -287,7 +300,7 @@ def save(
     # Fill payment row only after insert so grand_total is computed. Drafts
     # get it too: it is the only place the chosen mode is stored, so editing
     # or submitting the draft later would otherwise fall back to "Cash".
-    if pay_type == "cash" and not pe_mode:
+    if pay_type == "cash" and not later and not pe_mode:
         _fill_pos_payments(doc, rows)
         doc.save()
     elif pe_mode:
@@ -322,6 +335,19 @@ def save(
 
 def _cash_via_payment_entry() -> bool:
     return cash_sale_settings()["posting"] == "Payment Entry"
+
+
+def _collect_later(requested) -> bool:
+    """A cash sale left unpaid: always ("Collect later"), never ("Collect
+    now", the default) or as the salesman chose on the sale ("Salesman chooses")."""
+    from vansale.api.me import cash_collection
+
+    mode = cash_collection()
+    if mode == "Collect later":
+        return True
+    if mode == "Salesman chooses":
+        return bool(cint(requested))
+    return False
 
 
 def _payment_rows(mode_of_payment: Optional[str], payments: Optional[list[dict[str, Any]]]) -> list[dict]:
@@ -486,6 +512,31 @@ def _append_items(doc, items: list[dict[str, Any]], set_warehouse: Optional[str]
             row.warehouse = item.get("warehouse") or set_warehouse
 
 
+# Row links back to the document an invoice was made from. Rebuilding the rows
+# from the app's lines dropped them, so an order stayed "to bill" (and could be
+# billed twice) and a quotation never became "Ordered".
+_SOURCE_LINK_FIELDS = ("sales_order", "so_detail", "delivery_note", "dn_detail", "custom_quotation")
+
+
+def _keep_source_links(old_rows, doc) -> None:
+    """Give each rebuilt row the source links of the old row for the same item
+    (first unused one, in order)."""
+    item_meta = frappe.get_meta("Sales Invoice Item")
+    fields = [f for f in _SOURCE_LINK_FIELDS if item_meta.has_field(f)]
+    pool: dict[str, list] = {}
+    for row in old_rows:
+        if any(row.get(f) for f in fields):
+            pool.setdefault(row.item_code, []).append(row)
+    for row in doc.items:
+        sources = pool.get(row.item_code)
+        if not sources:
+            continue
+        source = sources.pop(0)
+        for f in fields:
+            if source.get(f):
+                row.set(f, source.get(f))
+
+
 def _apply_template_taxes(doc) -> None:
     """Fill the taxes table from `taxes_and_charges`, as the desk form does.
 
@@ -521,6 +572,7 @@ def update_draft(
     mode_of_payment: Optional[str] = None,
     warehouse: Optional[str] = None,
     payments: Optional[list[dict[str, Any]]] = None,
+    collect_later: int = 0,
 ) -> dict:
     """In-place update a draft Sales Invoice.
 
@@ -557,24 +609,29 @@ def update_draft(
     # so the POS flow activates on the next save (payments row filled
     # after save, same as `save()`).
     pay_type = (payment_type or "").lower()
-    pe_mode = pay_type == "cash" and _cash_via_payment_entry()
-    rows = _payment_rows(mode_of_payment, payments) if pay_type == "cash" else []
+    steelforce.set_payment_mode(doc, pay_type)
+    apply_van_defaults(doc)
+    later = pay_type == "cash" and _collect_later(collect_later)
+    pe_mode = pay_type == "cash" and not later and _cash_via_payment_entry()
+    rows = _payment_rows(mode_of_payment, payments) if pay_type == "cash" and not later else []
     if pe_mode:
         _set_cash_mode(doc, rows)
-    elif pay_type == "cash":
+    elif pay_type == "cash" and not later:
         doc.is_pos = 1
-    elif pay_type == "credit":
+    elif pay_type == "credit" or later:
         doc.is_pos = 0
         doc.set("payments", [])
-    if pay_type != "cash":
+    if pay_type != "cash" or later:
         for field in ("custom_vansale_payment_mode", "custom_vansale_payments"):
             if doc.meta.has_field(field):
                 doc.set(field, None)
 
     # Rebuild items table. Clearing + appending keeps the child-row
     # docnames consistent with Frappe's expectations on save().
+    old_rows = list(doc.items)
     doc.set("items", [])
     _append_items(doc, items, set_warehouse)
+    _keep_source_links(old_rows, doc)
     _apply_template_taxes(doc)
 
     _set_additional_discount(doc, discount_amount)
@@ -588,7 +645,7 @@ def update_draft(
     doc.flags.ignore_version = True
     doc.save(ignore_permissions=False)
 
-    if pay_type == "cash" and not pe_mode:
+    if pay_type == "cash" and not later and not pe_mode:
         _fill_pos_payments(doc, rows)
         doc.flags.ignore_version = True
         doc.save()
@@ -864,7 +921,8 @@ def detail(name: str) -> dict:
         "due_date": str(doc.due_date) if doc.due_date else None,
         "is_return": int(doc.is_return or 0),
         "is_pos": int(doc.is_pos or 0),
-        "payment_type": "cash" if (doc.is_pos or doc.get("custom_vansale_payment_mode")) else "credit",
+        "payment_type": steelforce.payment_type_of(doc)
+        or ("cash" if (doc.is_pos or doc.get("custom_vansale_payment_mode")) else "credit"),
         "payments": (
             [{"mode_of_payment": p.mode_of_payment, "amount": flt(p.amount)} for p in doc.payments]
             if doc.get("payments") else _stored_rows(doc)

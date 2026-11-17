@@ -1,8 +1,10 @@
 """Quotation endpoints.
 
-A quotation is addressed to a Customer, or to a Lead that has not been
-converted yet (`quotation_to`). Only a customer quotation can become a Sales
-Order — a lead is converted first (`vansale.api.lead.convert`).
+A quotation is addressed to a Customer or to a Lead (`quotation_to`), as in
+ERPNext. A lead stays a lead while it is only quoted; when its quotation
+becomes a Sales Order (`make_order`) or a Sales Invoice (`make_invoice`) the
+lead is converted into a Customer. Which of the two the app offers is the
+"Quotation becomes" setting.
 """
 
 from __future__ import annotations
@@ -15,8 +17,11 @@ from frappe.utils import add_days, cint, flt, getdate, nowdate
 
 from vansale.api import selling
 from vansale.api.access import check_read, readable_doc
-from vansale.api.invoice import _user_company
+from vansale.api.doc_defaults import apply_van_defaults
+from vansale.api.invoice import _get_default_warehouse, _user_company
+from vansale.api.me import quotation_next_step, update_stock_enabled
 from vansale.api.outbox import claim
+from vansale import steelforce
 
 _LIST_FIELDS = [
     "name", "quotation_to", "party_name", "customer_name", "grand_total", "status",
@@ -76,17 +81,6 @@ def save(
     if existing:
         return _result(frappe.get_doc("Quotation", existing), replay=True)
 
-    # Quoting a lead makes it a customer, as ERPNext's own flow ends up doing
-    # (and an order needs a customer anyway). Same transaction as the quotation,
-    # so a failed quote leaves the lead untouched.
-    converted = None
-    if quotation_to == "Lead":
-        from vansale.api.lead import ensure_customer
-
-        party, created = ensure_customer(readable_doc("Lead", party))
-        quotation_to = "Customer"
-        converted = party if created else None
-
     company = _user_company()
     doc = frappe.new_doc("Quotation")
     doc.quotation_to = quotation_to
@@ -107,7 +101,7 @@ def save(
         "party": party, "quotation_to": quotation_to, "items": items,
     })
     frappe.db.commit()
-    return {**_result(doc), "customer": party if quotation_to == "Customer" else None, "converted_customer": converted}
+    return {**_result(doc), "customer": party if quotation_to == "Customer" else None}
 
 
 @frappe.whitelist(methods=["POST"])
@@ -203,24 +197,41 @@ def detail(name: str) -> dict:
         "items": selling.line_rows(doc),
         "taxes": selling.tax_rows(doc),
         "orders": orders,
+        "invoices": steelforce.invoices_for_quotation(doc.name),
         "modified": selling.stamp(doc),
     }
 
 
 @frappe.whitelist(methods=["POST"])
 def make_order(client_id: str, name: str, delivery_date: Optional[str] = None, submit: int = 0) -> dict:
-    """Sales Order from a submitted customer quotation (ERPNext `make_sales_order`)."""
+    """Sales Order from a submitted quotation (ERPNext `make_sales_order`).
+
+    A lead's quotation converts the lead into a Customer first, in the same
+    transaction, so a refused order leaves the lead untouched.
+    """
     if not client_id:
         frappe.throw(_("client_id is required"))
     quotation = readable_doc("Quotation", name)
     if cint(quotation.docstatus) != 1:
         frappe.throw(_("Submit the quotation before making an order"))
-    if quotation.quotation_to != "Customer":
-        frappe.throw(_("Convert the lead to a customer before making an order"))
+    if quotation_next_step() == "Sales Invoice":
+        frappe.throw(_("Quotations become invoices on this site, not orders"))
+    if quotation.quotation_to not in ("Customer", "Lead"):
+        frappe.throw(_("Only a customer or lead quotation can become an order"))
 
     existing = claim(client_id, "sales_order", "Sales Order")
     if existing:
         return {"name": existing, "idempotent_replay": True}
+
+    converted = None
+    if quotation.quotation_to == "Lead":
+        # Our conversion rather than ERPNext's: the Customer `before_insert` hook
+        # assigns the new customer to the salesman. `make_sales_order` then finds
+        # it through the Customer's `lead_name`.
+        from vansale.api.lead import ensure_customer
+
+        customer, created = ensure_customer(readable_doc("Lead", quotation.party_name))
+        converted = customer if created else None
 
     from erpnext.selling.doctype.quotation.quotation import make_sales_order
 
@@ -229,6 +240,7 @@ def make_order(client_id: str, name: str, delivery_date: Optional[str] = None, s
     order.delivery_date = delivery
     for row in order.items:
         row.delivery_date = delivery
+    apply_van_defaults(order)
     selling.tag_sales_person(order)
     order.insert()
     if cint(submit):
@@ -241,5 +253,63 @@ def make_order(client_id: str, name: str, delivery_date: Optional[str] = None, s
         "grand_total": flt(order.grand_total),
         "status": order.status,
         "docstatus": cint(order.docstatus),
+        "customer": order.customer,
+        "converted_customer": converted,
+        "idempotent_replay": False,
+    }
+
+
+def _quotation_customer(quotation) -> tuple[str, Optional[str]]:
+    """(customer, customer converted now?) — a lead's quotation converts the lead."""
+    if quotation.quotation_to == "Lead":
+        from vansale.api.lead import ensure_customer
+
+        customer, created = ensure_customer(readable_doc("Lead", quotation.party_name))
+        return customer, (customer if created else None)
+    return quotation.party_name, None
+
+
+@frappe.whitelist(methods=["POST"])
+def make_invoice(client_id: str, name: str) -> dict:
+    """Draft Sales Invoice straight from a submitted quotation (no Sales Order),
+    when the "Quotation becomes" setting allows it. Left as a draft: payment
+    type, collection and submit happen in the invoice form, as for an order.
+    """
+    if not client_id:
+        frappe.throw(_("client_id is required"))
+    if quotation_next_step() == "Sales Order":
+        frappe.throw(_("Quotations become sales orders on this site, not invoices"))
+    quotation = readable_doc("Quotation", name)
+    if cint(quotation.docstatus) != 1:
+        frappe.throw(_("Submit the quotation before invoicing it"))
+    if quotation.quotation_to not in ("Customer", "Lead"):
+        frappe.throw(_("Only a customer or lead quotation can be invoiced"))
+
+    existing = claim(client_id, "invoice", "Sales Invoice")
+    if existing:
+        return {"name": existing, "idempotent_replay": True}
+
+    customer, converted = _quotation_customer(quotation)
+    invoice = steelforce.invoice_from_quotation(quotation.name, customer)
+    warehouse = _get_default_warehouse(invoice.company)
+    invoice.update_stock = int(update_stock_enabled())
+    if warehouse:
+        invoice.set_warehouse = warehouse
+        for row in invoice.items:
+            row.warehouse = row.get("warehouse") or warehouse
+    invoice.custom_client_id = client_id
+    apply_van_defaults(invoice)
+    selling.tag_sales_person(invoice)
+    invoice.insert()
+
+    selling.record_outbox(client_id, "invoice", "Sales Invoice", invoice.name, None, {"quotation": quotation.name})
+    frappe.db.commit()
+    return {
+        "name": invoice.name,
+        "grand_total": flt(invoice.grand_total),
+        "status": invoice.status,
+        "docstatus": cint(invoice.docstatus),
+        "customer": invoice.customer,
+        "converted_customer": converted,
         "idempotent_replay": False,
     }

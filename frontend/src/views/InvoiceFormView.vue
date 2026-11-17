@@ -79,7 +79,16 @@ const mops = ref<ModeOfPayment[]>([]);
  */
 interface PayRow { mode: string; amount: number | null; reference: string }
 const payRows = ref<PayRow[]>([]);
-const useSplit = computed(() => session.splitPayment && paymentType.value === "cash");
+// "Cash sale collection" setting: collected on the spot, left for the driver /
+// office ("Collect later"), or the salesman's choice per sale.
+const collectLaterChoice = ref(false);
+const laterChoosable = computed(() => session.cashCollection === "Salesman chooses");
+const collectLater = computed(
+  () =>
+    paymentType.value === "cash" &&
+    (session.cashCollection === "Collect later" || (laterChoosable.value && collectLaterChoice.value)),
+);
+const useSplit = computed(() => session.splitPayment && paymentType.value === "cash" && !collectLater.value);
 const needsReference = (mode: string) => Boolean(mops.value.find((m) => m.name === mode)?.needs_reference);
 
 function addPayRow() {
@@ -155,7 +164,9 @@ async function loadTaxInfo() {
 // The catalog only lists items with stock in this van (see `loadAll`), so
 // distinguish "your search matched nothing" from "this van is empty" —
 // the second one needs the office to post a transfer, not a retype.
+// An order taker (invoice moves no stock) sees the whole price list.
 const emptyCatalogHint = computed(() => {
+  if (!session.updateStock) return itemSearch.value.trim() ? "No item matches that search." : "No items to sell.";
   if (itemSearch.value.trim()) return "No item in this van's stock matches that search.";
   return warehouse.value
     ? `No stock in ${warehouse.value}. Ask the office to transfer stock into the van.`
@@ -282,7 +293,7 @@ async function loadAll() {
   // `onlyInStock` — a van can only sell what it carries, and an item with
   // no incoming stock has no valuation rate, which ERPNext rejects at
   // submit time (surfacing as an unfixable sync error days later).
-  items.value = await listItems(undefined, warehouse.value || undefined, 300, true);
+  items.value = await listItems(undefined, warehouse.value || undefined, 300, session.updateStock);
   if (isEditMode.value) {
     await prefillFromDraft(editName.value);
   }
@@ -304,6 +315,8 @@ async function prefillFromDraft(name: string) {
     // saving with that default turned an unpaid credit draft into a paid one.
     paymentType.value = doc.payment_type ?? (doc.is_pos ? "cash" : "credit");
     if (doc.mode_of_payment) modeOfPayment.value = doc.mode_of_payment;
+    // A cash draft with no payment stored was saved as "collect later".
+    collectLaterChoice.value = paymentType.value === "cash" && !doc.is_pos && !doc.payments?.length;
     // A single partial payment on a draft: show its amount.
     if (doc.payments?.length === 1 && doc.payments[0].amount != null
         && Math.abs(Number(doc.payments[0].amount) - Number(doc.grand_total)) > 0.005) {
@@ -485,7 +498,7 @@ async function doSave(submit: 0 | 1) {
   if (useSplit.value) {
     if (!payRows.value.length) { toasts.warn("Add a payment, or choose Credit"); return; }
     if (splitCredit.value < -0.005) { toasts.warn("Payments are more than the invoice total"); return; }
-  } else if (paymentType.value === "cash" && singleAmount.value != null) {
+  } else if (paymentType.value === "cash" && !collectLater.value && singleAmount.value != null) {
     if (singleAmount.value <= 0) { toasts.warn("Enter the amount paid, or choose Credit"); return; }
     if (singleAmount.value > grandTotal.value + 0.005) { toasts.warn("Amount is more than the invoice total"); return; }
   }
@@ -493,8 +506,10 @@ async function doSave(submit: 0 | 1) {
   if (flag) {
     const paid = useSplit.value
       ? splitPaid.value
-      : paymentType.value === "cash" ? singleAmount.value ?? grandTotal.value : 0;
-    const pay = paid <= 0.005
+      : paymentType.value === "cash" && !collectLater.value ? singleAmount.value ?? grandTotal.value : 0;
+    const pay = collectLater.value
+      ? "Cash · collected later"
+      : paid <= 0.005
       ? "Credit"
       : paid >= grandTotal.value - 0.005 ? "Paid in full" : `Paid ${money(paid)} · rest on credit`;
     const ok = await confirmSubmit(isEditMode.value ? "Submit this invoice?" : "Submit invoice?", [
@@ -544,17 +559,18 @@ async function doSave(submit: 0 | 1) {
         };
       }),
       remarks: remarks.value || undefined,
-      update_stock: 1 as const,
+      update_stock: session.updateStock ? (1 as const) : (0 as const),
+      collect_later: collectLater.value ? (1 as const) : (0 as const),
       submit,
       payment_type: paymentType.value,
-      mode_of_payment: paymentType.value === "cash" ? modeOfPayment.value : undefined,
+      mode_of_payment: paymentType.value === "cash" && !collectLater.value ? modeOfPayment.value : undefined,
       payments: useSplit.value
         ? payRows.value.map((r) => ({
             mode_of_payment: r.mode,
             amount: r.amount == null || (r.amount as unknown) === "" ? null : Number(r.amount),
             reference_no: r.reference || null,
           }))
-        : paymentType.value === "cash" && singleAmount.value != null
+        : paymentType.value === "cash" && !collectLater.value && singleAmount.value != null
           // Partial payment in one mode; untouched = full amount (server pays the exact total).
           ? [{ mode_of_payment: modeOfPayment.value, amount: singleAmount.value, reference_no: null }]
           : undefined,
@@ -578,6 +594,7 @@ async function doSave(submit: 0 | 1) {
           payment_type: payload.payment_type,
           mode_of_payment: payload.mode_of_payment,
           payments: payload.payments,
+          collect_later: payload.collect_later,
           discount_amount: payload.discount_amount,
           apply_discount_on: payload.apply_discount_on,
         })
@@ -668,6 +685,17 @@ onMounted(loadAll);
           <Icon name="clock" :size="16" /> Credit
         </button>
       </div>
+      <div v-if="paymentType === 'cash' && laterChoosable" class="seg seg-small">
+        <button type="button" class="seg-btn" :data-active="!collectLaterChoice" @click="collectLaterChoice = false">
+          Collected now
+        </button>
+        <button type="button" class="seg-btn" :data-active="collectLaterChoice" @click="collectLaterChoice = true">
+          Collect later
+        </button>
+      </div>
+      <p v-if="collectLater" class="muted small later-note">
+        Cash sale, not collected now — it stays unpaid until the driver or office collects it.
+      </p>
       <div v-if="useSplit" class="pay-rows">
         <div v-for="(r, i) in payRows" :key="i" class="pay-row">
           <select v-model="r.mode">
@@ -693,7 +721,7 @@ onMounted(loadAll);
           <span class="tabular"><SarSymbol :code="session.currency" />{{ money(splitCredit) }}</span>
         </div>
       </div>
-      <div v-else-if="paymentType === 'cash'" class="stack-sm">
+      <div v-else-if="paymentType === 'cash' && !collectLater" class="stack-sm">
         <div class="mode-amount">
           <label class="field">
             <span class="tiny">Mode of Payment</span>
@@ -889,6 +917,8 @@ onMounted(loadAll);
   transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
 }
 .seg-btn[data-active="true"] { background: var(--primary); color: var(--on-primary, white); }
+.seg-small .seg-btn { min-height: 2.25rem; font-size: var(--text-sm); }
+.later-note { margin: 0; }
 
 .section-head { display: flex; justify-content: space-between; align-items: center; }
 .tabular { font-variant-numeric: tabular-nums; }

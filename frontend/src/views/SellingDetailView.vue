@@ -1,16 +1,15 @@
 <script setup lang="ts">
 /**
  * Quotation / Sales Order detail, with the next step of the cycle:
- *   Quotation → Sales Order   (customer quotations; lead quotations convert the lead first)
+ *   Quotation → Sales Order   (a lead's quotation converts the lead into a customer)
  *   Sales Order → Sales Invoice (a draft, finished in the invoice form: payment, submit)
  */
 import { computed, onMounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import {
-  KIND, docDetail, deleteDoc, submitDoc, markQuotationLost, quotationToOrder, orderToInvoice,
+  KIND, docDetail, deleteDoc, submitDoc, markQuotationLost, quotationToOrder, quotationToInvoice, orderToInvoice,
   type SellingDetail, type SellingKind,
 } from "@/api/selling";
-import { convertLead } from "@/api/lead";
 import { openPrint } from "@/api/print";
 import { ApiError } from "@/app/frappe";
 import { useSessionStore } from "@/stores/session";
@@ -67,7 +66,18 @@ const isOpen = computed(() => doc.value?.docstatus === 1 && !["Lost", "Expired",
 const isLeadQuote = computed(() => props.kind === "quotation" && doc.value?.quotation_to === "Lead");
 const dateLabel = computed(() => k.value.dateLabel);
 const dateValue = computed(() => (props.kind === "quotation" ? doc.value?.valid_till : doc.value?.delivery_date));
-const linked = computed(() => (props.kind === "quotation" ? doc.value?.orders : doc.value?.invoices) ?? []);
+// A quotation links to its orders and, where it can be invoiced directly, its invoices.
+const linked = computed(() =>
+  props.kind === "quotation"
+    ? [
+        ...(doc.value?.orders ?? []).map((n) => ({ name: n, route: "order-detail" })),
+        ...(doc.value?.invoices ?? []).map((n) => ({ name: n, route: "invoice-detail" })),
+      ]
+    : (doc.value?.invoices ?? []).map((n) => ({ name: n, route: "invoice-detail" })),
+);
+// "Quotation becomes" setting: Sales Order, Sales Invoice or Both.
+const canOrder = computed(() => session.quotationNextStep !== "Sales Invoice");
+const canInvoice = computed(() => session.quotationNextStep !== "Sales Order");
 
 function fail(e: unknown) {
   toasts.error(e instanceof ApiError ? e.serverMessage ?? e.message : e instanceof Error ? e.message : String(e));
@@ -112,9 +122,34 @@ const lost = () => run(async () => {
 
 const toOrder = () => run(async () => {
   if (!doc.value) return;
+  if (isLeadQuote.value) {
+    const ok = await confirm.ask({
+      title: "Make order?",
+      message: `${doc.value.party_name} is a lead. Making the order turns the lead into a customer.`,
+      confirmText: "Make order",
+    });
+    if (!ok) return;
+  }
   const res = await quotationToOrder(doc.value.name);
+  if (res.converted_customer) toasts.success(`Lead converted to customer ${res.converted_customer}`);
   toasts.success(`Order ${res.name} created`);
   void router.push({ name: "order-detail", params: { name: res.name } });
+});
+
+const quoteToInvoice = () => run(async () => {
+  if (!doc.value) return;
+  if (isLeadQuote.value) {
+    const ok = await confirm.ask({
+      title: "Make invoice?",
+      message: `${doc.value.party_name} is a lead. Making the invoice turns the lead into a customer.`,
+      confirmText: "Make invoice",
+    });
+    if (!ok) return;
+  }
+  const res = await quotationToInvoice(doc.value.name);
+  if (res.converted_customer) toasts.success(`Lead converted to customer ${res.converted_customer}`);
+  toasts.success(`Invoice ${res.name} drafted — choose payment and submit`);
+  void router.push({ name: "invoice-edit", params: { name: res.name } });
 });
 
 const toInvoice = () => run(async () => {
@@ -122,20 +157,6 @@ const toInvoice = () => run(async () => {
   const res = await orderToInvoice(doc.value.name);
   toasts.success(`Invoice ${res.name} drafted — choose payment and submit`);
   void router.push({ name: "invoice-edit", params: { name: res.name } });
-});
-
-// A lead quotation cannot be ordered until the lead is a customer.
-const convertThenOrder = () => run(async () => {
-  if (!doc.value?.party) return;
-  const ok = await confirm.ask({
-    title: "Convert lead to customer?",
-    message: "This quotation can only become an order once the lead is a customer.",
-    confirmText: "Convert",
-  });
-  if (!ok) return;
-  const c = await convertLead(doc.value.party);
-  toasts.success(`Customer ${c.customer} created`);
-  void router.push({ name: "customer-detail", params: { name: c.customer } });
 });
 
 async function print() {
@@ -191,11 +212,11 @@ const open = (name: string, route: string) => router.push({ name: route, params:
             <button class="ghost danger-ghost" :disabled="busy" @click="remove"><Icon name="trash" :size="16" /> Delete</button>
           </template>
           <template v-else-if="isOpen && kind === 'quotation'">
-            <button v-if="!isLeadQuote" class="primary" :disabled="busy" @click="toOrder">
+            <button v-if="canOrder" class="primary" :disabled="busy" @click="toOrder">
               <Icon name="bag" :size="16" /> Make order
             </button>
-            <button v-else class="primary" :disabled="busy" @click="convertThenOrder">
-              <Icon name="customer" :size="16" /> Convert lead
+            <button v-if="canInvoice" :class="canOrder ? 'ghost' : 'primary'" :disabled="busy" @click="quoteToInvoice">
+              <Icon name="invoice" :size="16" /> Make invoice
             </button>
             <button class="ghost danger-ghost" :disabled="busy" @click="lost"><Icon name="x" :size="16" /> Lost</button>
           </template>
@@ -207,12 +228,12 @@ const open = (name: string, route: string) => router.push({ name: route, params:
       </section>
 
       <section v-if="linked.length" class="card stack">
-        <h3 class="section-h">{{ kind === "quotation" ? "Orders" : "Invoices" }}</h3>
+        <h3 class="section-h">{{ kind === "quotation" ? "Made from this quotation" : "Invoices" }}</h3>
         <button
-          v-for="n in linked" :key="n" class="link-row ghost"
-          @click="open(n, kind === 'quotation' ? 'order-detail' : 'invoice-detail')"
+          v-for="n in linked" :key="n.name" class="link-row ghost"
+          @click="open(n.name, n.route)"
         >
-          <span>{{ n }}</span><Icon name="chevron-right" :size="16" />
+          <span>{{ n.name }}</span><Icon name="chevron-right" :size="16" />
         </button>
       </section>
 

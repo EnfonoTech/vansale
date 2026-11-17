@@ -114,10 +114,8 @@ export interface SellingSaved {
   grand_total: number;
   status: string;
   docstatus: number;
-  /** Quotation: the customer it was made for (a lead is converted on save). */
+  /** Quotation: the customer it was made for (null for a lead's quotation). */
   customer?: string | null;
-  /** Set when saving converted a lead into this new customer. */
-  converted_customer?: string | null;
 }
 
 const path = (kind: SellingKind, fn: string) => `${KIND[kind].module}.${fn}`;
@@ -179,13 +177,24 @@ export async function markQuotationLost(name: string, reason?: string): Promise<
   return apiCall<SellingSaved>("POST", "vansale.api.quotation.mark_lost", { name, reason });
 }
 
-/** Quotation → Sales Order (customer quotations only). */
-export async function quotationToOrder(name: string, deliveryDate?: string): Promise<{ name: string }> {
+/** Quotation → Sales Order. A lead's quotation converts the lead into a customer first. */
+export async function quotationToOrder(
+  name: string,
+  deliveryDate?: string,
+): Promise<{ name: string; customer: string; converted_customer?: string | null }> {
   return apiCall("POST", "vansale.api.quotation.make_order", {
     client_id: genUuid(),
     name,
     delivery_date: deliveryDate,
   });
+}
+
+/** Quotation → draft Sales Invoice (no order), when the "Quotation becomes" setting allows it.
+ *  A lead's quotation converts the lead into a customer first. */
+export async function quotationToInvoice(
+  name: string,
+): Promise<{ name: string; customer: string; converted_customer?: string | null }> {
+  return apiCall("POST", "vansale.api.quotation.make_invoice", { client_id: genUuid(), name });
 }
 
 /** Sales Order → draft Sales Invoice, finished in the invoice form. */

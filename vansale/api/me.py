@@ -90,6 +90,14 @@ def config_defaults() -> dict:
             if is_default:
                 default_cost_center = value
 
+    # The van's own warehouse / cost center / branch / company win over User
+    # Permission defaults: other apps (e.g. sf_trading's Branch Configuration)
+    # reset a user's permission defaults, which silently moved the van.
+    default_warehouse = van_default("Warehouse", user) or default_warehouse
+    default_cost_center = van_default("Cost Center", user) or default_cost_center
+    branch = van_default("Branch", user) or branch
+    company = van_default("Company", user) or company
+
     # Van code + sales person — first Vansale Configuration that lists this user.
     cfg_user = frappe.db.get_value(
         "Vansale Configuration User",
@@ -200,6 +208,7 @@ def config_defaults() -> dict:
         "print_formats": print_formats(user),
         "print": print_behaviour(user),
         "customer_form": customer_form_config(),
+        "selling_flow": selling_flow(user),
     }
 
 
@@ -290,13 +299,26 @@ def customer_name_2_field() -> str | None:
     return None
 
 
+def cr_number_field() -> str | None:
+    """Customer field for the Commercial Registration number: Vansale Settings
+    "CR number field" when it exists on Customer, else `custom_cr_number`."""
+    meta = frappe.get_meta("Customer")
+    configured = frappe.db.get_single_value("Vansale Settings", "cr_number_field") if frappe.get_meta(
+        "Vansale Settings"
+    ).has_field("cr_number_field") else None
+    for fieldname in ([configured] if configured else []) + ["custom_cr_number"]:
+        if fieldname and meta.has_field(fieldname):
+            return fieldname
+    return None
+
+
 def customer_form_config() -> dict:
     """Optional customer fields this site has, for the app's customer form."""
     meta = frappe.get_meta("Customer")
     name_2 = customer_name_2_field()
     return {
         "name_2": {"field": name_2, "label": _(meta.get_label(name_2))} if name_2 else None,
-        "cr_number": meta.has_field("custom_cr_number"),
+        "cr_number": bool(cr_number_field()),
         # ZATCA "additional number" only where the site's Address has a field for it.
         "additional_number": any(
             frappe.get_meta("Address").has_field(f) for f in ("custom_additional_number", "additional_number")
@@ -313,6 +335,33 @@ def user_to_van_config(user: str | None) -> str | None:
         {"user": user},
         "parent",
     )
+
+
+_VAN_DEFAULT_SOURCES = {
+    # allow -> (child doctype, field) on Vansale Configuration; first row wins
+    "Warehouse": ("Vansale Configuration Warehouse", "warehouse"),
+    "Cost Center": ("Vansale Configuration Cost Center", "cost_center"),
+}
+
+
+def van_default(allow: str, user: str | None = None) -> str | None:
+    """The user's van value for a User Permission type (Warehouse, Cost Center,
+    Branch, Company), or None when the user has no van / the van leaves it blank.
+
+    Callers prefer this over the user's default User Permission and fall back
+    to that, so sites without a van row keep working as before.
+    """
+    van = user_to_van_config(user or frappe.session.user)
+    if not van:
+        return None
+    if allow in _VAN_DEFAULT_SOURCES:
+        child, field = _VAN_DEFAULT_SOURCES[allow]
+        return frappe.db.get_value(
+            child, {"parent": van, "parenttype": "Vansale Configuration"}, field, order_by="idx asc"
+        )
+    if allow in ("Branch", "Company"):
+        return frappe.db.get_value("Vansale Configuration", van, allow.lower()) or None
+    return None
 
 
 def rate_precision() -> int:
@@ -376,6 +425,47 @@ def collection_payment_entry_status(user: str | None = None) -> str:
     if status in ("Submit", "Draft"):
         return status
     return cash_sale_settings(user)["payment_entry_status"]
+
+
+def update_stock_enabled(user: str | None = None) -> bool:
+    """Whether an invoice moves stock out of the salesman's warehouse (a van
+    sale) or not (an order taker: delivery is done from the branch).
+    Van → Vansale Settings (default on)."""
+    return _resolve_mode(
+        _van_value("update_stock_mode", user), default=global_flags().get("update_stock_on_invoice", True)
+    )
+
+
+CASH_COLLECTION_OPTIONS = ("Collect now", "Collect later", "Salesman chooses")
+
+
+def cash_collection(user: str | None = None) -> str:
+    """Whether a cash sale is collected on the spot ("Collect now": POS
+    payment / Payment Entry as before), left unpaid for the driver or office
+    to collect ("Collect later"), or chosen per sale ("Salesman chooses").
+    Van → Vansale Settings."""
+    value = _van_or_global("cash_collection_mode", "cash_collection", "Collect now", user)
+    return value if value in CASH_COLLECTION_OPTIONS else "Collect now"
+
+
+def quotation_next_step() -> str:
+    """What a submitted quotation becomes in the app: "Sales Order",
+    "Sales Invoice" or "Both" (Vansale Settings, default Sales Order)."""
+    value = global_flags().get("quotation_next_step")
+    return value if value in ("Sales Order", "Sales Invoice", "Both") else "Sales Order"
+
+
+def selling_flow(user: str | None = None) -> dict:
+    """The selling-flow settings the app's screens follow."""
+    from vansale import steelforce
+
+    return {
+        "update_stock": update_stock_enabled(user),
+        "cash_collection": cash_collection(user),
+        "quotation_next_step": quotation_next_step(),
+        "return_reasons": steelforce.return_reason_options(),
+        "draft_sale_print": steelforce.draft_sale_printable(),
+    }
 
 
 def invoice_options() -> dict:

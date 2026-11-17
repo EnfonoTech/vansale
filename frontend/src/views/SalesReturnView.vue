@@ -58,6 +58,8 @@ const RETURN_REASONS = [
   "Short Delivery",
   "Other",
 ] as const;
+// The site's own reasons when the server sends them (e.g. a reason master), else the app's list.
+const reasons = computed<string[]>(() => session.returnReasons ?? [...RETURN_REASONS]);
 const reason = ref<string>("");
 const remarks = ref("");
 const busy = ref(false);
@@ -350,7 +352,7 @@ async function submit() {
         <span class="label">Reason *</span>
         <div class="reasons">
           <button
-            v-for="r in RETURN_REASONS"
+            v-for="r in reasons"
             :key="r"
             type="button"
             class="reason-chip"

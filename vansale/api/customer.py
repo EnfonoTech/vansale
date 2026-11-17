@@ -12,7 +12,14 @@ from frappe.utils import flt
 from vansale.api.access import check_read
 from vansale.api.outbox import claim
 from vansale.api.datetime_util import naive_site_to_utc_iso, parse_client_ts
-from vansale.api.me import current_user_sales_person, customer_name_2_field, is_office_user, user_to_van_config
+from vansale.api.me import (
+    cr_number_field,
+    current_user_sales_person,
+    customer_name_2_field,
+    is_office_user,
+    user_to_van_config,
+)
+from vansale import steelforce
 
 
 def _record_customer_outbox(
@@ -665,8 +672,9 @@ def create(
     vat_field = _vat_field()
     if vat_field and tax_id:
         customer_payload[vat_field] = tax_id
-    if cr_number and customer_meta.has_field("custom_cr_number"):
-        customer_payload["custom_cr_number"] = cr_number
+    cr_field = cr_number_field()
+    if cr_number and cr_field:
+        customer_payload[cr_field] = cr_number
     name_2_field = customer_name_2_field()
     if name_2_field and customer_name_2:
         customer_payload[name_2_field] = customer_name_2
@@ -680,6 +688,7 @@ def create(
         doc.append("sales_team", {"sales_person": sp, "allocated_percentage": 100})
         if customer_meta.has_field("custom_sales_person"):
             doc.custom_sales_person = sp
+    steelforce.on_new_customer(doc)
     doc.insert(ignore_permissions=False)
 
     # Create Address if fields provided (mandatory for B2B, optional for B2C).

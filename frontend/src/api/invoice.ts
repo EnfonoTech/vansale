@@ -31,6 +31,8 @@ export interface InvoicePayload {
   payments?: PaymentRow[];
   discount_amount?: number;
   apply_discount_on?: "Grand Total" | "Net Total";
+  /** Cash sale left unpaid for the driver / office ("Cash sale collection" setting). */
+  collect_later?: 0 | 1;
 }
 
 export interface PaymentRow {
@@ -210,6 +212,7 @@ export interface UpdateDraftPayload {
   mode_of_payment?: string;
   payments?: PaymentRow[];
   warehouse?: string;
+  collect_later?: 0 | 1;
 }
 
 /**

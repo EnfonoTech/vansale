@@ -225,7 +225,9 @@ def resolve_return_reason(reason: Optional[str]) -> tuple[str, str]:
     text = (reason or "").strip()
     if not text:
         frappe.throw(_("A return reason is required"))
-    if text in RETURN_REASONS:
+    from vansale import steelforce
+
+    if text in steelforce.return_reason_options():
         return text, text
     return "Other", text
 
@@ -279,8 +281,24 @@ def build_return_against(original, items: list[dict[str, Any]], posting=None, di
     sp = current_user_sales_person()
     if sp:
         doc.append("sales_team", {"sales_person": sp, "allocated_percentage": 100})
+    _return_defaults(doc, original)
     _decide_outstanding(doc, original)
     return doc
+
+
+def _return_defaults(doc, original=None) -> None:
+    """A credit note is built from scratch, so carry the original's branch /
+    cost center where the site has them, then the van's defaults (price list,
+    branch, mandatory sales person) and the Steel Force fields."""
+    from vansale import steelforce
+    from vansale.api.doc_defaults import apply_van_defaults
+
+    if original is not None:
+        for field in ("branch", "cost_center"):
+            if doc.meta.has_field(field) and original.get(field) and not doc.get(field):
+                doc.set(field, original.get(field))
+        steelforce.copy_to_return(doc, original)
+    apply_van_defaults(doc)
 
 
 def _carry_invoice_discount(doc, original, discount_amount=None) -> None:
@@ -418,8 +436,12 @@ def refund(
 
 
 def _set_reason(doc, reason_option: str, reason_text: str, note: Optional[str]) -> None:
+    from vansale import steelforce
+
     extra = (note or "").strip()
     doc.remarks = f"{reason_text} — {extra}" if extra and extra != reason_text else reason_text
+    if steelforce.set_return_reason(doc, reason_option, reason_text, note):
+        return
     # Guarded: a site that has not migrated the fixture yet still takes returns,
     # it just loses the structured breakdown until the next migrate.
     if doc.meta.has_field("custom_return_reason"):
@@ -612,6 +634,7 @@ def build_bulk_return(customer: str, items: list[dict[str, Any]], references: Op
     sp = current_user_sales_person()
     if sp:
         doc.append("sales_team", {"sales_person": sp, "allocated_percentage": 100})
+    _return_defaults(doc)
     return doc
 
 

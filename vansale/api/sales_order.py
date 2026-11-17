@@ -15,7 +15,9 @@ from frappe.utils import add_days, cint, flt, getdate, nowdate
 
 from vansale.api import selling
 from vansale.api.access import check_read, readable_doc
+from vansale.api.doc_defaults import apply_van_defaults
 from vansale.api.invoice import _get_default_warehouse, _user_company
+from vansale.api.me import update_stock_enabled
 from vansale.api.outbox import claim
 
 _LIST_FIELDS = [
@@ -202,12 +204,13 @@ def make_invoice(client_id: str, name: str) -> dict:
     company = invoice.company
     warehouse = order.set_warehouse or _get_default_warehouse(company)
     # The van ships what it invoices — unless a Delivery Note already did.
-    invoice.update_stock = 0 if flt(order.per_delivered) > 0 else 1
+    invoice.update_stock = 0 if flt(order.per_delivered) > 0 else int(update_stock_enabled())
     if invoice.update_stock and warehouse:
         invoice.set_warehouse = warehouse
         for row in invoice.items:
             row.warehouse = row.warehouse or warehouse
     invoice.custom_client_id = client_id
+    apply_van_defaults(invoice)
     selling.tag_sales_person(invoice)
     invoice.insert()
 

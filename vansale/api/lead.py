@@ -1,8 +1,9 @@
 """Lead endpoints — the start of the sales cycle.
 
-A van salesman captures a prospect in the field (`save`), quotes it
-(`quotation.save` with `quotation_to="Lead"`) and, once it is real, turns it
-into a Customer (`convert`) so it can be ordered and invoiced.
+A van salesman captures a prospect in the field (`save`) and quotes it
+(`quotation.save` with `quotation_to="Lead"`). The lead becomes a Customer
+when its quotation is ordered (`quotation.make_order`), or earlier by hand
+(`convert`) when the salesman wants to invoice it straight away.
 """
 
 from __future__ import annotations
@@ -192,7 +193,23 @@ def ensure_customer(lead) -> tuple[str, bool]:
 
     from erpnext.crm.doctype.lead.lead import make_customer
 
+    from vansale.api.customer import _default_leaf
+
     customer = make_customer(lead.name)
+    # ERPNext fills group / territory from Selling Settings, which may be empty
+    # or a group node ("Cannot select a Group type Customer Group"). Use the
+    # same defaults as a customer created in the app: the van's, else Selling
+    # Settings, never a group.
+    for field, doctype, van_field in (
+        ("customer_group", "Customer Group", "default_customer_group"),
+        ("territory", "Territory", "default_territory"),
+    ):
+        value = customer.get(field)
+        if not value or frappe.db.get_value(doctype, value, "is_group"):
+            customer.set(field, _default_leaf(doctype, van_field, field))
+    from vansale import steelforce
+
+    steelforce.on_new_customer(customer)
     customer.insert()
     return customer.name, True
 

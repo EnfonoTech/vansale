@@ -54,6 +54,8 @@ const customer = ref("");
 const items = ref<ItemRow[]>([]);
 const itemSearch = ref("");
 const lines = ref<Line[]>([]);
+// The site's own reasons when the server sends them (e.g. a reason master), else the app's list.
+const reasons = computed<string[]>(() => session.returnReasons ?? [...RETURN_REASONS]);
 const reason = ref("");
 const note = ref("");
 const busy = ref(false);
@@ -379,7 +381,7 @@ onMounted(async () => {
       <span class="label">Reason *</span>
       <div class="reasons">
         <button
-          v-for="r in RETURN_REASONS"
+          v-for="r in reasons"
           :key="r"
           type="button"
           class="reason-chip"

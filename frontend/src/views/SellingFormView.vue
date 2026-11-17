@@ -39,7 +39,7 @@ const toasts = useToastStore();
 const k = computed(() => KIND[props.kind]);
 
 const isEdit = computed(() => Boolean(props.name));
-// A quotation may be for a lead; saving it turns the lead into a customer.
+// A quotation may be for a lead; the lead becomes a customer when the quotation is ordered.
 const leadId = ref(String(route.query.lead ?? ""));
 const quotationTo = ref<"Customer" | "Lead">(leadId.value && props.kind === "quotation" ? "Lead" : "Customer");
 const leadLabel = ref("");
@@ -289,7 +289,6 @@ async function doSave(submit: 0 | 1) {
       ? await updateDocDraft(props.kind, props.name, payload)
       : await saveDoc(props.kind, payload);
     toasts.success(`${k.value.title} ${res.name} ${submit ? "submitted" : "saved as draft"}`);
-    if (res.converted_customer) toasts.success(`Lead converted to customer ${res.converted_customer}`);
     void router.replace({ name: k.value.detail, params: { name: res.name } });
   } catch (e) {
     toasts.error(e instanceof ApiError ? e.serverMessage ?? e.message : e instanceof Error ? e.message : String(e));
@@ -328,7 +327,7 @@ onMounted(loadAll);
         <template v-else>
           <SearchSelect v-model="leadId" :options="leadOptions" placeholder="Search lead by name, company or mobile"
                         remote @search="onLeadSearch" />
-          <p class="muted xsmall">The lead becomes a customer when you save this quotation.</p>
+          <p class="muted xsmall">The lead becomes a customer when this quotation is ordered.</p>
         </template>
       </template>
       <SearchSelect v-else v-model="customer" :options="customerOptions" placeholder="Search customer by name or code"

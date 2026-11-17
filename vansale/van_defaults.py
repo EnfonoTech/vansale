@@ -70,6 +70,13 @@ def override_warehouse_from_van(doc, method=None):
 
 
 def _get_user_default(allow: str) -> str | None:
+    """The van's own value first (Vansale Configuration), then the user's
+    default User Permission: other apps may reset permission defaults."""
+    from vansale.api.me import van_default
+
+    van_value = van_default(allow)
+    if van_value:
+        return van_value
     return frappe.db.get_value(
         "User Permission",
         {"user": frappe.session.user, "allow": allow, "is_default": 1},

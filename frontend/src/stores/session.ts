@@ -115,6 +115,14 @@ export const useSessionStore = defineStore("session", {
     paymentDelete: (s) => s.defaults?.payment_delete !== false,
     confirmSubmit: (s) => s.defaults?.confirm_submit === true,
     returnWithoutInvoice: (s) => Boolean(s.defaults?.return_without_invoice),
+    /** Invoice moves stock (van sale). On unless the server says otherwise. */
+    updateStock: (s) => s.defaults?.selling_flow?.update_stock !== false,
+    cashCollection: (s) => s.defaults?.selling_flow?.cash_collection ?? "Collect now",
+    quotationNextStep: (s) => s.defaults?.selling_flow?.quotation_next_step ?? "Sales Order",
+    /** Draft sales may be printed; on unless the server says the site refuses it. */
+    draftSalePrint: (s) => s.defaults?.selling_flow?.draft_sale_print !== false,
+    /** Server's return reasons; null = use the app's built-in list. */
+    returnReasons: (s) => (s.defaults?.selling_flow?.return_reasons?.length ? s.defaults.selling_flow.return_reasons : null),
   },
   actions: {
     setLogin(payload: { user: string; fullName: string; email: string; language?: string }) {

@@ -68,8 +68,10 @@ def prepare_lines(doc, items: list[dict[str, Any]], warehouse: Optional[str], de
     Pricing follows the invoice form: `price_list_rate` + `rate` so ERPNext
     derives the discount. A missing/zero qty is rejected, never defaulted to 1.
     """
+    from vansale.api.doc_defaults import apply_van_defaults
     from vansale.api.invoice import _append_items, _apply_template_taxes
 
+    apply_van_defaults(doc)
     doc.set("items", [])
     _append_items(doc, items, warehouse)
     if delivery_date is not None:

@@ -56,6 +56,21 @@ export interface ConfigDefaults {
     cr_number: boolean;
     additional_number: boolean;
   };
+  /** Selling-flow settings (Vansale Settings / van). Missing on older servers = old behaviour. */
+  selling_flow?: SellingFlow;
+}
+
+export interface SellingFlow {
+  /** Invoice moves stock out of the salesman's warehouse (van sale); off = order taker. */
+  update_stock: boolean;
+  /** Cash sale collected on the spot, left for later, or chosen per sale. */
+  cash_collection: "Collect now" | "Collect later" | "Salesman chooses";
+  /** What a submitted quotation becomes in the app. */
+  quotation_next_step: "Sales Order" | "Sales Invoice" | "Both";
+  /** Return reasons the server accepts (the site's own list where it has one). */
+  return_reasons: string[];
+  /** A draft sale may be printed (some sites refuse it until submitted). */
+  draft_sale_print?: boolean;
 }
 
 export function configDefaults() {

@@ -83,6 +83,10 @@ def global_flags() -> dict:
         # App PDFs printed by Chromium like the browser prints (off: Frappe's PDF).
         "pdf_like_browser_print": False,
         "print_copies": 1,
+        # Selling flow. Defaults are the behaviour before these settings existed.
+        "update_stock_on_invoice": True,
+        "quotation_next_step": "Sales Order",
+        "cash_collection": "Collect now",
     }
     try:
         row = frappe.db.get_singles_dict("Vansale Settings") or {}
@@ -103,6 +107,8 @@ def global_flags() -> dict:
             "default_payment_type",
             "invoice_print_format",
             "receipt_print_format",
+            "quotation_next_step",
+            "cash_collection",
         ):
             if row.get(key):
                 flags[key] = row[key]
@@ -118,6 +124,7 @@ def global_flags() -> dict:
             "allow_delete_draft_payment",
             "confirm_before_submit",
             "pdf_like_browser_print",
+            "update_stock_on_invoice",
         ):
             if key in row:
                 flags[key] = bool(int(row.get(key) or 0))
