@@ -69,6 +69,8 @@ export interface ReturnRow {
   name: string;
   customer: string;
   customer_name: string;
+  /** The customer's title (Badria: English name); customer_name is what the invoice stored. */
+  customer_title?: string | null;
   grand_total: number;
   status: string;
   posting_date: string | null;
@@ -128,6 +130,8 @@ export interface InvoiceDetail {
   name: string;
   customer: string;
   customer_name: string;
+  /** The customer's title (Badria: English name); customer_name is what the invoice stored. */
+  customer_title?: string | null;
   company: string;
   currency: string;
   posting_date: string | null;
@@ -270,6 +274,9 @@ export interface ReturnPayload {
   note?: string;
   submit?: 0 | 1;
   refund?: RefundPayload;
+  /** Additional discount on the credit note; omitted = the default
+   *  (the invoice's discount on a full return, none on a partial one). */
+  discount_amount?: number;
 }
 
 export interface SavedReturn extends SavedInvoice {
@@ -347,6 +354,8 @@ export async function returnWithoutInvoice(payload: {
   /** ZATCA reference invoices chosen by the user (required on ZATCA sites). */
   references?: string[];
   refund?: RefundPayload;
+  /** Additional discount typed on the bulk return. */
+  discount_amount?: number;
 }): Promise<SavedReturn & { references?: string[] }> {
   const clientId = genUuid();
   const res = await apiCall<SavedReturn & { references?: string[] }>(
@@ -360,6 +369,13 @@ export async function returnWithoutInvoice(payload: {
 
 export interface ReturnTotals {
   net_total: number;
+  /** Additional discount on the credit note (already in net / VAT / total). */
+  discount?: number;
+  /** Return against an invoice: the discount it gets by default, and the
+   *  invoice's discount not yet given back (the box shows when it is > 0). */
+  discount_default?: number | null;
+  discount_max?: number | null;
+  discount_on?: "Grand Total" | "Net Total" | null;
   tax: number;
   grand_total: number;
   /** Credit keeps its own balance → can be refunded now (bulk, or a paid invoice). */
@@ -379,6 +395,7 @@ export async function returnPreview(payload: {
   items: Array<{ item_code: string; qty: number; uom?: string; rate?: number | null; sales_invoice_item?: string }>;
   original_invoice?: string;
   customer?: string;
+  discount_amount?: number;
 }): Promise<ReturnTotals> {
   return apiCall<ReturnTotals>("POST", "vansale.api.sales_return.preview", payload);
 }

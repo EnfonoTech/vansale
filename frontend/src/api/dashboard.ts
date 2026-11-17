@@ -7,11 +7,21 @@ export interface TodayCollection {
   pending?: number;
   by_mode: Array<{ mode: string; amount: number; count: number }>;
 }
+/** Home screen customer card: the user's customers, ledger balances. */
+export interface CustomerOverview {
+  customers: number;
+  with_outstanding: number;
+  outstanding: number;
+  /** "van": a salesman's own van's invoices; "all": whole balances. */
+  scope?: "van" | "all";
+}
 export interface MonthSummary { from: string; to: string; sales: number; collections: number }
 export interface ActivityRow {
   kind: "invoice" | "payment";
   name: string;
   party: string;
+  /** The customer's title (Badria: English name). */
+  party_title?: string;
   amount: number;
   posting_date: string;
   modified: string;
@@ -23,6 +33,10 @@ export function todaySales() {
 
 export function todayCollection() {
   return apiCall<TodayCollection>("GET", "vansale.api.dashboard.today_collection");
+}
+
+export function customerOverview() {
+  return apiCall<CustomerOverview>("GET", "vansale.api.dashboard.customer_overview");
 }
 
 export function monthSummary(offset = 0) {

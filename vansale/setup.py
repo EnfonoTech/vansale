@@ -3,7 +3,8 @@
 Called via the `after_migrate` hook. Ensures:
   * `Van User` + `Van Manager` roles exist.
   * A curated set of DocPerm rows for `Van User` covering the day-to-day
-    flow (Sales Invoice, Payment Entry, Customer, Item lookups, etc.).
+    flow (Sales Invoice, Payment Entry, Customer, Item lookups, etc.) —
+    added when missing; rows a site already has are its own choice.
   * Vansale Configuration rows re-apply their User Permissions so admins
     can add a user on a config and have permissions materialise without
     having to open + save the row manually.
@@ -72,6 +73,7 @@ def after_migrate() -> None:
     _ensure_print_format()
     _ensure_indexes()
     _ensure_van_series()
+    _store_settings_defaults()
     frappe.db.commit()
 
 
@@ -241,6 +243,21 @@ def _ensure_custom_fields() -> None:
     create_custom_fields(VANSALE_CUSTOM_FIELDS, update=True)
 
 
+def _store_settings_defaults() -> None:
+    """Store the default of every Vansale Settings field that has no value
+    yet. Frappe does not store a new field's default on an existing single,
+    so the form showed new options blank or unticked (e.g. "Show Share
+    button") and saving the form turned them off. Values already set are
+    left as they are."""
+    if not frappe.db.exists("DocType", "Vansale Settings"):
+        return
+    stored = set(frappe.db.sql_list("SELECT field FROM `tabSingles` WHERE doctype = 'Vansale Settings'"))
+    for df in frappe.get_meta("Vansale Settings").fields:
+        if df.fieldname in stored or df.default in (None, "") or df.fieldtype in frappe.model.no_value_fields:
+            continue
+        frappe.db.set_single_value("Vansale Settings", df.fieldname, df.default)
+
+
 def _ensure_role(role: str, desk_access: int = 1) -> None:
     if frappe.db.exists("Role", role):
         return
@@ -276,12 +293,14 @@ def _ensure_standard_perms(doctype: str) -> None:
 
 
 def _apply_role_permissions(role: str, perms: list[dict]) -> None:
+    """Add the role's permission rows that are missing. A row the site
+    already has is left as it is: each client decides in Role Permission
+    Manager (e.g. whether salesmen may submit Payment Entries) and a migrate
+    used to overwrite that choice."""
     for perm in perms:
         _ensure_standard_perms(perm["parent"])
         filters = {"parent": perm["parent"], "role": role, "permlevel": 0}
-        existing = frappe.db.get_value("Custom DocPerm", filters, "name")
-        if existing:
-            frappe.db.set_value("Custom DocPerm", existing, perm)
+        if frappe.db.exists("Custom DocPerm", filters):
             continue
         doc = frappe.new_doc("Custom DocPerm")
         doc.parent = perm["parent"]

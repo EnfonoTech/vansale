@@ -12,6 +12,7 @@ import { useSessionStore } from "@/stores/session";
 import Icon from "@/components/Icon.vue";
 import ListSearch from "@/components/ListSearch.vue";
 import SarSymbol from "@/components/SarSymbol.vue";
+import CustomerName from "@/components/CustomerName.vue";
 
 const router = useRouter();
 const session = useSessionStore();
@@ -119,7 +120,7 @@ function statusLabel(docstatus: unknown, status: unknown): string {
         @keyup.enter="router.push({ name: 'payment-detail', params: { name: String(r.name) } })"
       >
         <div class="body">
-          <strong class="truncate">{{ r.party_name || r.party }}</strong>
+          <CustomerName :title="r.party_title" :name="r.party_name" :id="r.party" />
           <span class="muted xsmall">
             {{ r.name }} · {{ r.posting_date }}
             <template v-if="r.mode_of_payment"> · {{ r.mode_of_payment }}</template>

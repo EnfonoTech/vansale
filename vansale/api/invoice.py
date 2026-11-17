@@ -41,6 +41,12 @@ def _get_default_warehouse(company: str) -> Optional[str]:
     )
 
 
+def _customer_title(customer: str) -> Optional[str]:
+    from vansale.api.customer import customer_titles
+
+    return customer_titles([customer]).get(customer)
+
+
 def _user_company() -> str:
     return (
         _user_default("Company")
@@ -680,6 +686,7 @@ def return_against(
     note: Optional[str] = None,
     submit: int = 1,
     refund: Optional[dict] = None,
+    discount_amount: Optional[float] = None,
 ) -> dict:
     """Create a Sales Return (Credit Note) against an existing submitted invoice.
 
@@ -717,7 +724,7 @@ def return_against(
 
     original = readable_doc("Sales Invoice", original_name)
     posting = parse_client_ts(posting_ts) if posting_ts else frappe.utils.now_datetime()
-    doc = build_return_against(original, items, posting)
+    doc = build_return_against(original, items, posting, discount_amount)
     _set_reason(doc, reason_option, reason_text, note)
     doc.custom_client_id = client_id
 
@@ -730,6 +737,7 @@ def return_against(
     _record_outbox(client_id, doc.name, posting_ts, {
         "return_against": original.name,
         "items": items,
+        "discount_amount": discount_amount,
     })
     frappe.db.commit()
 
@@ -771,12 +779,16 @@ def list_mine(
         # Return picker: submitted sales with something left to return.
         filters.update({"docstatus": 1, "is_return": 0})
     # Search box: invoice number, customer ID or name (beyond the latest page).
+    from vansale.api.customer import customer_titles, customers_titled
+
     s = (search or "").strip()
-    or_filters = (
-        {"name": ["like", f"%{s}%"], "customer": ["like", f"%{s}%"], "customer_name": ["like", f"%{s}%"]}
-        if s
-        else None
-    )
+    or_filters = None
+    if s:
+        or_filters = [
+            ["name", "like", f"%{s}%"], ["customer", "like", f"%{s}%"], ["customer_name", "like", f"%{s}%"],
+        ]
+        if titled := customers_titled(s):  # the customer's English name (title)
+            or_filters.append(["customer", "in", titled])
     rows = frappe.get_all(
         "Sales Invoice",
         filters=filters,
@@ -803,6 +815,9 @@ def list_mine(
 
         done = fully_returned([r["name"] for r in rows])
         rows = [r for r in rows if r["name"] not in done][: int(limit)]
+    titles = customer_titles([r["customer"] for r in rows])
+    for r in rows:
+        r["customer_title"] = titles.get(r["customer"]) or r.get("customer_name")
     for r in rows:
         r["modified"] = naive_site_to_utc_iso(r.get("modified"))
     return rows
@@ -841,6 +856,7 @@ def detail(name: str) -> dict:
         "name": doc.name,
         "customer": doc.customer,
         "customer_name": doc.customer_name,
+        "customer_title": _customer_title(doc.customer) or doc.customer_name,
         "company": doc.company,
         "currency": doc.currency,
         "posting_date": str(doc.posting_date) if doc.posting_date else None,

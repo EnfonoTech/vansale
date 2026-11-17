@@ -79,22 +79,29 @@ def list_stock(warehouse: Optional[str] = None, limit: int = 500) -> dict:
     if not wh:
         frappe.throw(_("No van warehouse set. Assign one on your Sales Person profile."))
     check_read("Warehouse", wh)
-    rows = frappe.db.sql(
-        """
-        SELECT b.item_code, i.item_name, i.stock_uom, b.actual_qty,
-               b.stock_value, i.image
-        FROM `tabBin` b
-        JOIN `tabItem` i ON i.name = b.item_code
-        WHERE b.warehouse = %s AND i.disabled = 0 AND b.actual_qty > 0
-        ORDER BY i.item_name ASC
-        LIMIT %s
-        """,
-        (wh, int(limit)),
-        as_dict=True,
+    from vansale.api.item import warehouse_stock
+
+    # Quantities from Vansale Settings "Stock figures from" (Bin / Stock Ledger).
+    stock = warehouse_stock(wh)
+    in_stock = [code for code, st in stock.items() if st["qty"] > 0]
+    rows = (
+        frappe.db.sql(
+            """
+            SELECT i.name AS item_code, i.item_name, i.stock_uom, i.image
+            FROM `tabItem` i
+            WHERE i.name IN %s AND i.disabled = 0
+            ORDER BY i.item_name ASC
+            LIMIT %s
+            """,
+            (tuple(in_stock), int(limit)),
+            as_dict=True,
+        )
+        if in_stock
+        else []
     )
     for r in rows:
-        r["actual_qty"] = float(r.get("actual_qty") or 0)
-        r["stock_value"] = float(r.get("stock_value") or 0)
+        r["actual_qty"] = stock[r["item_code"]]["qty"]
+        r["stock_value"] = stock[r["item_code"]]["value"]
     from vansale.api.item import add_sales_units
 
     add_sales_units(rows)

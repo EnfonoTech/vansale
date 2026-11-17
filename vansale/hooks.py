@@ -9,9 +9,11 @@ app_license = "mit"
 # - ensure_capacitor_cors is idempotent and critical for APK login.
 # - setup.after_migrate installs the Van User role + its DocPerms and
 #   re-applies User Permissions for all Vansale Configuration rows.
+# - pdf_engine.after_migrate re-installs the PDF fonts ("PDF same as browser print").
 after_migrate = [
     "vansale.install.ensure_capacitor_cors",
     "vansale.setup.after_migrate",
+    "vansale.pdf_engine.after_migrate",
 ]
 
 # /vansale and every /vansale/<path> render www/vansale (the SPA's index.html),

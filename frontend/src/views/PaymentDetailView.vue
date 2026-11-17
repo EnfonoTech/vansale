@@ -16,10 +16,12 @@ import { detail, deletePayment, type PaymentDetail } from "@/api/payment";
 import { useSessionStore } from "@/stores/session";
 import { useToastStore } from "@/stores/toasts";
 import { useConfirmStore } from "@/stores/confirm";
-import { ApiError } from "@/app/frappe";
+import { ApiError, NetworkError } from "@/app/frappe";
 import { openPrint, printDocument, defaultPrintFormat } from "@/api/print";
+import { shareDocument } from "@/app/share";
 import Icon from "@/components/Icon.vue";
 import SarSymbol from "@/components/SarSymbol.vue";
+import { customerLine } from "@/app/customerName";
 
 const route = useRoute();
 const router = useRouter();
@@ -59,6 +61,22 @@ function tone(status: string | undefined): string {
   if (s === "submitted") return "success";
   if (s === "cancelled") return "danger";
   return "info";
+}
+
+const sharing = ref(false);
+/** The document's PDF to WhatsApp / email / … (also for "Print directly"
+ *  vans, which never see the print preview). */
+async function shareThis(doctype: string, name: string) {
+  if (sharing.value) return;
+  sharing.value = true;
+  try {
+    const res = await shareDocument(doctype, name, defaultPrintFormat(doctype, session.printFormats));
+    if (res === "saved") toasts.info("Sharing isn't available here — PDF saved instead");
+  } catch (e) {
+    toasts.error(e instanceof NetworkError ? "Offline — try again when connected" : e instanceof Error ? e.message : String(e));
+  } finally {
+    sharing.value = false;
+  }
 }
 
 async function printEntry() {
@@ -144,7 +162,7 @@ const isRefund = computed(() => doc.value?.payment_type === "Pay");
           <div>
             <span class="muted xsmall">Payment</span>
             <h2 class="pe-name">{{ doc.name }}</h2>
-            <span class="muted small">{{ doc.posting_date }} · {{ doc.party_name || doc.party }}</span>
+            <span class="muted small">{{ doc.posting_date }} · {{ customerLine(doc.party_title, doc.party_name, doc.party) }}</span>
           </div>
           <span class="pill" :data-tone="tone(doc.status)">{{ doc.status }}</span>
         </div>
@@ -155,6 +173,10 @@ const isRefund = computed(() => doc.value?.payment_type === "Pay");
         <div class="row actions">
           <button class="ghost" @click="printEntry">
             <Icon name="receipt" :size="16" /> Print
+          </button>
+          <button v-if="session.showShareButton" class="ghost" :disabled="sharing"
+                  @click="shareThis('Payment Entry', doc.name)">
+            <Icon name="share" :size="16" /> {{ sharing ? "Preparing…" : "Share" }}
           </button>
           <button class="ghost" @click="router.push({ name: 'payment-new' })">
             <Icon name="plus" :size="16" /> New payment

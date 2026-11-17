@@ -6,6 +6,7 @@ import { useSessionStore } from "@/stores/session";
 import Icon from "@/components/Icon.vue";
 import ListSearch from "@/components/ListSearch.vue";
 import SarSymbol from "@/components/SarSymbol.vue";
+import CustomerName from "@/components/CustomerName.vue";
 
 const router = useRouter();
 const session = useSessionStore();
@@ -108,7 +109,7 @@ function tone(status: unknown): string {
         @keyup.enter="router.push({ name: 'invoice-detail', params: { name: String(r.name) } })"
       >
         <div class="body">
-          <strong class="truncate">{{ r.customer_name || r.customer }}</strong>
+          <CustomerName :title="r.customer_title" :name="r.customer_name" :id="r.customer" />
           <span class="muted xsmall">{{ r.name }} · {{ r.posting_date }}</span>
         </div>
         <div class="right">

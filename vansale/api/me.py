@@ -436,6 +436,7 @@ def print_behaviour(user: str | None = None) -> dict:
         ),
         "copies": max(1, int(_van_value("print_copies", user) or flags.get("print_copies") or 1)),
         "pdf_button": _resolve_mode(_van_value("pdf_button_mode", user), default=flags.get("show_pdf_button", True)),
+        "share_button": bool(flags.get("show_share_button", True)),
     }
 
 

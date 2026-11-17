@@ -67,6 +67,9 @@ def global_flags() -> dict:
         "allow_delete_draft_payment": True,
         # Yes / No before posting an invoice, return, payment or refund.
         "confirm_before_submit": False,
+        # Van stock in the app: Bin (ERPNext's running totals, fast) or the
+        # Stock Ledger (what the Stock Balance report and submit check use).
+        "stock_source": "Bin",
         "invoice_print_format": None,
         "receipt_print_format": None,
         "allow_split_payment": False,
@@ -75,6 +78,10 @@ def global_flags() -> dict:
         "print_after_submit": False,
         # PDF (save to device) button on print screens; on unless a site hides it.
         "show_pdf_button": True,
+        # Share button (phone share sheet) on print screens.
+        "show_share_button": True,
+        # App PDFs printed by Chromium like the browser prints (off: Frappe's PDF).
+        "pdf_like_browser_print": False,
         "print_copies": 1,
     }
     try:
@@ -92,6 +99,7 @@ def global_flags() -> dict:
             "cash_payment_entry_status",
             "collection_payment_entry_status",
             "apply_discount_on",
+            "stock_source",
             "default_payment_type",
             "invoice_print_format",
             "receipt_print_format",
@@ -105,9 +113,11 @@ def global_flags() -> dict:
             "allow_return_without_invoice",
             "allow_advance_payment",
             "show_pdf_button",
+            "show_share_button",
             "allow_line_discount",
             "allow_delete_draft_payment",
             "confirm_before_submit",
+            "pdf_like_browser_print",
         ):
             if key in row:
                 flags[key] = bool(int(row.get(key) or 0))

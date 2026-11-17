@@ -6,6 +6,8 @@ import {
   todaySales,
   todayCollection,
   recentActivity,
+  customerOverview,
+  type CustomerOverview,
   type TodaySales,
   type TodayCollection,
   type ActivityRow,
@@ -13,6 +15,7 @@ import {
 import { warmCaches } from "@/offline/warm";
 import Icon from "@/components/Icon.vue";
 import SarSymbol from "@/components/SarSymbol.vue";
+import CustomerName from "@/components/CustomerName.vue";
 
 const router = useRouter();
 const session = useSessionStore();
@@ -20,12 +23,19 @@ const session = useSessionStore();
 const sales = ref<TodaySales | null>(null);
 const collection = ref<TodayCollection | null>(null);
 const activity = ref<ActivityRow[]>([]);
+const overview = ref<CustomerOverview | null>(null);
 const loading = ref(false);
 const loadErr = ref("");
 
 const CACHE_KEY = "vansale.dashboard.v1";
 
-type Snapshot = { sales: TodaySales; collection: TodayCollection; activity: ActivityRow[]; at: number };
+type Snapshot = {
+  sales: TodaySales;
+  collection: TodayCollection;
+  activity: ActivityRow[];
+  overview?: CustomerOverview;
+  at: number;
+};
 
 function readCache(): Snapshot | null {
   try {
@@ -52,16 +62,18 @@ async function load() {
     sales.value = cached.sales;
     collection.value = cached.collection;
     activity.value = cached.activity;
+    overview.value = cached.overview ?? null;
   }
 
   loading.value = !cached;
 
   try {
-    const [a, b, c] = await Promise.all([todaySales(), todayCollection(), recentActivity(8)]);
+    const [a, b, c, d] = await Promise.all([todaySales(), todayCollection(), recentActivity(8), customerOverview()]);
     sales.value = a;
     collection.value = b;
     activity.value = c;
-    writeCache({ sales: a, collection: b, activity: c, at: Date.now() });
+    overview.value = d;
+    writeCache({ sales: a, collection: b, activity: c, overview: d, at: Date.now() });
   } catch (err) {
     if (!cached) loadErr.value = err instanceof Error ? err.message : String(err);
   } finally {
@@ -172,6 +184,31 @@ function onActivityClick(row: ActivityRow) {
       </button>
     </section>
 
+    <section class="card stack overview" role="button" tabindex="0"
+             @click="router.push({ name: 'customers' })" @keyup.enter="router.push({ name: 'customers' })">
+      <div class="section-head">
+        <h3 style="margin:0">Customer overview</h3>
+        <Icon name="chevron-right" :size="18" class="muted" />
+      </div>
+      <div class="ov-grid">
+        <div class="ov-stat">
+          <span class="muted small">Total customers</span>
+          <span v-if="loading && !overview" class="skeleton" style="height:1.5rem;width:3rem"></span>
+          <strong v-else>{{ overview?.customers ?? "—" }}</strong>
+        </div>
+        <div class="ov-stat">
+          <span class="muted small">With outstanding balance</span>
+          <span v-if="loading && !overview" class="skeleton" style="height:1.5rem;width:3rem"></span>
+          <strong v-else>{{ overview?.with_outstanding ?? "—" }}</strong>
+        </div>
+        <div class="ov-stat ov-wide">
+          <span class="muted small">Total outstanding</span>
+          <span v-if="loading && !overview" class="skeleton" style="height:1.5rem;width:6rem"></span>
+          <strong v-else class="ov-amt"><SarSymbol :code="currency" />{{ overview ? fmt(overview.outstanding) : "—" }}</strong>
+        </div>
+      </div>
+    </section>
+
     <section class="card stack">
       <div class="section-head">
         <h3 style="margin:0">Recent activity</h3>
@@ -205,7 +242,7 @@ function onActivityClick(row: ActivityRow) {
             <Icon :name="kindIcon(row.kind)" :size="18" />
           </span>
           <div class="activity-main">
-            <strong class="truncate">{{ row.party }}</strong>
+            <CustomerName :title="row.party_title" :id="row.party" />
             <span class="muted xsmall">{{ row.name }} · {{ row.posting_date }}</span>
           </div>
           <strong class="activity-amt">{{ fmt(row.amount) }}</strong>
@@ -284,6 +321,25 @@ function onActivityClick(row: ActivityRow) {
 .quick-btn[data-tone="warning"] svg { background: var(--warning-soft); color: var(--warning); }
 
 .section-head { display: flex; align-items: center; justify-content: space-between; }
+
+.overview { cursor: pointer; }
+.overview:active { transform: scale(0.99); }
+.ov-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.85rem 1rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--border);
+}
+.ov-stat { display: flex; flex-direction: column; gap: 0.15rem; min-width: 0; }
+.ov-stat strong { font-size: var(--text-xl); font-variant-numeric: tabular-nums; }
+.ov-wide { grid-column: 1 / -1; }
+.ov-amt { color: var(--warning); }
+/* Tablet: the three figures side by side. */
+@media (min-width: 768px) {
+  .ov-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .ov-wide { grid-column: auto; }
+}
 
 .activity { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0.55rem; }
 .activity-row {

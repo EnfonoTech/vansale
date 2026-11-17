@@ -249,6 +249,11 @@ def today(client_date: Optional[str] = None) -> dict:
         visit = _fetch_visit(user, cust["customer"], today_)
         stops.append(_serialize_stop(cust, visit, i))
 
+    from vansale.api.customer import customer_titles
+
+    titles = customer_titles([st["customer"] for st in stops])
+    for st in stops:
+        st["customer_title"] = titles.get(st["customer"]) or st["customer_name"]
     return {
         "visit_date": str(today_),
         "sales_person": sales_person,

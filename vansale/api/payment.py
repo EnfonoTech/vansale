@@ -133,6 +133,12 @@ def pending_by_invoice(invoices: list[str]) -> dict[str, float]:
     }
 
 
+def _party_title(customer: str) -> Optional[str]:
+    from vansale.api.customer import customer_titles
+
+    return customer_titles([customer]).get(customer)
+
+
 def pending_by_customer(customers: list[str]) -> dict[str, float]:
     """Total of each customer's draft (not yet submitted) receipts. Draft
     refunds ("Pay") are not collections, so they are left out."""
@@ -396,12 +402,14 @@ def list_mine(limit: int = 50, customer: Optional[str] = None, search: Optional[
     if not is_admin:
         filters["owner"] = frappe.session.user
     # Search box: entry number, customer, reference no. or mode.
+    from vansale.api.customer import customer_titles, customers_titled
+
     s = (search or "").strip()
-    or_filters = (
-        {f: ["like", f"%{s}%"] for f in ("name", "party", "party_name", "reference_no", "mode_of_payment")}
-        if s
-        else None
-    )
+    or_filters = None
+    if s:
+        or_filters = [[f, "like", f"%{s}%"] for f in ("name", "party", "party_name", "reference_no", "mode_of_payment")]
+        if titled := customers_titled(s):  # the customer's English name (title)
+            or_filters.append(["party", "in", titled])
     rows = frappe.get_all(
         "Payment Entry",
         filters=filters,
@@ -413,9 +421,11 @@ def list_mine(limit: int = 50, customer: Optional[str] = None, search: Optional[
         order_by="posting_date desc, modified desc",
         limit=int(limit),
     )
+    titles = customer_titles([r["party"] for r in rows])
     for r in rows:
         r["modified"] = naive_site_to_utc_iso(r.get("modified"))
         r["posting_date"] = str(r["posting_date"]) if r.get("posting_date") else None
+        r["party_title"] = titles.get(r["party"]) or r.get("party_name")
     return rows
 
 
@@ -509,6 +519,7 @@ def detail(name: str) -> dict:
         "name": doc.name,
         "party": doc.party,
         "party_name": doc.party_name,
+        "party_title": _party_title(doc.party) or doc.party_name,
         "payment_type": doc.payment_type,
         "paid_amount": float(doc.paid_amount or 0),
         "received_amount": float(doc.received_amount or 0),

@@ -141,10 +141,15 @@ def recent_activity(limit: int = 10) -> list[dict]:
         {"user": user, "limit": int(limit)},
         as_dict=True,
     )
+    from vansale.api.customer import customer_titles
+
+    titles = customer_titles([r["party"] for r in rows])
     for r in rows:
         r["amount"] = float(r.get("amount") or 0)
         r["posting_date"] = str(r.get("posting_date") or "")
         r["modified"] = naive_site_to_utc_iso(r.get("modified"))
+        # The customer's title (Badria: English name), not the ID.
+        r["party_title"] = titles.get(r["party"]) or r["party"]
     return rows
 
 
@@ -190,3 +195,23 @@ def warehouses(company: Optional[str] = None) -> list[dict]:
         limit=200,
         order_by="warehouse_name",
     )
+
+
+@frappe.whitelist(methods=["GET"])
+def customer_overview() -> dict:
+    """The home screen's customer card: how many customers the user has, how
+    many owe money and how much in total — the outstanding the customer list
+    shows (a salesman: their van's invoices; office: ledger balances).
+    Customers holding credit are not netted off the total."""
+    from vansale.api.customer import _outstanding_by_customer, van_warehouses, visible_customers
+
+    customers = visible_customers()
+    balances = _outstanding_by_customer(customers)
+    owing = [b for b in balances.values() if b > 0.005]
+    return {
+        "customers": len(customers),
+        "with_outstanding": len(owing),
+        "outstanding": sum(owing),
+        # "van": a salesman's own van's invoices; "all": whole balances.
+        "scope": "van" if van_warehouses() else "all",
+    }

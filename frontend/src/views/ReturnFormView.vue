@@ -82,6 +82,11 @@ const refChoices = computed(() =>
 
 // Net / VAT / total as ERPNext will post them (server dry run).
 const totals = ref<ReturnTotals | null>(null);
+// ERPNext Additional Discount on the credit note, as on a sale.
+const discountAmount = ref<number | null>(null);
+const discountValue = () => Math.max(0, Number(discountAmount.value) || 0);
+// Why there are no totals (e.g. "Discount is more than the return total").
+const previewError = ref("");
 const refund = ref<RefundState>({ on: false, mode: "", amount: null, reference: "" });
 // Blank = the full credit; otherwise a partial refund, never more than the credit.
 function refundAmountError(): string | null {
@@ -102,7 +107,7 @@ function refundPayload() {
 
 
 const lineKey = () =>
-  JSON.stringify([customer.value, lines.value.map((l) => [l.item_code, Number(l.qty) || 0, l.uom, Number(l.rate) || 0])]);
+  JSON.stringify([customer.value, discountValue(), lines.value.map((l) => [l.item_code, Number(l.qty) || 0, l.uom, Number(l.rate) || 0])]);
 let timer: number | undefined;
 let seq = 0;
 watch(lineKey, () => {
@@ -117,6 +122,7 @@ watch(lineKey, () => {
           ? returnPreview({
               customer: customer.value,
               items: picked.map((l) => ({ item_code: l.item_code, qty: Number(l.qty), uom: l.uom, rate: Number(l.rate) })),
+              discount_amount: discountValue() || undefined,
             })
           : Promise.resolve(null),
         referenceOptions(customer.value, [...new Set(picked.map((l) => l.item_code))]),
@@ -124,8 +130,11 @@ watch(lineKey, () => {
       if (mine !== seq) return;
       totals.value = t;
       refOptions.value = o;
-    } catch {
-      if (mine === seq) totals.value = null;
+      previewError.value = "";
+    } catch (e) {
+      if (mine !== seq) return;
+      totals.value = null;
+      previewError.value = e instanceof ApiError ? e.serverMessage ?? "" : "";
     }
   }, 350);
 });
@@ -156,6 +165,19 @@ async function onCustomerSearch(term: string) {
 async function searchItems() {
   // Any sales item (a returned item need not be in the van's stock).
   items.value = await listItems(itemSearch.value || undefined, undefined, 60, false);
+}
+
+/** Catalog pick: add the line and, after a search, clear it (full list back,
+ *  cursor in the box) so the next item can be typed straight away. */
+const itemSearchEl = ref<HTMLInputElement | null>(null);
+async function pickItem(it: ItemRow) {
+  const before = lines.value.length;
+  await addLine(it);
+  if (lines.value.length > before && itemSearch.value) {
+    itemSearch.value = "";
+    void searchItems();
+    itemSearchEl.value?.focus();
+  }
 }
 
 async function addLine(it: ItemRow) {
@@ -215,6 +237,7 @@ async function submit() {
       note: note.value || undefined,
       references: refOptions.value?.enabled ? references.value : undefined,
       refund: refundPayload(),
+      discount_amount: discountValue() || undefined,
     });
     toasts.success(`Credit Note ${res.name} · ${session.currency} ${money(Math.abs(res.grand_total))}`);
     const autoprint = session.printBehaviour?.after_submit ? { autoprint: "1" } : undefined;
@@ -285,6 +308,12 @@ onMounted(async () => {
           </div>
         </li>
       </ul>
+      <label v-if="lines.length" class="field">
+        <span class="tiny">Additional discount on {{ session.applyDiscountOn }} ({{ session.currency }})</span>
+        <input type="number" min="0" step="any" inputmode="decimal" v-model.number="discountAmount"
+               v-decimals="session.currencyPrecision" placeholder="0" />
+      </label>
+      <p v-if="lines.length && previewError" class="error small">{{ previewError }}</p>
       <template v-if="lines.length && totals">
         <div class="tot-row">
           <span>Net</span>
@@ -298,6 +327,9 @@ onMounted(async () => {
           <span>Credit total</span>
           <strong class="tabular"><SarSymbol :code="session.currency" />{{ money(totals.grand_total) }}</strong>
         </div>
+        <p v-if="totals.discount" class="muted xsmall disc-note">
+          Includes the additional discount of <SarSymbol :code="session.currency" />{{ money(totals.discount) }}
+        </p>
       </template>
     </section>
 
@@ -328,11 +360,11 @@ onMounted(async () => {
     <section class="card stack split-side">
       <div class="search-bar">
         <Icon name="search" :size="18" class="search-ic" />
-        <input :value="itemSearch" placeholder="Search item code / name" @input="itemSearch = inputValue($event); searchItems()" @focus="revealOnFocus" />
+        <input ref="itemSearchEl" :value="itemSearch" placeholder="Search item code / name" @input="itemSearch = inputValue($event); searchItems()" @focus="revealOnFocus" />
       </div>
       <ul class="catalog">
         <li v-for="it in items" :key="it.item_code">
-          <button class="cat-item" type="button" @click="addLine(it)">
+          <button class="cat-item" type="button" @click="pickItem(it)">
             <strong class="truncate">{{ it.item_name }}</strong>
             <span class="muted xsmall">{{ it.item_code }}</span>
           </button>
@@ -428,4 +460,6 @@ onMounted(async () => {
     max-height: calc(100vh - var(--top-bar-height) - var(--bottom-nav-height) - 12rem);
   }
 }
+.disc-note { margin: 0; text-align: end; }
+.field { display: flex; flex-direction: column; gap: 0.3rem; }
 </style>
