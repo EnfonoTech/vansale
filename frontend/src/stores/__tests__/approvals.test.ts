@@ -7,10 +7,18 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createPinia, setActivePinia } from "pinia";
 import { inbox as makeInbox, item } from "@/features/approvals/__tests__/fixtures";
+import type { HistoryRow, MyRequestRow, SentBackRow } from "@/api/approvals";
 import { loadInbox, saveInbox } from "@/features/approvals/cache";
 import type { ConfigDefaults } from "@/api/me";
 
-const api = vi.hoisted(() => ({ inbox: vi.fn(), count: vi.fn(), apply: vi.fn() }));
+const api = vi.hoisted(() => ({
+  inbox: vi.fn(),
+  count: vi.fn(),
+  apply: vi.fn(),
+  myRequests: vi.fn(),
+  sentBack: vi.fn(),
+  history: vi.fn(),
+}));
 vi.mock("@/api/approvals", () => api);
 const online = vi.hoisted(() => ({ isOnline: vi.fn() }));
 vi.mock("@/app/online", () => online);
@@ -47,6 +55,45 @@ const THREE = makeInbox({
   waiting_items: [item({ docname: "JV-3", is_waiting: true })],
 });
 
+const MINE_ROW: MyRequestRow = {
+  doctype: "Sales Invoice",
+  docname: "SINV-1",
+  transaction: "Sales Invoice",
+  state: "Pending Finance",
+  holder: "Mariam K.",
+  role_id: "Finance Head",
+  days: 2,
+  priority: "Medium",
+};
+const SENT_BACK_ROW: SentBackRow = {
+  doctype: "Sales Order",
+  transaction: "Sales Order",
+  transaction_filter: "Sales Order",
+  docname: "SO-00231",
+  state: "Draft",
+  submitted_by: "Me",
+  days: 2,
+  doc_url: "/app/sales-order/SO-00231",
+  sent_back_by: "Mariam K.",
+  sent_back_on: "2026-11-17 10:00:00",
+  role: "Finance Head",
+  reason: "Wrong cost centre",
+};
+const HISTORY_ROW: HistoryRow = {
+  name: "PMWA-9",
+  doctype: "Journal Entry",
+  transaction: "Journal Entry",
+  transaction_filter: "Journal Entry",
+  docname: "ACC-JV-1",
+  action_state: "Approved",
+  current_state: "Approved",
+  role: "Accounts Manager",
+  completed_by: "A",
+  date: "18/11/26 09:00",
+  doc_url: "/app/journal-entry/ACC-JV-1",
+  event_count: 2,
+};
+
 beforeEach(() => {
   window.localStorage.clear();
   setActivePinia(createPinia());
@@ -54,6 +101,9 @@ beforeEach(() => {
   api.inbox.mockResolvedValue(THREE);
   api.count.mockResolvedValue({ total: 9, needs_you: 7, waiting: 2, high: 1, overdue: 1 });
   api.apply.mockResolvedValue({ ok: true, new_state: "Approved", recommended: false });
+  api.myRequests.mockResolvedValue({ items: [MINE_ROW] });
+  api.sentBack.mockResolvedValue({ items: [SENT_BACK_ROW] });
+  api.history.mockResolvedValue({ items: [HISTORY_ROW] });
   signIn();
 });
 
@@ -459,5 +509,226 @@ describe("session wiring", () => {
     saveInbox("a@x", makeInbox());
     useSessionStore().logout();
     expect(loadInbox("a@x")).toBeNull();
+  });
+});
+
+describe("list tabs: loadMine, loadSentBack, loadHistory", () => {
+  const LOADERS = [
+    { name: "mine" as const, load: (s: ReturnType<typeof useApprovalsStore>) => s.loadMine(), call: () => api.myRequests, row: MINE_ROW },
+    { name: "sentBack" as const, load: (s: ReturnType<typeof useApprovalsStore>) => s.loadSentBack(), call: () => api.sentBack, row: SENT_BACK_ROW },
+    { name: "history" as const, load: (s: ReturnType<typeof useApprovalsStore>) => s.loadHistory(), call: () => api.history, row: HISTORY_ROW },
+  ];
+
+  describe.each(LOADERS)("$name", ({ name, load, call, row }) => {
+    it("online: fills its slot and marks it loaded", async () => {
+      const store = useApprovalsStore();
+      expect(store.lists[name]).toEqual({ loading: false, error: null, loaded: false });
+
+      await load(store);
+
+      expect(call()).toHaveBeenCalledTimes(1);
+      expect(store[name]).toEqual([row]);
+      expect(store.lists[name]).toEqual({ loading: false, error: null, loaded: true });
+    });
+
+    it("is loading while the server answers", async () => {
+      const pending = deferred<{ items: unknown[] }>();
+      call().mockReturnValue(pending.promise);
+      const store = useApprovalsStore();
+      const done = load(store);
+      expect(store.lists[name].loading).toBe(true);
+
+      pending.resolve({ items: [row] });
+      await done;
+      expect(store.lists[name].loading).toBe(false);
+    });
+
+    it("a failure keeps the rows already shown and records the message", async () => {
+      const store = useApprovalsStore();
+      await load(store);
+      call().mockRejectedValue(new Error("Request timed out"));
+
+      await load(store);
+
+      expect(store[name]).toEqual([row]);
+      expect(store.lists[name]).toEqual({ loading: false, error: "Request timed out", loaded: true });
+    });
+
+    it("a failure with nothing shown stays not loaded", async () => {
+      call().mockRejectedValue(new Error("HTTP 500"));
+      const store = useApprovalsStore();
+      await load(store);
+      expect(store[name]).toEqual([]);
+      expect(store.lists[name]).toEqual({ loading: false, error: "HTTP 500", loaded: false });
+    });
+
+    it("a later success clears the error", async () => {
+      call().mockRejectedValueOnce(new Error("HTTP 500"));
+      const store = useApprovalsStore();
+      await load(store);
+      await load(store);
+      expect(store.lists[name].error).toBeNull();
+      expect(store[name]).toEqual([row]);
+    });
+
+    it("offline: calls nothing and keeps what it holds, with no error", async () => {
+      const store = useApprovalsStore();
+      await load(store);
+      call().mockClear();
+      online.isOnline.mockReturnValue(false);
+
+      await load(store);
+
+      expect(call()).not.toHaveBeenCalled();
+      expect(store[name]).toEqual([row]);
+      expect(store.lists[name]).toEqual({ loading: false, error: null, loaded: true });
+    });
+
+    it("offline with nothing held: stays empty and not loaded", async () => {
+      online.isOnline.mockReturnValue(false);
+      const store = useApprovalsStore();
+      await load(store);
+      expect(call()).not.toHaveBeenCalled();
+      expect(store[name]).toEqual([]);
+      expect(store.lists[name]).toEqual({ loading: false, error: null, loaded: false });
+    });
+
+    it("does nothing without a signed-in user", async () => {
+      useSessionStore().$patch({ user: null });
+      const store = useApprovalsStore();
+      await load(store);
+      expect(call()).not.toHaveBeenCalled();
+    });
+
+    it("an older answer never replaces a newer one", async () => {
+      const older = deferred<{ items: unknown[] }>();
+      const newer = deferred<{ items: unknown[] }>();
+      call().mockReturnValueOnce(older.promise).mockReturnValueOnce(newer.promise);
+
+      const store = useApprovalsStore();
+      const first = load(store);
+      const second = load(store);
+      newer.resolve({ items: [row, row] });
+      await second;
+      older.resolve({ items: [] });
+      await first;
+
+      expect(store[name]).toHaveLength(2);
+      expect(store.lists[name].loading).toBe(false);
+    });
+
+    it("an answer that arrives after a user switch is dropped", async () => {
+      const pending = deferred<{ items: unknown[] }>();
+      call().mockReturnValue(pending.promise);
+      const store = useApprovalsStore();
+      const done = load(store);
+
+      signIn("b@x");
+      store.adopt("b@x");
+      pending.resolve({ items: [row] });
+      await done;
+
+      expect(store[name]).toEqual([]);
+      expect(store.lists[name]).toEqual({ loading: false, error: null, loaded: false });
+    });
+
+    it("an answer that arrives after reset is dropped", async () => {
+      const pending = deferred<{ items: unknown[] }>();
+      call().mockReturnValue(pending.promise);
+      const store = useApprovalsStore();
+      const done = load(store);
+
+      store.reset();
+      pending.resolve({ items: [row] });
+      await done;
+
+      expect(store[name]).toEqual([]);
+      expect(store.lists[name]).toEqual({ loading: false, error: null, loaded: false });
+    });
+
+    it("reset forgets what was loaded", async () => {
+      const store = useApprovalsStore();
+      await load(store);
+      store.reset();
+      expect(store[name]).toEqual([]);
+      expect(store.lists[name]).toEqual({ loading: false, error: null, loaded: false });
+    });
+
+    it("a user switch forgets what the previous user loaded", async () => {
+      const store = useApprovalsStore();
+      await load(store);
+      signIn("b@x");
+      store.adopt("b@x");
+      expect(store[name]).toEqual([]);
+      expect(store.lists[name].loaded).toBe(false);
+    });
+
+    it("leaves the inbox's own loading, error and in-flight answer alone", async () => {
+      const inboxPending = deferred<typeof THREE>();
+      api.inbox.mockReturnValue(inboxPending.promise);
+      call().mockRejectedValue(new Error("HTTP 500"));
+      const store = useApprovalsStore();
+      const refreshing = store.refresh();
+
+      await load(store);
+      expect(store.loading).toBe(true);
+      expect(store.error).toBeNull();
+
+      inboxPending.resolve(THREE);
+      await refreshing;
+      expect(store.inbox).toEqual(THREE);
+      expect(store.error).toBeNull();
+      expect(store.lists[name].error).toBe("HTTP 500");
+    });
+  });
+
+  describe("loadHistory filters", () => {
+    it("asks for the default page when no filter is given", async () => {
+      await useApprovalsStore().loadHistory();
+      expect(api.history).toHaveBeenCalledWith(100, "", "", "");
+    });
+
+    it("passes the date range, the transaction and the page size", async () => {
+      await useApprovalsStore().loadHistory({
+        fromDate: "2026-11-01",
+        toDate: "2026-11-18",
+        transaction: "Journal Entry",
+        limit: 50,
+      });
+      expect(api.history).toHaveBeenCalledWith(50, "2026-11-01", "2026-11-18", "Journal Entry");
+    });
+
+    it("a partial filter leaves the rest empty", async () => {
+      await useApprovalsStore().loadHistory({ transaction: "Sales Return" });
+      expect(api.history).toHaveBeenCalledWith(100, "", "", "Sales Return");
+    });
+
+    it("a new filter replaces the rows", async () => {
+      const store = useApprovalsStore();
+      await store.loadHistory();
+      expect(store.history).toHaveLength(1);
+      api.history.mockResolvedValue({ items: [] });
+      await store.loadHistory({ transaction: "Purchase Order" });
+      expect(store.history).toEqual([]);
+      expect(store.lists.history.loaded).toBe(true);
+    });
+  });
+
+  it("the three lists load independently", async () => {
+    const pending = deferred<{ items: MyRequestRow[] }>();
+    api.myRequests.mockReturnValue(pending.promise);
+    const store = useApprovalsStore();
+    const mine = store.loadMine();
+    await store.loadSentBack();
+    await store.loadHistory();
+
+    expect(store.lists.mine.loading).toBe(true);
+    expect(store.lists.sentBack.loaded).toBe(true);
+    expect(store.lists.history.loaded).toBe(true);
+
+    pending.resolve({ items: [MINE_ROW] });
+    await mine;
+    expect(store.mine).toEqual([MINE_ROW]);
+    expect(store.sentBack).toEqual([SENT_BACK_ROW]);
   });
 });
