@@ -73,6 +73,21 @@ export function rowStates(names: string[], rows: BulkRow[]): Map<string, RowStat
   return out;
 }
 
+/**
+ * The state each of `names` was listed in, for the server to compare with the
+ * document's state when it decides: a document that has moved on since the
+ * approver saw it is refused, not decided on a stale view. A document with no
+ * state is left out (the server does not check a name that is missing).
+ */
+export function expectedStatesOf(items: Pick<ApprovalItem, "docname" | "state">[], names: string[]): Record<string, string> {
+  const wanted = new Set(names);
+  const out: Record<string, string> = {};
+  for (const item of items) {
+    if (wanted.has(item.docname) && item.state) out[item.docname] = item.state;
+  }
+  return out;
+}
+
 /** The documents to send again: refused ones, and any the server did not answer for. */
 export function retryNames(names: string[], rows: BulkRow[]): string[] {
   const states = rowStates(names, rows);

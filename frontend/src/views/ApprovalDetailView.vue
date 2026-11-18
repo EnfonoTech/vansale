@@ -227,12 +227,15 @@ async function onForwarded(person: string) {
   leave();
 }
 
+const REFUSAL_TOAST_MS = 7000;
+
 /** The server said no: its words, as given, then what is true now. */
 async function onRefused(message: string) {
   const forwarding = forwardOpen.value;
   activeSpec.value = null;
   forwardOpen.value = false;
-  toasts.error(message);
+  // Long enough to read a sentence such as "This document changed since you opened it".
+  toasts.error(message, REFUSAL_TOAST_MS);
   // An apply reloaded the inbox already; a forward did not.
   await Promise.all([load(true), forwarding ? approvals.refresh() : Promise.resolve()]);
 }
@@ -434,6 +437,7 @@ async function onRefused(message: string) {
       :name="name"
       :spec="activeSpec"
       :has-attachment="detail.has_attachment"
+      :expected-state="detail.state"
       @close="activeSpec = null"
       @done="onActionDone"
       @refused="onRefused"

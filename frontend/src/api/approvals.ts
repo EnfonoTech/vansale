@@ -308,15 +308,31 @@ export function detail(doctype: string, name: string): Promise<Detail> {
   return apiCall("GET", `${BASE}.detail?${query({ doctype, name })}`);
 }
 
-/** Take `action` on one document. A refusal is thrown as the server worded it. */
+/**
+ * Take `action` on one document. A refusal is thrown as the server worded it.
+ *
+ * `priority` is "" when the approver has not chosen one: the server then lets
+ * the transition's own default apply (the client never sends a made-up one).
+ * `expectedState` is the document's workflow state when the approver opened
+ * it (`Detail.state`); the server refuses with "changed since you opened it"
+ * when the document has moved on. "" means no check.
+ */
 export function apply(
   doctype: string,
   name: string,
   action: string,
   comment = "",
-  priority = "Medium",
+  priority = "",
+  expectedState = "",
 ): Promise<ApplyResult> {
-  return apiCall("POST", `${BASE}.apply`, { doctype, name, action, comment, priority });
+  return apiCall("POST", `${BASE}.apply`, {
+    doctype,
+    name,
+    action,
+    comment,
+    priority,
+    expected_state: expectedState,
+  });
 }
 
 /**
@@ -326,15 +342,24 @@ export function apply(
  */
 export const BULK_TIMEOUT_MS = 120_000;
 
-/** Take `action` on up to 20 documents of one type; each succeeds or fails alone. */
+/**
+ * Take `action` on up to 20 documents of one type; each succeeds or fails alone.
+ *
+ * `priority` "" = not chosen (the transition's own default applies).
+ * `expectedStates` maps a document name to its workflow state when it was
+ * listed; a document that has moved on since gets a failed row ("changed
+ * since you opened it") and is not decided. A name missing from the map is
+ * not checked.
+ */
 export function applyBulk(
   doctype: string,
   names: string[],
   action: string,
   comment = "",
-  priority = "Medium",
+  priority = "",
+  expectedStates: Record<string, string> = {},
 ): Promise<BulkResult> {
-  // The server reads `names` as a JSON string.
+  // The server reads `names` and `expected_states` as JSON strings.
   return apiCall(
     "POST",
     `${BASE}.apply_bulk`,
@@ -344,6 +369,7 @@ export function applyBulk(
       action,
       comment,
       priority,
+      expected_states: Object.keys(expectedStates).length ? JSON.stringify(expectedStates) : "",
     },
     BULK_TIMEOUT_MS,
   );

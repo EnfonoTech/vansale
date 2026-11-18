@@ -29,6 +29,7 @@ import {
   BULK_LIMIT,
   bulkStateAfterFailure,
   bulkTotals,
+  expectedStatesOf,
   mergeResults,
   retryNames,
   rowStates,
@@ -127,7 +128,16 @@ async function apply() {
   busy.value = true;
   sent.value = true;
   try {
-    const answer = await applyBulk(doctype, toSend.value, props.action, comment.value.trim());
+    // No priority is sent (the transition's own default applies); the states the
+    // documents were listed in go along, so a document that moved on is refused.
+    const answer = await applyBulk(
+      doctype,
+      toSend.value,
+      props.action,
+      comment.value.trim(),
+      "",
+      expectedStatesOf(docs, toSend.value),
+    );
     results.value = mergeResults(results.value, answer.results ?? []);
   } catch (error) {
     // No answer is not a refusal: the server may have decided some or all of the batch.

@@ -3,6 +3,7 @@ import {
   ageKey,
   bulkTotals,
   dateRangeReversed,
+  expectedStatesOf,
   mergeResults,
   bulkStateAfterFailure,
   mergeTransactions,
@@ -256,5 +257,32 @@ describe("dateRangeReversed", () => {
     expect(dateRangeReversed("2026-11-01", "2026-11-01")).toBe(false);
     expect(dateRangeReversed("", "2026-11-01")).toBe(false);
     expect(dateRangeReversed("2026-11-01", "")).toBe(false);
+  });
+});
+
+describe("expectedStatesOf", () => {
+  const docs = [
+    item({ docname: "JV-1", state: "Pending Approval" }),
+    item({ docname: "JV-2", state: "Pending Finance" }),
+    item({ docname: "JV-3", state: "" }),
+  ];
+
+  it("maps each name to the state it was listed in", () => {
+    expect(expectedStatesOf(docs, ["JV-1", "JV-2"])).toEqual({
+      "JV-1": "Pending Approval",
+      "JV-2": "Pending Finance",
+    });
+  });
+
+  it("covers only the names being sent (a retry sends the refused ones)", () => {
+    expect(expectedStatesOf(docs, ["JV-2"])).toEqual({ "JV-2": "Pending Finance" });
+  });
+
+  it("leaves out a document with no state, so the server does not check it", () => {
+    expect(expectedStatesOf(docs, ["JV-1", "JV-3"])).toEqual({ "JV-1": "Pending Approval" });
+  });
+
+  it("ignores a name that is not among the documents", () => {
+    expect(expectedStatesOf(docs, ["JV-9"])).toEqual({});
   });
 });

@@ -33,6 +33,8 @@ const props = defineProps<{
   spec: ActionSpec;
   /** The document already has a file attached. */
   hasAttachment: boolean;
+  /** The document's workflow state when it was opened: the server refuses if it has moved on. */
+  expectedState: string;
 }>();
 const emit = defineEmits<{
   (e: "close"): void;
@@ -49,6 +51,9 @@ const asked = canConfirm(props.spec, { comment: "", hasAttachment: props.hasAtta
 const commentRequired = asked.includes("comment");
 const attachmentRequired = asked.includes("attachment");
 const advice = props.spec.recommend_only;
+// The state the approver reviewed, fixed when the sheet opens: a reload of the
+// document behind the sheet must not quietly replace what they agreed to.
+const reviewedState = props.expectedState;
 
 const comment = ref("");
 const noteOpen = ref(false);
@@ -162,7 +167,15 @@ async function submit() {
     }
     stage.value = "applying";
     try {
-      await store.apply(props.doctype, props.name, props.spec.action, comment.value.trim(), priority.value);
+      // A recommendation has no priority to choose: send none, the server applies the default.
+      await store.apply(
+        props.doctype,
+        props.name,
+        props.spec.action,
+        comment.value.trim(),
+        advice ? "" : priority.value,
+        reviewedState,
+      );
     } catch (error) {
       const failure = failureOf(error);
       if (failure.kind === "server") emit("refused", failure.message);

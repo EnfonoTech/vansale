@@ -316,10 +316,19 @@ describe("apply", () => {
     await store.refresh();
     api.inbox.mockClear();
 
-    await store.apply("Journal Entry", "JV-1", "Approve", "ok", "High");
+    await store.apply("Journal Entry", "JV-1", "Approve", "ok", "High", "Pending Approval");
 
-    expect(api.apply).toHaveBeenCalledWith("Journal Entry", "JV-1", "Approve", "ok", "High");
+    expect(api.apply).toHaveBeenCalledWith("Journal Entry", "JV-1", "Approve", "ok", "High", "Pending Approval");
     expect(api.inbox).toHaveBeenCalledTimes(1);
+  });
+
+  it("passes no expected state when the caller has none", async () => {
+    const store = useApprovalsStore();
+    await store.refresh();
+
+    await store.apply("Journal Entry", "JV-1", "Approve", "", "");
+
+    expect(api.apply).toHaveBeenCalledWith("Journal Entry", "JV-1", "Approve", "", "", "");
   });
 
   it("a refusal reloads the inbox once more, then is thrown unchanged", async () => {

@@ -38,24 +38,35 @@ describe("approvals api", () => {
     );
   });
 
-  it("apply posts the decision, comment and priority", async () => {
-    await api.apply("Journal Entry", "JV-1", "Reject", "Wrong account", "High");
+  it("apply posts the decision, comment, priority and the state the approver reviewed", async () => {
+    await api.apply("Journal Entry", "JV-1", "Reject", "Wrong account", "High", "Pending Approval");
     expect(apiCall).toHaveBeenCalledWith("POST", `${BASE}.apply`, {
       doctype: "Journal Entry",
       name: "JV-1",
       action: "Reject",
       comment: "Wrong account",
       priority: "High",
+      expected_state: "Pending Approval",
     });
   });
 
-  it("apply defaults to no comment and Medium priority", async () => {
+  it("apply sends no priority and no expected state unless it is given: blank means not chosen / not checked", async () => {
     await api.apply("Journal Entry", "JV-1", "Approve");
-    expect(apiCall.mock.calls[0][2]).toMatchObject({ comment: "", priority: "Medium" });
+    expect(apiCall).toHaveBeenCalledWith("POST", `${BASE}.apply`, {
+      doctype: "Journal Entry",
+      name: "JV-1",
+      action: "Approve",
+      comment: "",
+      priority: "",
+      expected_state: "",
+    });
   });
 
-  it("applyBulk sends the names as a JSON string, as the server reads them", async () => {
-    await api.applyBulk("Journal Entry", ["JV-1", "JV-2"], "Approve");
+  it("applyBulk sends the names and the states they were listed in as JSON strings, as the server reads them", async () => {
+    await api.applyBulk("Journal Entry", ["JV-1", "JV-2"], "Approve", "", "", {
+      "JV-1": "Pending Approval",
+      "JV-2": "Pending Approval",
+    });
     expect(apiCall).toHaveBeenCalledWith(
       "POST",
       `${BASE}.apply_bulk`,
@@ -64,10 +75,16 @@ describe("approvals api", () => {
         names: '["JV-1","JV-2"]',
         action: "Approve",
         comment: "",
-        priority: "Medium",
+        priority: "",
+        expected_states: '{"JV-1":"Pending Approval","JV-2":"Pending Approval"}',
       },
       api.BULK_TIMEOUT_MS,
     );
+  });
+
+  it("applyBulk sends no priority and no states unless they are given", async () => {
+    await api.applyBulk("Journal Entry", ["JV-1"], "Approve");
+    expect(apiCall.mock.calls[0][2]).toMatchObject({ priority: "", expected_states: "" });
   });
 
   it("applyBulk waits two minutes, not the usual 20 seconds: the server decides the documents one by one", async () => {

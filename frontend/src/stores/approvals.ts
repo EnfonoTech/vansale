@@ -195,6 +195,8 @@ export const useApprovalsStore = defineStore("approvals", {
     /**
      * Take `action` on one document, then reload the inbox. A refusal reloads
      * it too, before being thrown unchanged, so the list shows what is true.
+     * `expectedState` is the state the approver reviewed: the server refuses
+     * when the document has moved on.
      */
     async apply(
       doctype: string,
@@ -202,9 +204,10 @@ export const useApprovalsStore = defineStore("approvals", {
       action: string,
       comment: string,
       priority: string,
+      expectedState = "",
     ): Promise<void> {
       try {
-        await api.apply(doctype, name, action, comment, priority);
+        await api.apply(doctype, name, action, comment, priority, expectedState);
       } catch (error) {
         await this.refresh();
         throw error;
