@@ -11,9 +11,13 @@
  * through the store, which reloads the inbox. Approvals are never queued.
  *
  * Emits `done` after success; `refused` with the server's own words when the
- * server said no (the screen shows it and reloads the document); `close` when
- * the approver backs out. A call that did not get through keeps the sheet
- * open with a line saying so, so nothing typed is lost.
+ * server said no to the decision (the screen shows it and reloads the
+ * document); `unconfirmed` when the decision was sent and no answer came back
+ * (it may have gone through: the screen says so and reloads the document, so
+ * Confirm is never offered again blindly); `close` when the approver backs
+ * out. A refused FILE keeps the sheet open with the server's words and the
+ * typed comment, and a call that did not get through at all keeps it open
+ * with a line saying so, so nothing typed is lost.
  */
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
@@ -22,7 +26,7 @@ import type { ActionSpec } from "@/api/approvals";
 import { useOnline } from "@/app/online";
 import { FILE_ACCEPT, attachmentName, checkAttachment, readAttachment, sizeLabel } from "@/features/approvals/detail-attach";
 import { PRIORITIES, normalizePriority } from "@/features/approvals/detail-display";
-import { failureOf } from "@/features/approvals/detail-failure";
+import { failureOf, sheetOutcome } from "@/features/approvals/detail-failure";
 import { canConfirm } from "@/features/approvals/rules";
 import { useApprovalsStore } from "@/stores/approvals";
 import Icon from "./Icon.vue";
@@ -40,6 +44,7 @@ const emit = defineEmits<{
   (e: "close"): void;
   (e: "done"): void;
   (e: "refused", message: string): void;
+  (e: "unconfirmed"): void;
 }>();
 
 const { t } = useI18n();
@@ -155,10 +160,13 @@ async function submit() {
         await api.attach(props.doctype, props.name, file.filename, file.base64);
         uploaded.value = true;
       } catch (error) {
-        const failure = failureOf(error);
-        // A refused file is the server's word on the document: show it and reload.
-        if (failure.kind === "server") {
-          emit("refused", failure.message);
+        const outcome = sheetOutcome("attach", error);
+        if (outcome.kind === "file") {
+          // The server refused the FILE: stay open with what was typed, drop the file
+          // that was refused and say why, so another can be chosen.
+          attachProblem.value = outcome.message;
+          picked.value = null;
+          uploaded.value = false;
         } else {
           problem.value = failureText(error);
         }
@@ -177,8 +185,10 @@ async function submit() {
         reviewedState,
       );
     } catch (error) {
-      const failure = failureOf(error);
-      if (failure.kind === "server") emit("refused", failure.message);
+      const outcome = sheetOutcome("apply", error);
+      if (outcome.kind === "refused") emit("refused", outcome.message);
+      // Sent, and no answer: it may have gone through. Never offer Confirm again as if it had not.
+      else if (outcome.kind === "unconfirmed") emit("unconfirmed");
       else problem.value = failureText(error);
       return;
     }

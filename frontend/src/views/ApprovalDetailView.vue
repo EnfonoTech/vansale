@@ -229,6 +229,17 @@ async function onForwarded(person: string) {
 
 const REFUSAL_TOAST_MS = 7000;
 
+/**
+ * The decision was sent and no answer came back: it may have gone through.
+ * Say so and reload the document, so what is offered next is what is true
+ * (the bar is gone if it moved) and not a Confirm button asking again blindly.
+ */
+async function onUnconfirmed() {
+  activeSpec.value = null;
+  toasts.warn(t("approvalsDetail.toast.unconfirmed"), REFUSAL_TOAST_MS);
+  await load(true);
+}
+
 /** The server said no: its words, as given, then what is true now. */
 async function onRefused(message: string) {
   const forwarding = forwardOpen.value;
@@ -441,6 +452,7 @@ async function onRefused(message: string) {
       @close="activeSpec = null"
       @done="onActionDone"
       @refused="onRefused"
+      @unconfirmed="onUnconfirmed"
     />
     <ForwardSheet
       v-if="detail && forwardOpen && detail.action_id"

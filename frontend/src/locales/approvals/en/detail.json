@@ -59,7 +59,8 @@
       "done": "Done: {action} on {name}",
       "forwarded": "Forwarded to {name}. It now shows under Waiting on others.",
       "recommended": "Your advice was sent",
-      "recommendedTo": "Your advice was sent to {name}"
+      "recommendedTo": "Your advice was sent to {name}",
+      "unconfirmed": "We could not confirm whether your decision went through. Check the document's state below before deciding again."
     },
     "errors": {
       "network": "The connection dropped. Check your signal and try again.",

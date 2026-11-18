@@ -1,10 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { failureOf } from "../detail-failure";
+import { failureOf, sheetOutcome } from "../detail-failure";
 
-function named(name: string, message: string, serverMessage?: string): Error {
-  const error = new Error(message) as Error & { serverMessage?: string };
+function named(name: string, message: string, serverMessage?: string, status?: number): Error {
+  const error = new Error(message) as Error & { serverMessage?: string; status?: number };
   error.name = name;
   error.serverMessage = serverMessage;
+  error.status = status;
   return error;
 }
 
@@ -26,5 +27,50 @@ describe("failureOf", () => {
     expect(failureOf(new Error(" boom "))).toEqual({ kind: "unknown", message: "boom" });
     expect(failureOf("plain")).toEqual({ kind: "unknown", message: "plain" });
     expect(failureOf(null)).toEqual({ kind: "unknown", message: "" });
+  });
+});
+
+describe("sheetOutcome", () => {
+  const refusal = named("ApiError", "x", "Not allowed for this document", 417);
+  const down = named("NetworkError", "Network unreachable");
+
+  describe("while attaching the file", () => {
+    it("a server refusal is about the file: the sheet stays open with the server's words", () => {
+      expect(sheetOutcome("attach", refusal)).toEqual({ kind: "file", message: "Not allowed for this document" });
+    });
+    it("a connection that dropped is a plain retry (a file added twice does no harm)", () => {
+      expect(sheetOutcome("attach", down)).toEqual({ kind: "retry" });
+    });
+    it("any other failure is a retry", () => {
+      expect(sheetOutcome("attach", new Error("tooLarge"))).toEqual({ kind: "retry" });
+      expect(sheetOutcome("attach", named("ApiError", "HTTP 500", undefined, 500))).toEqual({ kind: "retry" });
+    });
+  });
+
+  describe("while applying the decision", () => {
+    it("a server refusal closes the sheet and carries the server's words", () => {
+      expect(sheetOutcome("apply", refusal)).toEqual({ kind: "refused", message: "Not allowed for this document" });
+    });
+    it("a dropped connection or a timeout means the result is unknown, never a plain retry", () => {
+      expect(sheetOutcome("apply", down)).toEqual({ kind: "unconfirmed" });
+      expect(sheetOutcome("apply", named("NetworkError", "Request timed out"))).toEqual({ kind: "unconfirmed" });
+    });
+    it("a gateway error with no readable message is unknown too: the server may have finished", () => {
+      for (const status of [502, 503, 504]) {
+        expect(sheetOutcome("apply", named("ApiError", `HTTP ${status}`, undefined, status))).toEqual({
+          kind: "unconfirmed",
+        });
+      }
+    });
+    it("a gateway error that carries a server message is a refusal", () => {
+      expect(sheetOutcome("apply", named("ApiError", "x", "Try later", 503))).toEqual({
+        kind: "refused",
+        message: "Try later",
+      });
+    });
+    it("any other failure is a retry", () => {
+      expect(sheetOutcome("apply", named("ApiError", "HTTP 500", undefined, 500))).toEqual({ kind: "retry" });
+      expect(sheetOutcome("apply", new Error("boom"))).toEqual({ kind: "retry" });
+    });
   });
 });
