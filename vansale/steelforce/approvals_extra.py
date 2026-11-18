@@ -415,12 +415,27 @@ def _ad_hoc_holders(rows: list[dict]) -> dict[tuple[str, str], str]:
 def sent_back() -> dict:
     """The documents an approver sent back to the signed-in user for
     correction, as Permission Manager lists them (who sent it back, when, the
-    role and the reason). `sent_back_on` is a UTC ISO time to the second.
-    Empty when Permission Manager is not installed."""
+    role and the reason), as `{"items": [...], "unavailable": bool}`.
+    `sent_back_on` is a UTC ISO time to the second. When PM cannot build the
+    list for this user (its read of one document type is refused, which it
+    does not handle) the answer is no items and `unavailable` true. Empty
+    when Permission Manager is not installed."""
     if not approvals.is_available():
-        return {"items": []}
-    rows = approvals._pm().get_sent_back_documents() or []
-    return {"items": [_with_iso_times(row) for row in _without_hidden(rows)]}
+        return {"items": [], "unavailable": False}
+
+    logged = len(frappe.local.message_log)
+    try:
+        rows = approvals._pm().get_sent_back_documents() or []
+    except frappe.PermissionError:
+        # PM reads every sent-back type with the user's own permissions and
+        # stops at the first it may not read. The refusal queued a message
+        # that would reach the user as a toast on this GET; the row is
+        # deferred, as a GET rolls back what it inserts.
+        if len(frappe.local.message_log) > logged:
+            frappe.clear_last_message()
+        frappe.log_error(title="vansale approvals: sent back unavailable", defer_insert=True)
+        return {"items": [], "unavailable": True}
+    return {"items": [_with_iso_times(row) for row in _without_hidden(rows)], "unavailable": False}
 
 
 @frappe.whitelist(methods=["GET"])

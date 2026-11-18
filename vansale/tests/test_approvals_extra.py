@@ -1473,7 +1473,42 @@ class TestSentBack(ExtraCase):
     def test_no_documents_is_an_empty_list(self):
         self.pm.get_sent_back_documents.return_value = None
 
-        self.assertEqual(approvals_extra.sent_back(), {"items": []})
+        self.assertEqual(approvals_extra.sent_back(), {"items": [], "unavailable": False})
+
+    def test_pms_rows_say_the_list_is_available(self):
+        self.assertIs(approvals_extra.sent_back()["unavailable"], False)
+
+    def test_pms_own_permission_error_makes_the_list_unavailable_not_an_error(self):
+        # PM reads each sent-back type with the user's permissions and raises
+        # when one of them is not readable (seen for every non-admin on UAT).
+        def refused():
+            frappe.throw("No permission for Purchase Invoice", frappe.PermissionError)
+
+        frappe.msgprint("an earlier message that stays")
+        self.pm.get_sent_back_documents.side_effect = refused
+        log_error = self._patch("frappe.log_error")
+
+        self.assertEqual(approvals_extra.sent_back(), {"items": [], "unavailable": True})
+
+        # PM's message is cleared, nothing else
+        self.assertEqual(len(frappe.local.message_log), 1)
+        self.assertIn("an earlier message that stays", str(frappe.local.message_log[0]))
+        log_error.assert_called_once()
+        self.assertTrue(log_error.call_args.kwargs.get("defer_insert"))
+
+    def test_a_bare_permission_error_that_queued_nothing_keeps_earlier_messages(self):
+        frappe.msgprint("an earlier message that stays")
+        self.pm.get_sent_back_documents.side_effect = frappe.PermissionError
+        self._patch("frappe.log_error")
+
+        self.assertTrue(approvals_extra.sent_back()["unavailable"])
+        self.assertEqual(len(frappe.local.message_log), 1)
+
+    def test_any_other_error_is_not_swallowed(self):
+        self.pm.get_sent_back_documents.side_effect = frappe.ValidationError("broken")
+
+        with self.assertRaises(frappe.ValidationError):
+            approvals_extra.sent_back()
 
     def test_a_hidden_type_never_shows_even_if_pm_returned_it(self):
         self.pm.hidden_doctypes.return_value = ["Gate Pass"]
@@ -1490,7 +1525,7 @@ class TestSentBack(ExtraCase):
     def test_nothing_without_pm(self):
         self.available.return_value = False
 
-        self.assertEqual(approvals_extra.sent_back(), {"items": []})
+        self.assertEqual(approvals_extra.sent_back(), {"items": [], "unavailable": False})
 
         self.assertEqual(self.pm.method_calls, [])
 
