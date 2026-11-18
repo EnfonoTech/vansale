@@ -10,14 +10,16 @@ table has no list view and is only reachable through its parent.
 | --- | --- | --- |
 | [Van Daily Visit](#van-daily-visit) | Document | 12 |
 | [Van Visit Log](#van-visit-log) | Document | 11 |
-| [Vansale Configuration](#vansale-configuration) | Document | 14 |
+| [Vansale Allowed Mode of Payment](#vansale-allowed-mode-of-payment) | Child table | 1 |
+| [Vansale Configuration](#vansale-configuration) | Document | 33 |
 | [Vansale Configuration Cost Center](#vansale-configuration-cost-center) | Child table | 1 |
 | [Vansale Configuration User](#vansale-configuration-user) | Child table | 4 |
 | [Vansale Configuration Warehouse](#vansale-configuration-warehouse) | Child table | 1 |
 | [Vansale Naming Series](#vansale-naming-series) | Child table | 3 |
+| [Vansale Office Role](#vansale-office-role) | Child table | 1 |
 | [Vansale Outbox](#vansale-outbox) | Document | 10 |
 | [Vansale Pin](#vansale-pin) | Document | 3 |
-| [Vansale Settings](#vansale-settings) | Single | 4 |
+| [Vansale Settings](#vansale-settings) | Single | 34 |
 
 ## Van Daily Visit
 
@@ -64,32 +66,61 @@ table has no list view and is only reachable through its parent.
 **Roles with DocPerms:** `System Manager`, `Sales User`
 
 
+## Vansale Allowed Mode of Payment
+
+*Child table*
+
+| Field | Type | Options / default | Notes |
+| --- | --- | --- | --- |
+| `mode_of_payment` | Link | Mode of Payment | required |
+
 ## Vansale Configuration
 
 *Document*
 
 | Field | Type | Options / default | Notes |
 | --- | --- | --- | --- |
+| `tab_break_van` | Tab Break | - | - |
 | `van_code` | Data | - | required; Unique identifier for this van (e.g. VAN-RIYADH-01) |
 | `van_name` | Data | - | - |
 | `company` | Link | Company | required |
 | `branch` | Link | Branch | - |
-| | | | **-- Modules --** |
-| `route_mode` | Select | Follow Global / Enabled / Disabled / default `Follow Global` | Enabled: app shows Today's Route in the bottom bar and home. Disabled: that slot becomes Van Stock. Follow Global uses Vansale Settings. |
-| `pin_mode` | Select | Follow Global / Enabled / Disabled / default `Follow Global` | Applies to every user on this van unless their Assigned Users row overrides it. |
-| `uom_change_mode` | Select | Follow Global / Enabled / Disabled / default `Follow Global` | Enabled: driver may switch a line to another of the item's UOMs. Disabled: lines sell in the item's stock UOM only. |
-| | | | **-- Pricing --** |
-| `selling_price_list` | Link | Price List | Van-level selling price list. Takes effect when a customer has no Customer-specific default price list. Falls back to Customer Group → Selling Settings when ... |
-| | | | **-- Visits --** |
-| `require_location` | Check | default `0` | If enabled, the app asks for GPS permission and tags end-visit with lat/lng. Off by default. |
-| | | | **-- Document Numbering --** |
-| `doc_prefix` | Data | - | Per-van number prefix, e.g. VAN1- (trailing dash added if you omit it). Leaving it blank means this van uses the site's normal series. Saving generates one s... |
-| `naming_series_table` | Table | Vansale Naming Series | read-only; Generated from the prefix on save. Read-only: each row must keep its per-doctype abbreviation or Frappe shares one counter between document types. |
+| | | | **-- Users --** |
+| `user` | Table | Vansale Configuration User | Users assigned here are auto-granted the Van User role + scoped User Permissions. ⚠️ After adding a user, open their User doc and set a password — without on... |
 | | | | **-- Warehouses & Cost Centers --** |
 | `warehouse` | Table | Vansale Configuration Warehouse | First row is the user's default warehouse. Add additional rows if the van can draw from multiple warehouses. |
 | `cost_center` | Table | Vansale Configuration Cost Center | First row is the user's default cost center. Tax templates will use the company's default cost center automatically. |
-| | | | **-- Assigned Users --** |
-| `user` | Table | Vansale Configuration User | Users assigned here are auto-granted the Van User role + scoped User Permissions. ⚠️ After adding a user, open their User doc and set a password — without on... |
+| | | | **-- Document Numbering --** |
+| `doc_prefix` | Data | - | Per-van number prefix, e.g. VAN1- (trailing dash added if you omit it). Leaving it blank means this van uses the site's normal series. Saving generates one s... |
+| `naming_series_table` | Table | Vansale Naming Series | read-only; Generated from the prefix on save. Read-only: each row must keep its per-doctype abbreviation or Frappe shares one counter between document types. |
+| `tab_break_settings` | Tab Break | - | - |
+| | | | **-- General --** |
+| `route_mode` | Select | Follow Global / Enabled / Disabled / default `Follow Global` | - |
+| `pin_mode` | Select | Follow Global / Enabled / Disabled / default `Follow Global` | - |
+| `uom_change_mode` | Select | Follow Global / Enabled / Disabled / default `Follow Global` | - |
+| `require_location` | Check | default `0` | - |
+| | | | **-- Pricing & New Customers --** |
+| `selling_price_list` | Link | Price List | - |
+| `customer_price_mode` | Select | Follow Global / Enabled / Disabled / default `Follow Global` | - |
+| `default_customer_group` | Link | Customer Group | - |
+| `default_territory` | Link | Territory | - |
+| | | | **-- Payments --** |
+| `cash_sale_posting_mode` | Select | Follow Global / POS Invoice / Payment Entry / default `Follow Global` | - |
+| `cash_payment_entry_status_mode` | Select | Follow Global / Submit / Draft / default `Follow Global` | - |
+| `collection_payment_entry_status_mode` | Select | Follow Global / Submit / Draft / default `Follow Global` | - |
+| `split_payment_mode` | Select | Follow Global / Enabled / Disabled / default `Follow Global` | - |
+| `advance_payment_mode` | Select | Follow Global / Enabled / Disabled / default `Follow Global` | - |
+| `return_without_invoice_mode` | Select | Follow Global / Enabled / Disabled / default `Follow Global` | - |
+| `allowed_modes_of_payment` | Table MultiSelect | Vansale Allowed Mode of Payment | - |
+| | | | **-- Printing --** |
+| `invoice_print_format` | Link | Print Format | - |
+| `receipt_print_format` | Link | Print Format | - |
+| `direct_print_mode` | Select | Follow Global / Enabled / Disabled / default `Follow Global` | - |
+| `print_after_submit_mode` | Select | Follow Global / Enabled / Disabled / default `Follow Global` | - |
+| `pdf_button_mode` | Select | Follow Global / Enabled / Disabled / default `Follow Global` | - |
+| `print_copies` | Int | - | - |
+| | | | **-- Selling flow --** |
+| `update_stock_mode` | Select | Follow Global / Enabled / Disabled / default `Follow Global` | - |
 
 **Roles with DocPerms:** `System Manager`
 
@@ -131,13 +162,21 @@ table has no list view and is only reachable through its parent.
 | `naming_series` | Data | - | required; Must carry a per-doctype abbreviation. Frappe keys tabSeries on the resolved prefix, so two doctypes sharing a template share one counter. |
 | `use_for_return` | Check | - | Used when is_return = 1 (credit notes). |
 
+## Vansale Office Role
+
+*Child table*
+
+| Field | Type | Options / default | Notes |
+| --- | --- | --- | --- |
+| `role` | Link | Role | required |
+
 ## Vansale Outbox
 
 *Document*
 
 | Field | Type | Options / default | Notes |
 | --- | --- | --- | --- |
-| `event_type` | Select | invoice / payment / return / visit / stock_adjust / customer | required |
+| `event_type` | Select | invoice / payment / return / visit / stock_adjust / custo... | required |
 | `client_id` | Data | - | required |
 | `user` | Link | User | - |
 | `client_ts` | Datetime | - | - |
@@ -175,7 +214,43 @@ table has no list view and is only reachable through its parent.
 | `require_pin` | Check | default `1` | Master switch. On, drivers set a 4-digit PIN and re-enter it after 2 hours idle. Off, the app goes straight to Home after login. Individual vans and users ca... |
 | | | | **-- Invoicing --** |
 | `allow_uom_change` | Check | default `1` | Master switch. On, the driver can switch a line between the item's own UOMs (Pcs / Box / Carton) and the rate re-fetches. Off, every line sells in the item's... |
+| `use_customer_price` | Check | default `0` | - |
+| `allow_return_without_invoice` | Check | default `0` | - |
+| `allow_line_discount` | Check | default `1` | - |
+| `apply_discount_on` | Select | Grand Total / Net Total / default `Grand Total` | - |
+| `default_payment_type` | Select | Cash / Credit / default `Cash` | - |
+| `confirm_before_submit` | Check | default `0` | - |
+| `stock_source` | Select | Bin / Stock Ledger / default `Bin` | - |
+| | | | **-- Payments --** |
+| `cash_sale_posting` | Select | POS Invoice / Payment Entry / default `POS Invoice` | - |
+| `cash_payment_entry_status` | Select | Submit / Draft / default `Submit` | - |
+| `collection_payment_entry_status` | Select | Same as cash sale / Submit / Draft / default `Same as cash sale` | - |
+| `allow_split_payment` | Check | default `0` | - |
+| `allow_advance_payment` | Check | default `0` | - |
+| `allow_delete_draft_payment` | Check | default `1` | - |
+| | | | **-- Print --** |
+| `invoice_print_format` | Link | Print Format | - |
+| `receipt_print_format` | Link | Print Format | - |
+| `direct_print` | Check | default `0` | - |
+| `print_after_submit` | Check | default `0` | - |
+| `show_pdf_button` | Check | default `1` | - |
+| `show_share_button` | Check | default `1` | - |
+| `pdf_like_browser_print` | Check | default `0` | - |
+| `print_copies` | Int | default `1` | - |
+| | | | **-- Install on phone (web app) --** |
+| `pwa_app_name` | Data | - | - |
+| `pwa_icon` | Attach Image | - | - |
+| | | | **-- Access --** |
+| `office_roles` | Table MultiSelect | Vansale Office Role | - |
+| | | | **-- Customer --** |
+| `customer_name_2_field` | Data | - | - |
 | `help_html` | HTML | <p class="text-muted small">Override order, most specific... | - |
+| | | | **-- Selling flow --** |
+| `update_stock_on_invoice` | Check | default `1` | - |
+| `quotation_next_step` | Select | Sales Order / Sales Invoice / Both / default `Sales Order` | - |
+| `cr_number_field` | Data | - | - |
+| `credit_needs_limit` | Check | default `0` | - |
+| `ask_driver` | Check | default `0` | - |
 
 **Roles with DocPerms:** `System Manager`, `Van Manager`, `Van User`
 

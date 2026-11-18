@@ -30,7 +30,7 @@ cannot make a document disappear.
 ## 2. The public HTTP surface
 
 **Every `@frappe.whitelist()` is a public HTTP endpoint** at
-`/api/method/<dotted.path>`. There are currently **67**.
+`/api/method/<dotted.path>`. There are currently **120**.
 
 Adding an endpoint adds attack surface. Before merging one, confirm:
 
@@ -60,7 +60,7 @@ five are structurally pre-login and none returns tenant data:
 second pair of eyes — it is the only category of change here that can expose data
 to the open internet.
 
-### Endpoints with no explicit permission call — 47
+### Endpoints with no explicit permission call — 97
 
 `gen-docs.py` flags these. **Absence is not proof of a hole.** Most are safe
 because every query is scoped to `frappe.session.user`, or because they only read
@@ -75,6 +75,42 @@ audited if it appears there:
   controls that name;
 - anything an admin-only screen calls (`api/admin.py`), which must verify the role
   rather than assume the UI hid the button.
+
+### Approvals endpoints — 13
+
+`steelforce.approvals` (6) and `steelforce.approvals_extra` (7) front
+`permission_manager` (PM). PM owns who may approve what, so these call PM
+(`approvals._pm()`) for every decision and never copy its rules. None is guest
+reachable. Stock Entry and any type whose workflow PM flags
+`hide_from_approval_inbox` are refused (or left out of a list) in every one.
+Ten of the thirteen are on the generated "no explicit permission call" list
+because their check is in a helper or in PM, which the generator cannot see; the
+last column says what each is scoped by.
+
+| Endpoint | Verb | Scoped by |
+| --- | --- | --- |
+| `approvals.availability` | GET | Nothing to scope: it answers only whether PM is installed. |
+| `approvals.inbox` | GET | **Session user, through PM**: only what PM's `get_my_pending_approvals` returns for them, the desk's own list. Party, amount and currency are read with `frappe.get_list` as the user, so a document they may not read shows without them. |
+| `approvals.count` | GET | **Session user, through PM**: the same list as `inbox`, numbers only. |
+| `approvals.detail` | GET | **Read permission** on the document. A user who cannot read it but holds an open PM action on it (PM's `_can_act_on`) gets a bare record (state, priority, creator) and nothing of the document; anyone else is refused. Fields are cut to what the user may read. |
+| `approvals.apply` | POST | **PM action ownership**, after read permission: the action must be one PM's `get_transitions` offers the session user for the document's state, less PM's self-approval rule (a person asked for advice by a "return to me" forward may only recommend: the document does not move). The comment or attachment the transition requires is enforced here (PM does not enforce `require_comment`); PM's `apply_workflow` then checks again and runs the document's own hooks. |
+| `approvals.apply_bulk` | POST | As `apply`, document by document: at most 20, each committed or rolled back on its own, a hidden type refuses the whole batch. |
+| `approvals_extra.forward_targets` | GET | **Read permission** on the document for the caller. Offers up to 20 enabled system users who can read it (user id, full name and the workflow role they hold, nothing else), never the caller; the users are listed with `get_all` on purpose, since a desk user may pick a colleague but not read the User list. |
+| `approvals_extra.forward` | POST | **PM action ownership**: PM's `forward_workflow_action` checks the caller may act on the open action. The recipient must also be an enabled system user other than the caller who can read the document (a forward does not share it). |
+| `approvals_extra.return_to_originator` | POST | **PM action ownership**: PM's `return_adhoc_to_originator` checks the caller may act on the open ad-hoc action. |
+| `approvals_extra.attach` | POST | **PM action ownership and read permission**: the caller must hold an open action they may act on for that document and be able to read it. Write permission on the document is not needed, and it is not a general "attach to anything": the file is private and made by the app's own upload. |
+| `approvals_extra.my_requests` | GET | **Session user**: only PM Workflow Actions with `for_submitter` = the caller (`get_all` is safe for that reason). The documents are not read, only whether each still exists and is not cancelled. |
+| `approvals_extra.sent_back` | GET | **Session user, through PM**: PM's `get_sent_back_documents` for the caller's own list (`all_users` is never passed). |
+| `approvals_extra.history` | GET | **Session user, through PM**: PM's `get_my_approval_history` for the caller (`all_users` is never passed, so never anybody else's). |
+
+All thirteen are inert when `permission_manager` is not installed: the reads
+(`availability`, `inbox`, `count`, `forward_targets`, `my_requests`, `sent_back`,
+`history`) answer "disabled", empty or zero without calling PM, and the writes
+and `detail` refuse with "Approvals are not available on this site" before
+reading or changing anything.
+
+`steelforce/approvals_parity.py` is not an endpoint: it is a developer check run
+from `bench execute` that compares these lists with PM's own for one user.
 
 ---
 

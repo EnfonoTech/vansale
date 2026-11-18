@@ -28,6 +28,7 @@ unexpectedly.
 
 - `vansale.install.ensure_capacitor_cors`
 - `vansale.setup.after_migrate`
+- `vansale.pdf_engine.after_migrate`
 
 ## `boot_session`
 
@@ -56,17 +57,13 @@ Exported with `bench export-fixtures`, re-imported on every `bench migrate`.
 ]
 ```
 
-## `website_redirects`
+## `website_route_rules`
 
 ```json
 [
   {
-    "source": "/vansale",
-    "target": "/assets/vansale/spa/index.html"
-  },
-  {
-    "source": "/vansale/",
-    "target": "/assets/vansale/spa/index.html"
+    "from_route": "/vansale/<path:app_path>",
+    "to_route": "vansale"
   }
 ]
 ```

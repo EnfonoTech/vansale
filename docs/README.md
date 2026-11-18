@@ -46,8 +46,8 @@ which no generator can do.
 
 ## Current state
 
-- 67 whitelisted endpoints, 5 guest-reachable (all structurally pre-login)
-- 10 DocTypes
+- 120 whitelisted endpoints, 5 guest-reachable (all structurally pre-login)
+- 12 DocTypes
 - 4 reports, 4 number cards, 3 charts, 1 dashboard
 - App v1.0.30
 
