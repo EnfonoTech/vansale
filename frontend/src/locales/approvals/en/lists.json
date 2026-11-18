@@ -1,0 +1,82 @@
+{
+  "approvalsLists": {
+    "age": {
+      "today": "Today",
+      "one": "1 day",
+      "two": "{n} days",
+      "few": "{n} days",
+      "many": "{n} days",
+      "other": "{n} days"
+    },
+    "ago": "{age} ago",
+    "priority": {
+      "critical": "Critical",
+      "high": "High",
+      "medium": "Medium",
+      "low": "Low"
+    },
+    "state": {
+      "loading": "Loading the list",
+      "loadFailed": "Could not load this list.",
+      "retry": "Try again",
+      "offline": "You are offline. This list needs a connection.",
+      "offlineOld": "You are offline. This list may be out of date.",
+      "failedOld": "Could not refresh. Showing the last list loaded."
+    },
+    "mine": {
+      "emptyTitle": "Nothing in approval",
+      "emptyHint": "Documents you submit for approval show here until they are decided.",
+      "with": "With {holder}",
+      "waitingFor": "Waiting for {role}",
+      "open": "Open {name}"
+    },
+    "sentBack": {
+      "emptyTitle": "Nothing sent back",
+      "emptyHint": "When an approver returns a document for correction, it shows here with the reason.",
+      "by": "Sent back by {name}",
+      "noReason": "No reason was given.",
+      "openAndCorrect": "Open and correct",
+      "noLink": "This document has no link to open."
+    },
+    "history": {
+      "filtersLabel": "Filter the history",
+      "from": "From",
+      "to": "To",
+      "transaction": "Transaction",
+      "allTransactions": "All transactions",
+      "clear": "Clear filters",
+      "rangeReversed": "The From date is after the To date.",
+      "emptyTitle": "No history yet",
+      "emptyHint": "Your decisions, and the outcome of documents you submitted, show here.",
+      "emptyFilteredTitle": "Nothing for these filters",
+      "emptyFilteredHint": "Try a wider date range or another transaction.",
+      "stateChange": "{from} → {to}",
+      "by": "By {name}",
+      "limitNote": "Showing the latest {limit}. Narrow the dates to see older ones.",
+      "open": "Open {name}"
+    },
+    "bulk": {
+      "documents": "Documents: {count}",
+      "total": "Total",
+      "unknownAmounts": "Documents with no amount (not in the total): {count}",
+      "commentLabel": "Comment for all documents",
+      "commentHint": "Required. It is recorded on every document.",
+      "commentPlaceholder": "Write your comment",
+      "needsConnection": "This needs a connection.",
+      "tooMany": "A batch holds at most {max} documents. Go back and select fewer.",
+      "noItems": "No documents are selected.",
+      "confirm": "{action} ({count})",
+      "cancel": "Cancel",
+      "applying": "Applying…",
+      "summary": "{ok} of {count} done",
+      "refusedCount": "{failed} refused",
+      "retry": "Retry failed ({failed})",
+      "close": "Done",
+      "statusOk": "Done",
+      "statusFailed": "Refused",
+      "refused": "Refused by the server.",
+      "notAnswered": "No answer for this document.",
+      "requestFailed": "The request did not go through: {message}"
+    }
+  }
+}

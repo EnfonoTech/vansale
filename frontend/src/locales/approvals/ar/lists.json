@@ -1,0 +1,82 @@
+{
+  "approvalsLists": {
+    "age": {
+      "today": "اليوم",
+      "one": "يوم واحد",
+      "two": "يومين",
+      "few": "{n} أيام",
+      "many": "{n} يومًا",
+      "other": "{n} يوم"
+    },
+    "ago": "قبل {age}",
+    "priority": {
+      "critical": "حرجة",
+      "high": "عالية",
+      "medium": "متوسطة",
+      "low": "منخفضة"
+    },
+    "state": {
+      "loading": "جارٍ تحميل القائمة",
+      "loadFailed": "تعذّر تحميل هذه القائمة.",
+      "retry": "حاول مرة أخرى",
+      "offline": "أنت غير متصل. تحتاج هذه القائمة إلى اتصال بالإنترنت.",
+      "offlineOld": "أنت غير متصل. قد تكون هذه القائمة قديمة.",
+      "failedOld": "تعذّر التحديث. تُعرض آخر قائمة تم تحميلها."
+    },
+    "mine": {
+      "emptyTitle": "لا شيء قيد الاعتماد",
+      "emptyHint": "تظهر هنا المستندات التي ترسلها للاعتماد إلى أن يُبتّ فيها.",
+      "with": "لدى {holder}",
+      "waitingFor": "بانتظار {role}",
+      "open": "فتح {name}"
+    },
+    "sentBack": {
+      "emptyTitle": "لا توجد مستندات معادة",
+      "emptyHint": "عندما يعيد المعتمِد مستندًا للتصحيح يظهر هنا مع السبب.",
+      "by": "أعاده {name}",
+      "noReason": "لم يُذكر سبب.",
+      "openAndCorrect": "فتح وتصحيح",
+      "noLink": "لا يوجد رابط لفتح هذا المستند."
+    },
+    "history": {
+      "filtersLabel": "تصفية السجل",
+      "from": "من",
+      "to": "إلى",
+      "transaction": "نوع المعاملة",
+      "allTransactions": "كل المعاملات",
+      "clear": "مسح التصفية",
+      "rangeReversed": "تاريخ البداية بعد تاريخ النهاية.",
+      "emptyTitle": "لا يوجد سجل بعد",
+      "emptyHint": "تظهر هنا قراراتك ونتيجة المستندات التي أرسلتها.",
+      "emptyFilteredTitle": "لا نتائج لهذه التصفية",
+      "emptyFilteredHint": "جرّب فترة أوسع أو نوع معاملة آخر.",
+      "stateChange": "من {from} إلى {to}",
+      "by": "بواسطة {name}",
+      "limitNote": "تُعرض أحدث {limit} حركة. ضيّق الفترة لرؤية الأقدم.",
+      "open": "فتح {name}"
+    },
+    "bulk": {
+      "documents": "المستندات: {count}",
+      "total": "الإجمالي",
+      "unknownAmounts": "مستندات بلا مبلغ (غير داخلة في الإجمالي): {count}",
+      "commentLabel": "تعليق لكل المستندات",
+      "commentHint": "مطلوب. يُسجَّل على كل مستند.",
+      "commentPlaceholder": "اكتب تعليقك",
+      "needsConnection": "يتطلب هذا اتصالًا بالإنترنت.",
+      "tooMany": "تتسع الدفعة الواحدة لـ {max} مستندًا كحد أقصى. ارجع وحدّد عددًا أقل.",
+      "noItems": "لم يتم تحديد أي مستند.",
+      "confirm": "{action} ({count})",
+      "cancel": "إلغاء",
+      "applying": "جارٍ التنفيذ…",
+      "summary": "تم {ok} من {count}",
+      "refusedCount": "رُفض {failed}",
+      "retry": "إعادة المحاولة للمرفوض ({failed})",
+      "close": "تم",
+      "statusOk": "تم",
+      "statusFailed": "رُفض",
+      "refused": "رفضه الخادم.",
+      "notAnswered": "لا توجد استجابة لهذا المستند.",
+      "requestFailed": "لم يتم إرسال الطلب: {message}"
+    }
+  }
+}
