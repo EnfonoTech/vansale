@@ -872,6 +872,14 @@ class FakeDoc:
         self.owner = owner
         self._fields = {"doctype": doctype, "name": name, "owner": owner, **fields}
         self._hidden = set(hidden)
+        self.can_read = lambda: True
+
+    def check_permission(self, permtype="read"):
+        """What `Document.check_permission` does when refused: the text goes
+        to `flags.error_message` and a bare PermissionError is raised."""
+        if permtype == "read" and not self.can_read():
+            frappe.flags.error_message = f"You need the 'read' permission on {self.doctype} {self.name}"
+            raise frappe.PermissionError
 
     def get(self, key, default=None):
         return self._fields.get(key, default)
@@ -951,7 +959,9 @@ class DetailCase(ApiCase):
     def setUp(self):
         super().setUp()
         frappe.local.session.user = ME
-        self.workflow = types.SimpleNamespace(name="SI Approval", workflow_state_field="workflow_state")
+        self.workflow = types.SimpleNamespace(
+            name="SI Approval", workflow_state_field="workflow_state", hide_from_approval_inbox=0
+        )
         self.pm.get_workflow.return_value = self.workflow
         self.pm.get_open_return_adhoc_action.return_value = None
         self.pm.get_transitions.return_value = [
@@ -984,6 +994,7 @@ class DetailCase(ApiCase):
         self.get_doc = self._patch("frappe.get_doc", side_effect=self._get_doc)
 
         self.readable = True
+        self.unreadable_docs: set[str] = set()
         self.has_permission = self._patch(
             "frappe.has_permission",
             side_effect=lambda doctype, ptype="read", doc=None, **kwargs: self.readable,
@@ -1029,7 +1040,9 @@ class DetailCase(ApiCase):
             return types.SimpleNamespace(doctype=doctype, name=name)
         if (doctype, name) not in self.docs:
             raise frappe.DoesNotExistError(f"{doctype} {name} not found")
-        return self.docs[(doctype, name)]
+        doc = self.docs[(doctype, name)]
+        doc.can_read = lambda: self.readable and name not in self.unreadable_docs
+        return doc
 
     def _db_value(self, doctype, name, fieldname, *args, **kwargs):
         if (doctype, fieldname) == ("Sales Invoice", "workflow_state") and (doctype, name) in self.docs:
@@ -1520,6 +1533,110 @@ class TestWritesNeedPm(DetailCase):
             with self.assertRaises(frappe.ValidationError):
                 call()
         self.assertEqual(self.pm.mock_calls, [])
+
+
+class TestReadCheckOnApply(DetailCase):
+    """A "return to me" recipient's recommendations are built from the
+    transition rows, not from PM's `get_transitions` (which checks read), so
+    `apply` makes the read check itself."""
+
+    def setUp(self):
+        super().setUp()
+        self.pm.get_open_return_adhoc_action.return_value = "WA-2"
+        self.tables["PM Workflow Transition"] = [transition("Approve")]
+        for name in ("SINV-2", "SINV-3"):
+            self.docs[("Sales Invoice", name)] = FakeDoc(
+                "Sales Invoice", name, workflow_state="Pending Finance", is_return=0
+            )
+
+    def test_a_return_to_me_recipient_who_cannot_read_is_refused(self):
+        self.readable = False
+
+        with self.assertRaises(frappe.PermissionError):
+            approvals.apply("Sales Invoice", "SINV-1", "Approve")
+
+        self.pm.apply_workflow.assert_not_called()
+        self.pm.get_open_return_adhoc_action.assert_not_called()  # refused before the actions
+
+    def test_a_return_to_me_recipient_who_can_read_still_recommends(self):
+        self.assertEqual(
+            approvals.apply("Sales Invoice", "SINV-1", "Approve"),
+            {"ok": True, "new_state": "Approved", "recommended": True},
+        )
+
+    def test_in_bulk_the_unreadable_document_fails_alone_with_the_permission_message(self):
+        self.unreadable_docs.add("SINV-2")
+
+        result = approvals.apply_bulk("Sales Invoice", '["SINV-1", "SINV-2", "SINV-3"]', "Approve")
+
+        self.assertEqual(
+            result["results"],
+            [
+                {"docname": "SINV-1", "ok": True, "message": ""},
+                {"docname": "SINV-2", "ok": False,
+                 "message": "You need the 'read' permission on Sales Invoice SINV-2"},
+                {"docname": "SINV-3", "ok": True, "message": ""},
+            ],
+        )
+        self.assertEqual(
+            [c.args[0]["name"] for c in self.pm.apply_workflow.call_args_list], ["SINV-1", "SINV-3"]
+        )
+
+
+class TestHiddenTypesAreRefused(DetailCase):
+    """Stock Entry and any workflow flagged `hide_from_approval_inbox` never
+    appear here: every endpoint refuses them before reading or applying."""
+
+    def setUp(self):
+        super().setUp()
+        self.docs[("Stock Entry", "STE-1")] = FakeDoc("Stock Entry", "STE-1", workflow_state="Pending")
+
+    def _assert_nothing_happened(self):
+        self.has_permission.assert_not_called()
+        self.get_doc.assert_not_called()
+        self.assertEqual(self.get_all.calls, [])
+        self.assertEqual(self.get_list.calls, [])
+        self.pm.get_transitions.assert_not_called()
+        self.pm.apply_workflow.assert_not_called()
+        self.pm.get_document_lifecycle.assert_not_called()
+        self.assertEqual(
+            [c[0] for c in frappe.local.db.method_calls if c[0] in ("commit", "rollback")], []
+        )
+        self.assertEqual(frappe.local.message_log, [])
+
+    def _endpoints(self, doctype: str, name: str):
+        return {
+            "detail": lambda: approvals.detail(doctype, name),
+            "apply": lambda: approvals.apply(doctype, name, "Approve"),
+            "apply_bulk": lambda: approvals.apply_bulk(doctype, frappe.as_json([name]), "Approve"),
+        }
+
+    def test_stock_entry_is_refused_by_every_endpoint(self):
+        for endpoint, call in self._endpoints("Stock Entry", "STE-1").items():
+            with self.subTest(endpoint=endpoint):
+                with self.assertRaises(frappe.PermissionError):
+                    call()
+                self._assert_nothing_happened()
+                self.pm.get_workflow.assert_not_called()
+
+    def test_a_workflow_hidden_from_the_inbox_is_refused_by_every_endpoint(self):
+        self.workflow.hide_from_approval_inbox = 1
+
+        for endpoint, call in self._endpoints("Sales Invoice", "SINV-1").items():
+            with self.subTest(endpoint=endpoint):
+                with self.assertRaises(frappe.PermissionError):
+                    call()
+                self._assert_nothing_happened()
+
+        self.pm.get_workflow.assert_called_with("Sales Invoice", throw=False)
+
+    def test_an_ordinary_type_is_unaffected(self):
+        self.assertEqual(approvals.detail("Sales Invoice", "SINV-1")["docname"], "SINV-1")
+        self.assertTrue(approvals.apply("Sales Invoice", "SINV-1", "Approve")["ok"])
+        self.assertEqual(
+            approvals.apply_bulk("Sales Invoice", '["SINV-1"]', "Approve")["ok_count"], 1
+        )
+        self.pm.get_workflow.assert_called_with("Sales Invoice", throw=False)
 
 
 if __name__ == "__main__":

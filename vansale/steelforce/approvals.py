@@ -31,6 +31,10 @@ PM_APP = "permission_manager"
 PM_ACTION = "PM Workflow Action"
 PM_TRANSITION = "PM Workflow Transition"
 
+HIDDEN_DOCTYPES = ("Stock Entry",)
+"""Never handled here, as PM keeps them out of its own inbox (with any
+workflow flagged `hide_from_approval_inbox`)."""
+
 PRIORITIES = ("Low", "Medium", "High", "Critical")
 BULK_LIMIT = 20
 """The most documents one bulk decision may cover."""
@@ -169,10 +173,12 @@ def detail(doctype: str, name: str) -> dict:
     Needs read permission on the document. A user who cannot read it but holds
     an open approval on it gets the bare record with `banner.kind ==
     "cannot_read"` and nothing of the document itself; anyone else is
-    refused."""
+    refused. Stock Entry and types whose workflow is hidden from the approval
+    inbox are refused."""
     _require_available()
     doctype, name = cstr(doctype), cstr(name)
     user = frappe.session.user
+    workflow = _visible_workflow(doctype)
 
     if not frappe.has_permission(doctype, "read", doc=name):
         actions = _pm_actions(doctype, name)
@@ -184,7 +190,7 @@ def detail(doctype: str, name: str) -> dict:
             )
         return _unreadable_detail(doctype, name, held)
 
-    return _readable_detail(frappe.get_doc(doctype, name), user)
+    return _readable_detail(frappe.get_doc(doctype, name), user, workflow)
 
 
 @frappe.whitelist(methods=["POST"])
@@ -213,6 +219,7 @@ def apply_bulk(
     doctype, action, comment = cstr(doctype), cstr(action), cstr(comment)
     priority = _priority(priority)
     docnames = _bulk_names(names)
+    _visible_workflow(doctype)  # a hidden type refuses the whole batch
 
     results = []
     for docname in docnames:
@@ -497,7 +504,7 @@ def _actions_for(doc, user: str, workflow=None) -> tuple[list[dict], Optional[st
     rule refuses; when that leaves nothing, the banner is `"self_owned"`.
     `workflow` is the document's PM Workflow when the caller has it."""
     pm = _pm()
-    workflow = workflow or _workflow_of(doc)
+    workflow = workflow or _workflow_for(doc.doctype)
     if not workflow:
         return [], None
 
@@ -545,8 +552,11 @@ def _specs(rows: list, recommend_only: bool) -> list[dict]:
 
 def _apply_one(doctype: str, name: str, action: str, comment: str, priority: str) -> dict:
     """`apply` for one document; `apply_bulk` runs every document through it."""
+    workflow = _visible_workflow(doctype)
     doc = frappe.get_doc(doctype, name)
-    workflow = _workflow_of(doc)
+    # The read check PM's `get_transitions` makes; a "return to me" recipient's
+    # recommendations do not go through `get_transitions`, so it is made here.
+    doc.check_permission("read")
     specs, _banner = _actions_for(doc, frappe.session.user, workflow)
     spec = next((spec for spec in specs if spec["action"] == action), None)
 
@@ -603,10 +613,9 @@ def _require_available() -> None:
 # ─── The detail record ────────────────────────────────────────────────────────
 
 
-def _readable_detail(doc, user: str) -> dict:
+def _readable_detail(doc, user: str, workflow) -> dict:
     doctype, name = doc.doctype, doc.name
     pm = _pm()
-    workflow = _workflow_of(doc)
     # Actions and labels are worked out on the whole document (PM's conditions
     # read it); the facts below show only the fields the user may read.
     actions, banner_kind = _actions_for(doc, user, workflow)
@@ -704,9 +713,28 @@ def _blank_detail(doctype: str, name: str) -> dict:
     }
 
 
-def _workflow_of(doc):
-    """The document's active PM Workflow, or None."""
-    return _pm().get_workflow(doc.doctype, docname=doc.name, doc=doc, throw=False)
+def _workflow_for(doctype: str):
+    """The doctype's active PM Workflow, or None."""
+    return _pm().get_workflow(doctype, throw=False)
+
+
+def _visible_workflow(doctype: str):
+    """`_workflow_for(doctype)`, after refusing a type the approvals never
+    handle (Stock Entry, or a workflow flagged `hide_from_approval_inbox`)."""
+    if doctype in HIDDEN_DOCTYPES:
+        _refuse_hidden(doctype)
+    workflow = _workflow_for(doctype)
+    if workflow and cint(getattr(workflow, "hide_from_approval_inbox", 0)):
+        _refuse_hidden(doctype)
+    return workflow
+
+
+def _refuse_hidden(doctype: str) -> None:
+    """Raise PermissionError the way Frappe's own permission checks do (no
+    message queued for the response, the text in `flags.error_message`)."""
+    message = _("{0} is not handled in Approvals").format(_(doctype))
+    frappe.flags.error_message = message
+    raise frappe.PermissionError(message)
 
 
 def _state_of(doc, workflow) -> str:
