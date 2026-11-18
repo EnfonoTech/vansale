@@ -13,6 +13,8 @@ sf_trading on branch `new`, 0.1.159). Runs **next to `sf_trading`** (Steel Force
 
 - Every change is tagged **[STD]** (right for every client) or **[SF]** (Steel Force / sf_trading only).
 - When the Steel Force work is complete, the **[STD]** changes are moved to `develop` in one go.
+  The list to move is kept in `STANDARD_FIXES_FOR_DEVELOP.md` (`develop` has no Lead / Quotation /
+  Sales Order, so that selling flow stays here).
   **[SF]** changes stay on `develop_2`. All [SF] code lives in `vansale/steelforce/`, which makes the split easy.
 - **No sf_trading code is copied into vansale.** sf_trading stays installed and owns Steel Force's business
   rules. vansale calls its functions and lets its server checks run on every document the app creates.
