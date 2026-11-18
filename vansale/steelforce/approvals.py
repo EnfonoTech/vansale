@@ -251,13 +251,28 @@ def apply_bulk(
 
     results = []
     for docname in docnames:
+        # A label an earlier document (or the request) left must not name this one.
+        frappe.flags.pop("error_message", None)
         try:
-            _apply_one(doctype, docname, action, comment, priority, expected_state=states.get(docname, ""))
-        except Exception as error:  # one document's refusal must not stop the batch
-            frappe.db.rollback()
-            results.append({"docname": docname, "ok": False, "message": _error_text(error)})
-        else:
+            _apply_one(
+                doctype,
+                docname,
+                action,
+                comment,
+                priority,
+                expected_state=states.get(docname, ""),
+                refuse_advice=True,
+            )
             frappe.db.commit()
+        except Exception as error:  # one document's trouble must not stop the batch
+            message = _plain(_error_text(error))
+            if not isinstance(error, (frappe.ValidationError, frappe.PermissionError)):
+                # Not a refusal: something broke. Deferred, as the rollback
+                # below would discard a row inserted now.
+                frappe.log_error(title="vansale approvals: bulk apply", defer_insert=True)
+            _rollback()
+            results.append({"docname": docname, "ok": False, "message": message})
+        else:
             results.append({"docname": docname, "ok": True, "message": ""})
         frappe.clear_messages()
 
@@ -585,9 +600,12 @@ def _apply_one(
     comment: str,
     priority: Optional[str],
     expected_state: str = "",
+    refuse_advice: bool = False,
 ) -> dict:
     """`apply` for one document; `apply_bulk` runs every document through it.
-    `comment` is already trimmed; `priority` None leaves the transition's own."""
+    `comment` is already trimmed; `priority` None leaves the transition's own.
+    `refuse_advice` refuses a document on which the user is only asked for
+    advice (a batch would report advice as a decision)."""
     _refuse_if_hidden(doctype)
     doc = frappe.get_doc(doctype, name)
     # The read check PM's `get_transitions` makes; a "return to me" recipient's
@@ -600,6 +618,8 @@ def _apply_one(
         frappe.throw(_("This document changed since you opened it. Review it again."))
     specs, _banner = _actions_for(doc, frappe.session.user, workflow)
     spec = next((spec for spec in specs if spec["action"] == action), None)
+    if refuse_advice and spec and spec["recommend_only"]:
+        frappe.throw(_("Answer this one from its own screen"))
 
     refusal = check_apply(spec, comment, bool(spec) and bool(_attachments(doctype, name)))
     if refusal:
@@ -667,6 +687,20 @@ def _error_text(error: Exception) -> str:
     message Frappe set for a bare PermissionError, else a plain fallback."""
     text = cstr(error).strip() or cstr(frappe.flags.pop("error_message", None)).strip()
     return text or _("The action could not be applied")
+
+
+def _plain(text: str) -> str:
+    """A message as plain text: tags removed, entities decoded."""
+    return unescape(strip_html(cstr(text))).strip()
+
+
+def _rollback() -> None:
+    """Roll back one bulk document; a rollback that fails (a lost connection,
+    say) is logged and the batch goes on to report every document."""
+    try:
+        frappe.db.rollback()
+    except Exception:
+        frappe.log_error(title="vansale approvals: bulk rollback", defer_insert=True)
 
 
 def _require_available() -> None:

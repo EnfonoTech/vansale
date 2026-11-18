@@ -1567,23 +1567,188 @@ class TestReadCheckOnApply(DetailCase):
             {"ok": True, "new_state": "Approved", "recommended": True},
         )
 
-    def test_in_bulk_the_unreadable_document_fails_alone_with_the_permission_message(self):
+    def test_in_bulk_the_unreadable_document_fails_with_the_permission_message(self):
         self.unreadable_docs.add("SINV-2")
 
         result = approvals.apply_bulk("Sales Invoice", '["SINV-1", "SINV-2", "SINV-3"]', "Approve")
 
+        # the readable ones are advice only, which a batch never gives (below)
         self.assertEqual(
             result["results"],
             [
-                {"docname": "SINV-1", "ok": True, "message": ""},
+                {"docname": "SINV-1", "ok": False, "message": ADVICE_ONLY},
                 {"docname": "SINV-2", "ok": False,
                  "message": "You need the 'read' permission on Sales Invoice SINV-2"},
+                {"docname": "SINV-3", "ok": False, "message": ADVICE_ONLY},
+            ],
+        )
+        self.pm.apply_workflow.assert_not_called()
+
+
+ADVICE_ONLY = "Answer this one from its own screen"
+
+
+class TestBulkNeverGivesAdvice(DetailCase):
+    """A "return to me" recipient is asked for advice, not a decision: PM
+    records the answer and the document does not move. A batch would report
+    that as decided, so a batch refuses those documents and PM is not asked."""
+
+    def setUp(self):
+        super().setUp()
+        self.docs[("Sales Invoice", "SINV-2")] = FakeDoc(
+            "Sales Invoice", "SINV-2", workflow_state="Pending Finance", is_return=0
+        )
+        self.pm.get_open_return_adhoc_action.side_effect = lambda doc, state, user: (
+            "WA-9" if doc.name == "SINV-2" else None
+        )
+        self.tables["PM Workflow Transition"] = [transition("Approve")]
+
+    def test_an_advice_only_document_fails_alone_and_pm_is_not_asked_for_it(self):
+        result = approvals.apply_bulk("Sales Invoice", '["SINV-1", "SINV-2"]', "Approve")
+
+        self.assertEqual(
+            result,
+            {
+                "results": [
+                    {"docname": "SINV-1", "ok": True, "message": ""},
+                    {"docname": "SINV-2", "ok": False, "message": ADVICE_ONLY},
+                ],
+                "ok_count": 1,
+                "failed_count": 1,
+            },
+        )
+        self.assertEqual([c.args[0]["name"] for c in self.pm.apply_workflow.call_args_list], ["SINV-1"])
+
+    def test_a_single_apply_still_gives_the_advice(self):
+        result = approvals.apply("Sales Invoice", "SINV-2", "Approve")
+
+        self.assertTrue(result["recommended"])
+        self.pm.apply_workflow.assert_called_once()
+
+
+class TestBulkHardening(DetailCase):
+    """One document's trouble stays that document's: unexpected errors are
+    logged (deferred: the batch rolls back), a failing rollback or commit
+    does not end the batch, a label left by an earlier document never names
+    a later one, and row messages are plain text."""
+
+    def setUp(self):
+        super().setUp()
+        for name in ("SINV-2", "SINV-3"):
+            self.docs[("Sales Invoice", name)] = FakeDoc(
+                "Sales Invoice", name, workflow_state="Pending Finance", is_return=0
+            )
+        self.log_error = self._patch("frappe.log_error")
+
+    def _bulk(self, names='["SINV-1", "SINV-2", "SINV-3"]'):
+        return approvals.apply_bulk("Sales Invoice", names, "Approve")
+
+    def test_an_unexpected_error_is_logged_deferred_and_the_batch_goes_on(self):
+        def apply_workflow(doc, action, comment, priority):
+            if doc["name"] == "SINV-2":
+                raise KeyError("grand_total")
+
+        self.pm.apply_workflow.side_effect = apply_workflow
+
+        result = self._bulk()
+
+        self.assertEqual([r["ok"] for r in result["results"]], [True, False, True])
+        self.log_error.assert_called_once()
+        self.assertTrue(self.log_error.call_args.kwargs.get("defer_insert"))
+
+    def test_a_refusal_is_not_logged(self):
+        self.pm.apply_workflow.side_effect = frappe.ValidationError("Invalid Workflow Action: Approve")
+
+        self._bulk()
+
+        self.log_error.assert_not_called()
+
+    def test_a_permission_refusal_is_not_logged(self):
+        self.unreadable_docs.add("SINV-2")
+
+        self._bulk()
+
+        self.log_error.assert_not_called()
+
+    def test_a_rollback_that_fails_does_not_end_the_batch(self):
+        self.pm.apply_workflow.side_effect = lambda doc, *a: (
+            (_ for _ in ()).throw(frappe.ValidationError("no")) if doc["name"] == "SINV-1" else None
+        )
+        frappe.local.db.rollback.side_effect = Exception("Lost connection to MySQL server")
+
+        result = self._bulk()
+
+        self.assertEqual(
+            result["results"],
+            [
+                {"docname": "SINV-1", "ok": False, "message": "no"},
+                {"docname": "SINV-2", "ok": True, "message": ""},
                 {"docname": "SINV-3", "ok": True, "message": ""},
             ],
         )
+
+    def test_a_commit_that_fails_reports_that_document_failed_and_the_batch_goes_on(self):
+        commits = iter([None, Exception("Deadlock found when trying to get lock"), None])
+
+        def commit():
+            outcome = next(commits)
+            if outcome:
+                raise outcome
+
+        frappe.local.db.commit.side_effect = commit
+
+        result = self._bulk()
+
+        self.assertEqual([r["ok"] for r in result["results"]], [True, False, True])
+        self.assertEqual(result["ok_count"], 2)
         self.assertEqual(
-            [c.args[0]["name"] for c in self.pm.apply_workflow.call_args_list], ["SINV-1", "SINV-3"]
+            [c[0] for c in frappe.local.db.method_calls if c[0] in ("commit", "rollback")],
+            ["commit", "commit", "rollback", "commit"],
         )
+
+    def test_a_label_left_by_an_earlier_document_never_names_a_later_one(self):
+        def apply_workflow(doc, action, comment, priority):
+            if doc["name"] == "SINV-1":
+                frappe.flags.error_message = "You need the 'write' permission on Sales Invoice SINV-1"
+                raise frappe.ValidationError("Selling below the minimum price")
+            if doc["name"] == "SINV-2":
+                raise frappe.PermissionError  # bare, and it set no label of its own
+
+        self.pm.apply_workflow.side_effect = apply_workflow
+
+        result = self._bulk('["SINV-1", "SINV-2"]')
+
+        self.assertEqual(
+            [r["message"] for r in result["results"]],
+            ["Selling below the minimum price", "The action could not be applied"],
+        )
+
+    def test_a_stale_label_from_before_the_batch_is_not_reported(self):
+        frappe.flags.error_message = "left over from earlier in the request"
+        self.pm.apply_workflow.side_effect = frappe.PermissionError
+
+        result = self._bulk('["SINV-1"]')
+
+        self.assertEqual(result["results"][0]["message"], "The action could not be applied")
+
+    def test_row_messages_are_plain_text(self):
+        self.pm.apply_workflow.side_effect = frappe.ValidationError(
+            "Row <b>2</b>: rate &lt; minimum for <strong>Steel &amp; Bar</strong>"
+        )
+
+        result = self._bulk('["SINV-1"]')
+
+        self.assertEqual(result["results"][0]["message"], "Row 2: rate < minimum for Steel & Bar")
+
+    def test_a_single_apply_raises_the_message_unchanged(self):
+        text = "Row <b>2</b>: rate &lt; minimum"
+        self.pm.apply_workflow.side_effect = frappe.ValidationError(text)
+
+        with self.assertRaises(frappe.ValidationError) as caught:
+            approvals.apply("Sales Invoice", "SINV-1", "Approve")
+
+        self.assertEqual(str(caught.exception), text)
+        self.log_error.assert_not_called()
 
 
 class TestHiddenTypesAreRefused(DetailCase):
