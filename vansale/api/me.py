@@ -172,6 +172,8 @@ def config_defaults() -> dict:
     if company:
         currency = frappe.db.get_value("Company", company, "default_currency")
 
+    from vansale.steelforce import approvals
+
     return {
         "user": user_doc.name,
         "full_name": user_doc.full_name,
@@ -209,6 +211,7 @@ def config_defaults() -> dict:
         "print": print_behaviour(user),
         "customer_form": customer_form_config(),
         "selling_flow": selling_flow(user),
+        "approvals": {"enabled": approvals.is_available()},
     }
 
 
