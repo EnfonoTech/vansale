@@ -42,6 +42,7 @@ KEYS = {
     "my_requests_equal",
     "ok",
     "differences",
+    "skipped",
 }
 
 
@@ -277,6 +278,7 @@ class TestEqualInputs(ParityCase):
                 "my_requests_equal": True,
                 "ok": True,
                 "differences": [],
+                "skipped": [],
             },
         )
 
@@ -393,6 +395,55 @@ class TestInbox(ParityCase):
 
         self.assertFalse(report["ok"])
         self.assertIn("waiting", self.fields(report))
+
+
+SENT_BACK_SKIPPED = "sent_back: PM refuses this user (PermissionError)"
+
+
+class TestSentBackRefusedByPm(ParityCase):
+    """PM's own sent-back list raises PermissionError for a user who may not
+    read one of the sent-back document types (seen for every non-admin on
+    sft-uat). That comparison is then skipped, said so, and left out of `ok`."""
+
+    def setUp(self):
+        super().setUp()
+
+        def refused():
+            frappe.throw("No permission for Purchase Invoice", frappe.PermissionError)
+
+        self.pm.get_sent_back_documents.side_effect = refused
+        self.pwa_sent_back = []
+
+    def test_the_rest_matching_is_ok_with_sent_back_skipped(self):
+        report = self.report()
+
+        self.assertTrue(report["ok"])
+        self.assertIsNone(report["sent_back_equal"])
+        self.assertEqual(report["skipped"], [SENT_BACK_SKIPPED])
+        self.assertEqual(report["differences"], [])
+        self.assertTrue(report["my_requests_equal"])
+        self.assertEqual(frappe.local.message_log, [])  # PM's refusal leaves no toast
+
+    def test_a_real_difference_elsewhere_still_is_not_ok(self):
+        self.pwa_inbox = {**self.pwa_inbox, "total": self.pwa_inbox["total"] - 1}
+
+        report = self.report()
+
+        self.assertFalse(report["ok"])
+        self.assertIn("total", self.fields(report))
+        self.assertIsNone(report["sent_back_equal"])
+        self.assertEqual(report["skipped"], [SENT_BACK_SKIPPED])
+
+    def test_the_session_is_handed_back(self):
+        self.report()
+
+        self.assertEqual(frappe.session.user, RUNNER)
+
+    def test_any_other_error_is_not_swallowed(self):
+        self.pm.get_sent_back_documents.side_effect = frappe.ValidationError("broken")
+
+        with self.assertRaises(frappe.ValidationError):
+            self.report()
 
 
 class TestSentBack(ParityCase):
@@ -685,12 +736,23 @@ class TestAgainstTheRealEndpoints(RealEndpointsCase):
                 "sent_back_equal": True,
                 "my_requests_equal": True,
                 "ok": True,
+                "skipped": [],
             },
         )
         self.assertEqual(frappe.session.user, RUNNER)
 
     def test_the_report_has_the_documented_keys_and_nothing_else(self):
         self.assertEqual(set(approvals_parity.parity_report(ME)), KEYS)
+
+    def test_pm_refusing_its_own_sent_back_list_skips_that_comparison(self):
+        self.pm.get_sent_back_documents.side_effect = frappe.PermissionError
+        self._patch("frappe.log_error")
+
+        report = approvals_parity.parity_report(ME)
+
+        self.assertTrue(report["ok"])
+        self.assertIsNone(report["sent_back_equal"])
+        self.assertEqual(report["skipped"], ["sent_back: PM refuses this user (PermissionError)"])
 
     def test_the_total_is_pms_own_not_a_count_of_the_items(self):
         # PM claims 4 but lists 3 items: the desk shows PM's 4 and so does the PWA

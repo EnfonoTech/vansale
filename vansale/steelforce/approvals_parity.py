@@ -44,10 +44,13 @@ with the person it was forwarded to)."""
 def parity_report(user: str) -> dict:
     """The report for `user`: `{"user", "desk_total", "pwa_total",
     "desk_waiting", "pwa_waiting", "needs_you", "sent_back_equal",
-    "my_requests_equal", "ok", "differences"}`.
+    "my_requests_equal", "ok", "differences", "skipped"}`.
 
     `needs_you` is the PWA's total less its waiting. `differences` lists every
-    comparison that failed, so `ok` is true exactly when it is empty. A figure
+    comparison that failed, so `ok` is true exactly when it is empty.
+    `skipped` names comparisons that could not be made: when PM's own
+    sent-back list refuses the user (PermissionError), `sent_back_equal` is
+    None and that comparison does not count against `ok`. A figure
     is `{"field", "desk", "pwa"}` (`field` is `total`, `waiting`, `needs_you`,
     or `count.` and one of those for the badge numbers); a list is `{"field",
     "only_desk", "only_pwa"}` (`field` is `sections` and `waiting_items`, which
@@ -117,13 +120,23 @@ def _report(user: str) -> dict:
     ):
         _note(differences, _only_one_side(field, desk_ids, pwa_ids))
 
-    # Sent back: the pairs, not the other columns or their order.
-    sent_back = _only_one_side(
-        "sent_back",
-        _pairs(pm.get_sent_back_documents() or [], "doctype", "docname"),
-        _pairs(approvals_extra.sent_back().get("items") or [], "doctype", "docname"),
-    )
-    _note(differences, sent_back)
+    # Sent back: the pairs, not the other columns or their order. PM's own list
+    # raises PermissionError for a user who may not read one of the sent-back
+    # types (the PWA then says "unavailable"); that comparison is skipped and
+    # said so, and does not decide `ok` by itself.
+    skipped: list[str] = []
+    desk_sent_back = _desk_sent_back(pm)
+    if desk_sent_back is None:
+        skipped.append("sent_back: PM refuses this user (PermissionError)")
+        sent_back_equal = None
+    else:
+        sent_back = _only_one_side(
+            "sent_back",
+            _pairs(desk_sent_back, "doctype", "docname"),
+            _pairs(approvals_extra.sent_back().get("items") or [], "doctype", "docname"),
+        )
+        _note(differences, sent_back)
+        sent_back_equal = sent_back is None
 
     # My requests: against an independent read of the actions.
     my_requests = _only_one_side(
@@ -140,11 +153,24 @@ def _report(user: str) -> dict:
         "desk_waiting": desk_waiting,
         "pwa_waiting": pwa_waiting,
         "needs_you": pwa_total - pwa_waiting,
-        "sent_back_equal": sent_back is None,
+        "sent_back_equal": sent_back_equal,
         "my_requests_equal": my_requests is None,
         "ok": not differences,
         "differences": differences,
+        "skipped": skipped,
     }
+
+
+def _desk_sent_back(pm) -> Optional[list[dict]]:
+    """PM's own sent-back list, or None when PM refuses it for this user (the
+    message its refusal queued is cleared, as the endpoint does)."""
+    logged = len(frappe.local.message_log)
+    try:
+        return pm.get_sent_back_documents() or []
+    except frappe.PermissionError:
+        if len(frappe.local.message_log) > logged:
+            frappe.clear_last_message()
+        return None
 
 
 def _open_requests(user: str, pm) -> list[tuple[str, str]]:
