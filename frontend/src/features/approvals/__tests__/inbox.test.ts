@@ -214,17 +214,24 @@ describe("parseServerTime", () => {
 });
 
 describe("approvalsOnly", () => {
-  it("is for a signed-in user whose settings say no van app", () => {
-    expect(approvalsOnly({ defaults: { is_van_user: false }, hasVanShell: false })).toBe(true);
+  const on = { approvalsEnabled: true };
+
+  it("is for a signed-in user whose settings say no van app and who has approvals", () => {
+    expect(approvalsOnly({ defaults: { is_van_user: false }, hasVanShell: false, ...on })).toBe(true);
   });
 
   it("is not for a user who has the van app", () => {
-    expect(approvalsOnly({ defaults: { is_van_user: true }, hasVanShell: true })).toBe(false);
+    expect(approvalsOnly({ defaults: { is_van_user: true }, hasVanShell: true, ...on })).toBe(false);
   });
 
   it("waits for the settings: unknown is not approvals-only", () => {
-    expect(approvalsOnly({ defaults: null, hasVanShell: false })).toBe(false);
-    expect(approvalsOnly({ defaults: null, hasVanShell: true })).toBe(false);
+    expect(approvalsOnly({ defaults: null, hasVanShell: false, ...on })).toBe(false);
+    expect(approvalsOnly({ defaults: null, hasVanShell: true, ...on })).toBe(false);
+  });
+
+  it("is never the answer on a site without approvals: nobody is trapped in a shell with nothing in it", () => {
+    expect(approvalsOnly({ defaults: { is_van_user: false }, hasVanShell: false, approvalsEnabled: false })).toBe(false);
+    expect(approvalsOnly({ defaults: { is_van_user: true }, hasVanShell: true, approvalsEnabled: false })).toBe(false);
   });
 });
 

@@ -109,13 +109,20 @@ export function parseServerTime(stamp: string | null | undefined): Date | null {
 }
 
 /**
- * The user has no van app (neither Van User nor Van Manager: the session's
- * `hasVanShell`), so the app is Approvals and More only and no van endpoint is
- * called for them. Unknown until the user's settings have loaded (`defaults`
- * is null): nobody is moved by a guess.
+ * The app is Approvals and More only, and no van endpoint is called: the user
+ * has no van app (neither Van User, Van Manager nor an assigned van: the
+ * session's `hasVanShell`) AND the site has approvals for them
+ * (`approvalsEnabled`). Without Permission Manager there would be nothing to
+ * show in that shell, so nobody is moved into it: a site that does not have
+ * approvals keeps the van shell for everyone. Unknown until the user's
+ * settings have loaded (`defaults` is null): nobody is moved by a guess.
  */
-export function approvalsOnly(session: { defaults: unknown; hasVanShell: boolean }): boolean {
-  return session.defaults != null && !session.hasVanShell;
+export function approvalsOnly(session: {
+  defaults: unknown;
+  hasVanShell: boolean;
+  approvalsEnabled: boolean;
+}): boolean {
+  return session.defaults != null && session.approvalsEnabled && !session.hasVanShell;
 }
 
 /** The screens a user without the van app may open; every other screen is a van screen. */

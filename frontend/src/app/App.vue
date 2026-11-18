@@ -27,8 +27,12 @@ const sync = useSyncStore();
  * server ignores a sale it already has (client_id).
  */
 function syncPending() {
-  // The queue belongs to the van app: a user without it has none to send.
-  if (!session.isAuthenticated || !session.hasVanShell) return;
+  // Reads only the local queue and drains when something is waiting, so it is
+  // safe for any signed-in user (a user without the van app has an empty
+  // queue). It must not wait on who the user is: a van user whose settings
+  // have not loaded, or who has a van without either van role, still has
+  // sales saved offline to send.
+  if (!session.isAuthenticated) return;
   void sync.refresh().then(() => {
     if (sync.pending > 0) void sync.requestDrain();
   });

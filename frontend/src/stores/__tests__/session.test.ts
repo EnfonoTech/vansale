@@ -1,11 +1,14 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { createPinia, setActivePinia } from "pinia";
 import type { ConfigDefaults } from "@/api/me";
+import { approvalsOnly } from "@/features/approvals/inbox";
 import { useSessionStore } from "../session";
 
 /** Settings as the server sends them: only the role flags matter here. */
-function settings(flags: Partial<Pick<ConfigDefaults, "is_van_user" | "is_van_manager">>): ConfigDefaults {
-  return { is_van_user: false, is_van_manager: false, ...flags } as ConfigDefaults;
+function settings(
+  flags: Partial<Pick<ConfigDefaults, "is_van_user" | "is_van_manager" | "van_code" | "approvals">>,
+): ConfigDefaults {
+  return { is_van_user: false, is_van_manager: false, van_code: null, ...flags } as ConfigDefaults;
 }
 
 describe("hasVanShell", () => {
@@ -45,6 +48,21 @@ describe("hasVanShell", () => {
     expect(session.hasVanShell).toBe(false);
   });
 
+  it("is true for a user with a van but without the Van User role: the van code is enough", () => {
+    const session = useSessionStore();
+    session.defaults = settings({ van_code: "VAN-01" });
+    expect(session.isVanUser).toBe(false);
+    expect(session.hasVanShell).toBe(true);
+  });
+
+  it("is false for no role and no van code, or a blank one", () => {
+    const session = useSessionStore();
+    session.defaults = settings({ van_code: null });
+    expect(session.hasVanShell).toBe(false);
+    session.defaults = settings({ van_code: "" });
+    expect(session.hasVanShell).toBe(false);
+  });
+
   it("is true while the settings are not loaded, so the nav does not flicker", () => {
     const session = useSessionStore();
     expect(session.defaults).toBeNull();
@@ -57,5 +75,52 @@ describe("hasVanShell", () => {
     expect(session.hasVanShell).toBe(false);
     session.setDefaults(settings({ is_van_manager: true }));
     expect(session.hasVanShell).toBe(true);
+    session.setDefaults(settings({ van_code: "VAN-02" }));
+    expect(session.hasVanShell).toBe(true);
+  });
+});
+
+/** The shell decision the router, nav and Home take: the real store, the real rule. */
+describe("approvalsOnly with the session store", () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+    setActivePinia(createPinia());
+  });
+
+  const on = { approvals: { enabled: true } };
+  const off = { approvals: { enabled: false } };
+
+  it("a user with a van code but no van role keeps the van shell", () => {
+    const session = useSessionStore();
+    session.defaults = settings({ van_code: "VAN-01", ...on });
+    expect(approvalsOnly(session)).toBe(false);
+  });
+
+  it("a user with no van at all and approvals on gets the approvals-only shell", () => {
+    const session = useSessionStore();
+    session.defaults = settings({ ...on });
+    expect(approvalsOnly(session)).toBe(true);
+  });
+
+  it("with Permission Manager off (approvals disabled) nobody gets the approvals-only shell", () => {
+    const session = useSessionStore();
+    session.defaults = settings(off);
+    expect(approvalsOnly(session)).toBe(false);
+    session.defaults = settings({ van_code: "VAN-01", ...off });
+    expect(approvalsOnly(session)).toBe(false);
+  });
+
+  it("an older server that sends no approvals flag counts as Permission Manager off", () => {
+    const session = useSessionStore();
+    session.defaults = settings({});
+    expect(session.approvalsEnabled).toBe(false);
+    expect(approvalsOnly(session)).toBe(false);
+  });
+
+  it("unloaded settings (defaults null) count as van and are never approvals-only", () => {
+    const session = useSessionStore();
+    expect(session.defaults).toBeNull();
+    expect(session.hasVanShell).toBe(true);
+    expect(approvalsOnly(session)).toBe(false);
   });
 });

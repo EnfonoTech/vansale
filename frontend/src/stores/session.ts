@@ -84,7 +84,10 @@ export const useSessionStore = defineStore("session", {
     isVanUser: (s) => Boolean(s.defaults?.is_van_user),
     /**
      * The app has its van screens (Home, Sales, Customers, Stock or Route):
-     * the user is a Van User or a Van Manager. Anyone else gets the
+     * the user is a Van User or a Van Manager, or has a van assigned
+     * (`van_code`). A salesman set up with a van but without either role
+     * still sells from it, so the van alone counts: the role flags are not
+     * the only way in. Anyone else, on a site with approvals, gets the
      * approvals-only shell and no van endpoint is called for them.
      *
      * While the settings have not loaded (`defaults` is null) the answer is
@@ -93,7 +96,10 @@ export const useSessionStore = defineStore("session", {
      * endpoint before it knows (App.vue's cache warm-up) checks `defaults`
      * itself as well.
      */
-    hasVanShell: (s) => (s.defaults == null ? true : Boolean(s.defaults.is_van_user || s.defaults.is_van_manager)),
+    hasVanShell: (s) =>
+      s.defaults == null
+        ? true
+        : Boolean(s.defaults.is_van_user || s.defaults.is_van_manager || s.defaults.van_code),
     /** Approvals (Permission Manager) are on for this site; off on older servers. */
     approvalsEnabled: (s) => s.defaults?.approvals?.enabled === true,
     requireLocation: (s) => Boolean(s.defaults?.require_location),
