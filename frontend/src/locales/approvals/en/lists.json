@@ -76,7 +76,8 @@
       "statusFailed": "Refused",
       "refused": "Refused by the server.",
       "notAnswered": "No answer for this document.",
-      "requestFailed": "The request did not go through: {message}"
+      "resultUnknown": "No answer came back ({message}). The server may already have decided some or all of these documents, so they are not sent again. Close to reload the inbox and check.",
+      "closeReload": "Close and reload"
     }
   }
 }

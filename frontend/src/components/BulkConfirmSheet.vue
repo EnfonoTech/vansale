@@ -8,6 +8,12 @@
  * never hides the rest. Closing after anything was sent emits `done` (the
  * parent reloads the inbox); closing before that emits `close`.
  *
+ * A request that fails after it was sent is NOT a refusal: the server decides
+ * and commits the documents one by one, so some or all of the batch may be
+ * decided already. The sheet then says the result is unknown and offers only
+ * "Close and reload"; it never sends the batch a second time (a user who holds
+ * two steps in a row could decide a document twice).
+ *
  * Approvals need a connection and are never queued, so with no connection the
  * action stays disabled.
  */
@@ -17,8 +23,17 @@ import { applyBulk } from "@/api/approvals";
 import type { ApprovalItem, BulkRow } from "@/api/approvals";
 import { useOnline } from "@/app/online";
 import { useSessionStore } from "@/stores/session";
+import { actionTone } from "@/features/approvals/inbox";
 import { bulkShared } from "@/features/approvals/rules";
-import { BULK_LIMIT, bulkTotals, mergeResults, retryNames, rowStates } from "@/features/approvals/lists";
+import {
+  BULK_LIMIT,
+  bulkStateAfterFailure,
+  bulkTotals,
+  mergeResults,
+  retryNames,
+  rowStates,
+} from "@/features/approvals/lists";
+import type { RowState } from "@/features/approvals/lists";
 import Icon from "./Icon.vue";
 import SarSymbol from "./SarSymbol.vue";
 
@@ -44,8 +59,10 @@ const busy = ref(false);
 const results = ref<BulkRow[]>([]);
 /** Something was sent: the server may have acted, so closing must reload the inbox. */
 const sent = ref(false);
-/** The request itself failed (no answer for any document). */
-const requestError = ref("");
+/** The request failed after it was sent: the batch may be decided already, so it is never sent again. */
+const unknown = ref(false);
+/** What the failed request said (the connection, the wait that ran out). */
+const failureMessage = ref("");
 
 const mixed = computed(() => bulkShared(docs).reason);
 const tooMany = computed(() => docs.length > BULK_LIMIT);
@@ -55,13 +72,20 @@ const toSend = computed(() => retryNames(names, results.value));
 const okCount = computed(() => names.length - toSend.value.length);
 const failedCount = computed(() => results.value.filter((row) => !row.ok).length);
 const finished = computed(() => hasResults.value && toSend.value.length === 0);
+/** Nothing more can be decided here: all done, or the result of a sent request is unknown. */
+const closedOnly = computed(() => finished.value || unknown.value);
+/** The rows carry a mark and a line once there is something to say about them. */
+const showMarks = computed(() => hasResults.value || unknown.value);
 const totals = computed(() => bulkTotals(docs, session.currency ?? ""));
-/** A return for correction is the one decision named by data rather than by wording: it gets the destructive colour. */
-const destructive = computed(() =>
-  docs.some((doc) =>
-    doc.available_actions.some((flag) => flag.action === props.action && flag.is_return_for_correction),
-  ),
-);
+/**
+ * The button is coloured as the inbox's bulk bar colours the same action: from
+ * the action shared by the whole batch (the flag the bar was built from), read
+ * with the same `actionTone`.
+ */
+const tone = computed(() => {
+  const flag = bulkShared(docs).actions.find((shared) => shared.action === props.action);
+  return flag ? actionTone(flag) : "other";
+});
 
 const commentOk = computed(() => !props.needsComment || comment.value.trim().length > 0);
 const blocker = computed(() => {
@@ -72,7 +96,7 @@ const blocker = computed(() => {
   return "";
 });
 const canApply = computed(
-  () => !busy.value && !blocker.value && commentOk.value && toSend.value.length > 0,
+  () => !busy.value && !unknown.value && !blocker.value && commentOk.value && toSend.value.length > 0,
 );
 
 function fmt(amount: number): string {
@@ -80,6 +104,12 @@ function fmt(amount: number): string {
     minimumFractionDigits: session.currencyPrecision,
     maximumFractionDigits: session.currencyPrecision,
   }).format(amount);
+}
+
+/** What a row shows: a document not known to be done reads as unanswered once the result is unknown. */
+function stateOf(name: string): RowState {
+  const state = states.value.get(name) ?? { kind: "idle" as const };
+  return unknown.value && state.kind !== "ok" ? { kind: "idle" } : state;
 }
 
 /** The server's words for a refused document, or a plain line when it gave none. */
@@ -95,13 +125,14 @@ function messageOf(error: unknown): string {
 async function apply() {
   if (!canApply.value) return;
   busy.value = true;
-  requestError.value = "";
   sent.value = true;
   try {
     const answer = await applyBulk(doctype, toSend.value, props.action, comment.value.trim());
     results.value = mergeResults(results.value, answer.results ?? []);
   } catch (error) {
-    requestError.value = messageOf(error);
+    // No answer is not a refusal: the server may have decided some or all of the batch.
+    failureMessage.value = messageOf(error);
+    unknown.value = bulkStateAfterFailure(sent.value) === "unknown";
   } finally {
     busy.value = false;
   }
@@ -147,11 +178,11 @@ onBeforeUnmount(() => {
             v-for="doc in docs"
             :key="doc.docname"
             class="doc"
-            :data-state="hasResults ? states.get(doc.docname)?.kind : 'idle'"
+            :data-state="showMarks ? stateOf(doc.docname).kind : 'idle'"
           >
-            <span v-if="hasResults" class="mark" aria-hidden="true">
-              <Icon v-if="states.get(doc.docname)?.kind === 'ok'" name="check" :size="14" />
-              <Icon v-else-if="states.get(doc.docname)?.kind === 'failed'" name="x" :size="14" />
+            <span v-if="showMarks" class="mark" aria-hidden="true">
+              <Icon v-if="stateOf(doc.docname).kind === 'ok'" name="check" :size="14" />
+              <Icon v-else-if="stateOf(doc.docname).kind === 'failed'" name="x" :size="14" />
               <Icon v-else name="alert" :size="14" />
             </span>
             <div class="what">
@@ -166,11 +197,11 @@ onBeforeUnmount(() => {
                 <span v-if="doc.party && doc.transaction"> · </span>
                 <span v-if="doc.transaction">{{ doc.transaction }}</span>
               </div>
-              <template v-if="hasResults">
-                <div v-if="states.get(doc.docname)?.kind === 'ok'" class="result ok">
+              <template v-if="showMarks">
+                <div v-if="stateOf(doc.docname).kind === 'ok'" class="result ok">
                   {{ t("approvalsLists.bulk.statusOk") }}
                 </div>
-                <div v-else-if="states.get(doc.docname)?.kind === 'failed'" class="result failed" role="alert">
+                <div v-else-if="stateOf(doc.docname).kind === 'failed'" class="result failed" role="alert">
                   {{ failure(doc.docname) }}
                 </div>
                 <div v-else class="result idle">{{ t("approvalsLists.bulk.notAnswered") }}</div>
@@ -189,7 +220,7 @@ onBeforeUnmount(() => {
         </div>
         <p v-if="totals.unknown" class="hint">{{ t("approvalsLists.bulk.unknownAmounts", { count: totals.unknown }) }}</p>
 
-        <label v-if="needsComment && !finished" class="comment">
+        <label v-if="needsComment && !closedOnly" class="comment">
           <span class="label">{{ t("approvalsLists.bulk.commentLabel") }}</span>
           <textarea
             ref="commentBox"
@@ -206,20 +237,22 @@ onBeforeUnmount(() => {
           {{ t("approvalsLists.bulk.summary", { ok: okCount, count: docs.length }) }}
           <template v-if="failedCount"> · {{ t("approvalsLists.bulk.refusedCount", { failed: failedCount }) }}</template>
         </p>
-        <p v-if="requestError" class="problem" role="alert">
-          {{ t("approvalsLists.bulk.requestFailed", { message: requestError }) }}
+        <p v-if="unknown" class="problem" role="alert">
+          {{ t("approvalsLists.bulk.resultUnknown", { message: failureMessage }) }}
         </p>
-        <p v-if="blocker && !finished" class="problem" role="status">{{ blocker }}</p>
+        <p v-if="blocker && !closedOnly" class="problem" role="status">{{ blocker }}</p>
 
         <footer class="actions">
-          <template v-if="finished">
-            <button type="button" class="go" @click="close">{{ t("approvalsLists.bulk.close") }}</button>
+          <template v-if="closedOnly">
+            <button type="button" class="go" :data-tone="unknown ? 'other' : 'approve'" @click="close">
+              {{ unknown ? t("approvalsLists.bulk.closeReload") : t("approvalsLists.bulk.close") }}
+            </button>
           </template>
           <template v-else>
             <button type="button" class="secondary" :disabled="busy" @click="close">
               {{ hasResults ? t("approvalsLists.bulk.close") : t("approvalsLists.bulk.cancel") }}
             </button>
-            <button type="button" class="go" :class="{ danger: destructive }" :disabled="!canApply" @click="apply">
+            <button type="button" class="go" :data-tone="tone" :disabled="!canApply" @click="apply">
               <template v-if="busy">{{ t("approvalsLists.bulk.applying") }}</template>
               <template v-else-if="hasResults">
                 {{ t("approvalsLists.bulk.retry", { failed: toSend.length }) }}
@@ -294,6 +327,8 @@ onBeforeUnmount(() => {
 .actions { display: grid; grid-template-columns: 1fr 1.4fr; gap: 0.6rem; margin-top: 0.25rem; }
 .actions .go:only-child { grid-column: 1 / -1; }
 .actions button { min-height: 2.9rem; }
+/* Coloured as the inbox's bulk bar colours the action: approve green, reject red, anything else blue. */
 .go { background: var(--success); color: white; }
-.go.danger { background: var(--danger); }
+.go[data-tone="reject"] { background: var(--danger); }
+.go[data-tone="other"] { background: var(--primary); }
 </style>
