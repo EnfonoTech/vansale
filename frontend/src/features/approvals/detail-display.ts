@@ -45,7 +45,7 @@ export function barMode(detail: { banner: Banner | null; actions: ActionSpec[] }
   return detail.actions.length ? { kind: "actions" } : { kind: "none" };
 }
 
-/** An i18n key under `approvalsDetail.banner` and its parameters. */
+/** A message key for `t()` and its named parameters. */
 export interface Message {
   key: string;
   params: Record<string, string>;
@@ -122,4 +122,15 @@ export function initials(name: string): string {
   const first = Array.from(words[0])[0] ?? "";
   const last = words.length > 1 ? (Array.from(words[words.length - 1])[0] ?? "") : "";
   return (first + last).toUpperCase();
+}
+
+/**
+ * Whether the page the user came from (`history.state.back`) is the inbox
+ * itself, so going back lands there with its tab as it was. A detail opened
+ * from another detail, or from a link, is not.
+ */
+export function cameFromInbox(back: unknown): boolean {
+  if (typeof back !== "string") return false;
+  const path = back.split(/[?#]/)[0].replace(/\/+$/, "");
+  return path === "/approvals" || path.endsWith("/approvals");
 }

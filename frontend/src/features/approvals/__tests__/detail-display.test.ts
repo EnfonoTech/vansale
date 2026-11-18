@@ -3,6 +3,7 @@ import type { Route } from "@/api/approvals";
 import {
   bannerMessage,
   barMode,
+  cameFromInbox,
   currentHolders,
   initials,
   moreLines,
@@ -148,5 +149,20 @@ describe("initials", () => {
     expect(initials("Shafeek")).toBe("S");
     expect(initials("  ")).toBe("?");
     expect(initials("مريم خالد")).toBe("مخ");
+  });
+});
+
+describe("cameFromInbox", () => {
+  it("is true for the inbox, with or without a query or trailing slash", () => {
+    expect(cameFromInbox("/approvals")).toBe(true);
+    expect(cameFromInbox("/approvals/")).toBe(true);
+    expect(cameFromInbox("/approvals?tab=mine")).toBe(true);
+    expect(cameFromInbox("/vansale/approvals")).toBe(true);
+  });
+  it("is false for a detail, another screen, or nothing", () => {
+    expect(cameFromInbox("/approvals/Journal%20Entry/ACC-JV-1")).toBe(false);
+    expect(cameFromInbox("/invoices")).toBe(false);
+    expect(cameFromInbox(null)).toBe(false);
+    expect(cameFromInbox(undefined)).toBe(false);
   });
 });
