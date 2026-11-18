@@ -15,6 +15,7 @@ import unittest
 from unittest.mock import MagicMock, patch, sentinel
 
 import frappe
+import pymysql
 from frappe.query_builder import get_query_builder
 from frappe.query_builder.utils import patch_query_execute
 
@@ -78,19 +79,20 @@ def pm_pending(*items: dict, total: int | None = None) -> dict:
     }
 
 
-def fake_get_all(rows_by_doctype: dict[str, list[dict]]):
-    """A `frappe.get_all` that answers from `rows_by_doctype` and fails on any
+def fake_reader(function: str, rows_by_doctype: dict[str, list[dict]]):
+    """A stand-in for `frappe.get_all` / `frappe.get_list` (`function` names it
+    in the failure message) that answers from `rows_by_doctype` and fails on any
     other doctype. `.calls` lists `(doctype, kwargs)` for every call."""
     calls: list = []
 
-    def get_all(doctype, *args, **kwargs):
+    def read(doctype, *args, **kwargs):
         calls.append((doctype, kwargs))
         if doctype not in rows_by_doctype:
-            raise AssertionError(f"unexpected get_all({doctype!r}, {kwargs})")
+            raise AssertionError(f"unexpected {function}({doctype!r}, {kwargs})")
         return [frappe._dict(row) for row in rows_by_doctype[doctype]]
 
-    get_all.calls = calls
-    return get_all
+    read.calls = calls
+    return read
 
 
 def meta_with(*fieldnames: str):
@@ -110,9 +112,14 @@ class SiteFreeCase(unittest.TestCase):
         return mock
 
     def _use_get_all(self, rows_by_doctype: dict[str, list[dict]]):
-        get_all = fake_get_all(rows_by_doctype)
+        get_all = fake_reader("get_all", rows_by_doctype)
         self._patch("frappe.get_all", get_all)
         return get_all
+
+    def _use_get_list(self, rows_by_doctype: dict[str, list[dict]]):
+        get_list = fake_reader("get_list", rows_by_doctype)
+        self._patch("frappe.get_list", get_list)
+        return get_list
 
 
 class ApiCase(SiteFreeCase):
@@ -492,6 +499,9 @@ def _doc(doctype: str, docname: str) -> dict:
 
 
 class TestPartyAmounts(SiteFreeCase):
+    """Party and amount are read as the signed-in user: `frappe.get_list` (roles,
+    User Permissions, field-level permissions), never `frappe.get_all`."""
+
     def setUp(self):
         super().setUp()
         self.metas = {
@@ -502,6 +512,16 @@ class TestPartyAmounts(SiteFreeCase):
         self.currency_of = self._patch(
             "frappe.get_cached_value", side_effect=lambda doctype, name, field: {"Steel Co": "BHD"}.get(name)
         )
+        self.unreadable: set[str] = set()
+        self.has_permission = self._patch(
+            "frappe.has_permission",
+            side_effect=lambda doctype, ptype="read", **kwargs: doctype not in self.unreadable,
+        )
+        # `get_all` would skip the user's permissions: any call fails the test.
+        self.get_all = self._use_get_all({})
+        # frappe.db is a MagicMock here; give it the driver's real error classes.
+        for name in ("ProgrammingError", "OperationalError", "InternalError", "DataError"):
+            setattr(frappe.local.db, name, getattr(pymysql, name))
 
     def _meta(self, doctype):
         if doctype not in self.metas:
@@ -509,7 +529,7 @@ class TestPartyAmounts(SiteFreeCase):
         return self.metas[doctype]
 
     def test_one_query_per_doctype_never_per_row(self):
-        get_all = self._use_get_all(
+        get_list = self._use_get_list(
             {
                 "Sales Invoice": [
                     {"name": "SINV-1", "customer_name": "Acme", "grand_total": 120.5, "currency": "USD",
@@ -532,12 +552,13 @@ class TestPartyAmounts(SiteFreeCase):
 
         result = approvals._party_amounts(items)
 
-        self.assertEqual([call[0] for call in get_all.calls], ["Sales Invoice", "Journal Entry"])
-        invoice_call = get_all.calls[0][1]
+        self.assertEqual([call[0] for call in get_list.calls], ["Sales Invoice", "Journal Entry"])
+        invoice_call = get_list.calls[0][1]
         self.assertEqual(invoice_call["filters"], {"name": ["in", ["SINV-1", "SINV-2", "SINV-9"]]})
         self.assertEqual(
             invoice_call["fields"], ["name", "customer_name", "grand_total", "currency", "company"]
         )
+        self.assertEqual(invoice_call["limit_page_length"], 0)  # every name asked for, no page of 20
         self.assertEqual(
             result,
             {
@@ -549,9 +570,10 @@ class TestPartyAmounts(SiteFreeCase):
         )
         # SINV-9 is not found, so it is not in the answer.
         self.assertNotIn(("Sales Invoice", "SINV-9"), result)
+        self.assertEqual(self.get_all.calls, [])
 
     def test_a_company_is_looked_up_once_not_per_row(self):
-        self._use_get_all(
+        self._use_get_list(
             {
                 "Sales Invoice": [
                     {"name": "SINV-1", "customer_name": "Acme", "grand_total": 1, "currency": "", "company": "Steel Co"},
@@ -564,50 +586,139 @@ class TestPartyAmounts(SiteFreeCase):
 
         self.assertEqual(self.currency_of.call_count, 1)
 
-    def test_a_failing_read_costs_only_that_doctypes_facts(self):
-        def get_all(doctype, *args, **kwargs):
-            if doctype == "Sales Invoice":
-                raise frappe.db.InternalError("Unknown column")
-            return [frappe._dict(name="JV-1", title="Rent", total_debit=5, company="Steel Co")]
-
-        self._patch("frappe.get_all", get_all)
+    def test_a_doctype_the_user_may_not_read_gives_nothing_and_no_error(self):
+        self.unreadable.add("Sales Invoice")
+        get_list = self._use_get_list(
+            {"Journal Entry": [{"name": "JV-1", "title": "Rent", "total_debit": 5, "company": "Steel Co"}]}
+        )
         log_error = self._patch("frappe.log_error")
 
         result = approvals._party_amounts([_doc("Sales Invoice", "SINV-1"), _doc("Journal Entry", "JV-1")])
 
         self.assertEqual(list(result), [("Journal Entry", "JV-1")])
-        log_error.assert_called_once()
+        self.has_permission.assert_any_call("Sales Invoice", "read")
+        self.assertEqual([call[0] for call in get_list.calls], ["Journal Entry"])  # never asked
+        log_error.assert_not_called()
+        self.assertEqual(frappe.local.message_log, [])
+
+    def test_a_row_the_users_permissions_filter_out_is_left_out(self):
+        # A User Permission (a branch, a company) makes `get_list` drop SINV-2
+        # from the answer; PM still lists the document, so it shows with no
+        # party and no amount (see TestInbox).
+        get_list = self._use_get_list(
+            {
+                "Sales Invoice": [
+                    {"name": "SINV-1", "customer_name": "Acme", "grand_total": 3, "currency": "BHD",
+                     "company": "Steel Co"},
+                ]
+            }
+        )
+
+        result = approvals._party_amounts([_doc("Sales Invoice", "SINV-1"), _doc("Sales Invoice", "SINV-2")])
+
+        self.assertEqual(get_list.calls[0][1]["filters"], {"name": ["in", ["SINV-1", "SINV-2"]]})
+        self.assertEqual(list(result), [("Sales Invoice", "SINV-1")])
+
+    def test_a_field_the_user_may_not_read_comes_back_with_no_value(self):
+        # `get_list` leaves out a field above the user's permission level, so
+        # the row has no `grand_total` key at all: no amount, not 0.
+        self._use_get_list(
+            {"Sales Invoice": [{"name": "SINV-1", "customer_name": "Acme", "currency": "USD", "company": "Steel Co"}]}
+        )
+
+        result = approvals._party_amounts([_doc("Sales Invoice", "SINV-1")])
+
+        self.assertEqual(result, {("Sales Invoice", "SINV-1"): {"party": "Acme", "amount": None, "currency": "USD"}})
+
+    def test_a_permission_error_from_the_read_is_blank_not_an_error_or_a_toast(self):
+        def get_list(doctype, *args, **kwargs):
+            if doctype == "Sales Invoice":
+                # what `frappe.throw(..., PermissionError)` does before raising
+                frappe.local.message_log.append({"message": "No permission to read Sales Invoice"})
+                raise frappe.PermissionError
+            return [frappe._dict(name="JV-1", title="Rent", total_debit=5, company="Steel Co")]
+
+        self._patch("frappe.get_list", get_list)
+        log_error = self._patch("frappe.log_error")
+
+        result = approvals._party_amounts([_doc("Sales Invoice", "SINV-1"), _doc("Journal Entry", "JV-1")])
+
+        self.assertEqual(list(result), [("Journal Entry", "JV-1")])
+        self.assertEqual(frappe.local.message_log, [])  # no stray toast on the 200 response
+        log_error.assert_not_called()  # and no Error Log row every minute
+
+    def test_a_permission_error_that_left_no_message_keeps_the_earlier_ones(self):
+        frappe.local.message_log.append({"message": "earlier"})
+
+        def get_list(doctype, *args, **kwargs):
+            raise frappe.PermissionError
+
+        self._patch("frappe.get_list", get_list)
+
+        self.assertEqual(approvals._party_amounts([_doc("Sales Invoice", "SINV-1")]), {})
+        self.assertEqual(frappe.local.message_log, [{"message": "earlier"}])
+
+    def test_a_database_error_is_deferred_to_the_error_log_and_that_doctype_skipped(self):
+        error_log = MagicMock(name="Error Log")
+        get_doc = self._patch("frappe.get_doc", return_value=error_log)
+
+        def get_list(doctype, *args, **kwargs):
+            if doctype == "Sales Invoice":
+                raise pymysql.err.OperationalError(1054, "Unknown column 'grand_total' in 'field list'")
+            return [frappe._dict(name="JV-1", title="Rent", total_debit=5, company="Steel Co")]
+
+        self._patch("frappe.get_list", get_list)
+
+        result = approvals._party_amounts([_doc("Sales Invoice", "SINV-1"), _doc("Journal Entry", "JV-1")])
+
+        self.assertEqual(list(result), [("Journal Entry", "JV-1")])
+        # The real `frappe.log_error` ran. This request is a GET, which ends in
+        # a rollback: a row inserted now would be discarded, so it is deferred.
+        error_log.deferred_insert.assert_called_once_with()
+        error_log.insert.assert_not_called()
+        self.assertIn("Sales Invoice", get_doc.call_args.kwargs["method"])
+
+    def test_an_error_that_is_not_a_database_error_is_not_swallowed(self):
+        def get_list(doctype, *args, **kwargs):
+            raise ValueError("a bug, not a bad field")
+
+        self._patch("frappe.get_list", get_list)
+        log_error = self._patch("frappe.log_error")
+
+        with self.assertRaises(ValueError):
+            approvals._party_amounts([_doc("Sales Invoice", "SINV-1")])
+        log_error.assert_not_called()
 
     def test_a_doctype_that_does_not_exist_is_skipped(self):
-        get_all = self._use_get_all({})
+        get_list = self._use_get_list({})
 
         result = approvals._party_amounts([_doc("Gone Doctype", "G-1")])
 
         self.assertEqual(result, {})
-        self.assertEqual(get_all.calls, [])
+        self.assertEqual(get_list.calls, [])
 
     def test_a_doctype_with_no_party_or_amount_field_is_not_queried(self):
         self.metas["Gate Pass"] = meta_with("company", "currency")
-        get_all = self._use_get_all({})
+        get_list = self._use_get_list({})
 
         result = approvals._party_amounts([_doc("Gate Pass", "GP-1")])
 
         self.assertEqual(result, {})
-        self.assertEqual(get_all.calls, [])
+        self.assertEqual(get_list.calls, [])
 
     def test_a_document_with_no_amount_field_has_a_party_and_no_amount(self):
         self.metas["Customer"] = meta_with("customer_name")
-        self._use_get_all({"Customer": [{"name": "CUST-1", "customer_name": "Acme"}]})
+        self._use_get_list({"Customer": [{"name": "CUST-1", "customer_name": "Acme"}]})
 
         result = approvals._party_amounts([_doc("Customer", "CUST-1")])
 
         self.assertEqual(result, {("Customer", "CUST-1"): {"party": "Acme", "amount": None, "currency": ""}})
 
     def test_no_items_no_queries(self):
-        get_all = self._use_get_all({})
+        get_list = self._use_get_list({})
 
         self.assertEqual(approvals._party_amounts([]), {})
-        self.assertEqual(get_all.calls, [])
+        self.assertEqual(get_list.calls, [])
 
 
 class TestActionFlags(SiteFreeCase):

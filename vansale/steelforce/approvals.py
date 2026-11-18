@@ -79,9 +79,11 @@ def inbox() -> dict:
     buttons). `total` is PM's own total, so it matches the desk; `needs_you`
     is `total - waiting`. `stats` counts High/Critical and over-30-day items
     among the ones that need the user. Each item carries its party, amount and
-    currency (one read per document type), the person who forwarded it to the
-    user, and the actions available in its state with what each one requires.
-    Empty when Permission Manager is not installed."""
+    currency (one read per document type, made with the user's own read
+    permissions, so a document they may not read shows without them), the
+    person who forwarded it to the user, and the actions available in its
+    state with what each one requires. Empty when Permission Manager is not
+    installed."""
     if not is_available():
         return _empty_inbox()
 
@@ -215,13 +217,16 @@ def _now_iso() -> str:
     return naive_site_to_utc_iso(now_datetime())
 
 
-# ─── Enrichment: three bulk reads, none per row ───────────────────────────────
+# ─── Enrichment: bulk reads, none per row ─────────────────────────────────────
 
 
 def _party_amounts(items: list[dict]) -> dict[tuple[str, str], dict]:
     """`{(doctype, docname): {"party", "amount", "currency"}}` for the
-    documents of PM items, with one `get_all` per document type. A document
-    that is not found, or a type with no party or amount field, is left out."""
+    documents of PM items, with one `get_list` per document type, so the user
+    sees only what their own permissions allow (roles, User Permissions,
+    field-level permissions). A document that is not found or not readable by
+    the user, a type the user may not read, or a type with no party or amount
+    field is left out; a field the user may not read comes back as no value."""
     names_by_doctype: dict[str, list[str]] = {}
     for item in items:
         names_by_doctype.setdefault(item["doctype"], []).append(item["docname"])
@@ -238,6 +243,9 @@ def _doctype_facts(doctype: str, names: list[str], company_currency: dict[str, s
         meta = frappe.get_meta(doctype)
     except frappe.DoesNotExistError:
         return {}
+    if not frappe.has_permission(doctype, "read"):
+        # Not a type this user may read: nothing to show, and nothing to report.
+        return {}
 
     party_field, amount_field = pick_party_amount(meta.has_field)
     if not (party_field or amount_field):
@@ -246,21 +254,41 @@ def _doctype_facts(doctype: str, names: list[str], company_currency: dict[str, s
     company_field = "company" if meta.has_field("company") else None
     fields = ["name"] + [f for f in (party_field, amount_field, currency_field, company_field) if f]
 
+    logged = len(frappe.local.message_log)
     try:
-        rows = frappe.get_all(doctype, filters={"name": ["in", names]}, fields=fields)
-    except Exception:
-        # A bad field on one type must not hide the approvals themselves.
-        frappe.log_error(title=f"vansale approvals: party and amount of {doctype}")
+        rows = frappe.get_list(
+            doctype, filters={"name": ["in", names]}, fields=fields, limit_page_length=0
+        )
+    except frappe.PermissionError:
+        # Refused after all (a share that went away, say): the throw left a
+        # message that would reach the user as a toast on this GET.
+        if len(frappe.local.message_log) > logged:
+            frappe.clear_last_message()
+        return {}
+    except _db_errors():
+        # A bad field on one type must not hide the approvals themselves. The
+        # row is deferred: this request is a GET, and its rollback would
+        # discard an Error Log inserted now.
+        frappe.log_error(title=f"vansale approvals: party and amount of {doctype}", defer_insert=True)
         return {}
 
     facts = {}
     for row in rows:
+        amount = row.get(amount_field) if amount_field else None
         facts[(doctype, row.get("name"))] = {
             "party": cstr(row.get(party_field)) if party_field else "",
-            "amount": flt(row.get(amount_field)) if amount_field else None,
+            # None, not 0, when the user may not read the amount field
+            "amount": flt(amount) if amount is not None else None,
             "currency": _currency_of(row, currency_field, company_field, company_currency),
         }
     return facts
+
+
+def _db_errors() -> tuple[type, ...]:
+    """The database driver's error classes (looked up when an error is being
+    handled, as they hang off the connected database)."""
+    db = frappe.db
+    return (db.ProgrammingError, db.OperationalError, db.InternalError, db.DataError)
 
 
 def _currency_of(row, currency_field: Optional[str], company_field: Optional[str], memo: dict) -> str:
