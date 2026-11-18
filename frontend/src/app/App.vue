@@ -27,7 +27,8 @@ const sync = useSyncStore();
  * server ignores a sale it already has (client_id).
  */
 function syncPending() {
-  if (!session.isAuthenticated) return;
+  // The queue belongs to the van app: a user without it has none to send.
+  if (!session.isAuthenticated || !session.hasVanShell) return;
   void sync.refresh().then(() => {
     if (sync.pending > 0) void sync.requestDrain();
   });
@@ -38,14 +39,19 @@ function syncPending() {
 // helper internally rate-limits to once per 10 min so this never spams.
 // Also re-read config: a van that was offline while the office changed a
 // module toggle should pick it up the moment it has signal again.
-watch(online, (isNow, wasNow) => {
+watch(online, async (isNow, wasNow) => {
   if (isNow && !wasNow && session.isAuthenticated) {
-    void session.refreshDefaults();
+    // Who the user is comes first: the warm-up reads van endpoints, which a
+    // user without the van app must never trigger. Unknown settings (never
+    // loaded) warm nothing.
+    await session.refreshDefaults();
     syncPending();
-    void warmCaches({
-      warehouse: session.defaultWarehouse ?? undefined,
-      force: true,
-    }).catch(() => {});
+    if (session.defaults !== null && session.hasVanShell) {
+      void warmCaches({
+        warehouse: session.defaultWarehouse ?? undefined,
+        force: true,
+      }).catch(() => {});
+    }
   }
 });
 
