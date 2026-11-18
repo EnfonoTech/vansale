@@ -38,7 +38,7 @@ const emit = defineEmits<{
   (e: "select", item: ApprovalItem): void;
 }>();
 
-const { t } = useI18n();
+const { t, te } = useI18n();
 const session = useSessionStore();
 
 const tone = computed(() => priorityTone(props.item.priority));
@@ -51,9 +51,10 @@ const amount = computed(() =>
 );
 const age = computed(() => ageText(props.item.days, t));
 const overdue = computed(() => isOverdue(props.item.days));
+/** The priority in the user's language; one the app does not know is shown as the server wrote it. */
 const priorityLabel = computed(() => {
   const key = `approvalsInbox.priority.${props.item.priority}`;
-  return props.item.priority ? t(key) : "";
+  return te(key) ? t(key) : props.item.priority || "";
 });
 /** Document, then party: "ACC-JV-2026-02580 · Al Noor Trading". */
 const subline = computed(() => [props.item.docname, props.item.party].filter(Boolean).join(" · "));

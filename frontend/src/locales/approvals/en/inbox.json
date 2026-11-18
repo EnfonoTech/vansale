@@ -27,7 +27,6 @@
     },
     "search": "Search document, party or type",
     "sections": {
-      "needsYou": "Needs you",
       "waiting": "Waiting on others",
       "uncategorised": "Other"
     },
