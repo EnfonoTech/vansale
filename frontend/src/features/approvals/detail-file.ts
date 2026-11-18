@@ -26,6 +26,18 @@ export function isSitePath(url: string | null | undefined): boolean {
   return value.startsWith("/") && !value.startsWith("//") && !value.includes("\\");
 }
 
+/**
+ * `url` when it is safe to put in a link: a path on this site or an http(s)
+ * address, "" otherwise. A script (`javascript:`), a data address, a
+ * protocol-relative `//host` and anything with a backslash are never links,
+ * whatever the server stored as the file's address.
+ */
+export function safeLinkUrl(url: string | null | undefined): string {
+  const text = (url ?? "").trim();
+  if (isSitePath(text)) return text;
+  return /^https?:\/\//i.test(text) && !text.includes("\\") ? text : "";
+}
+
 /** Whether the server keeps the file private (the flag, or the folder it lives in). */
 export function isPrivateFile(file: { url: string | null; is_private: boolean }): boolean {
   return Boolean(file.is_private) || (file.url ?? "").startsWith("/private/");

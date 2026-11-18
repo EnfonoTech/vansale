@@ -17,6 +17,7 @@ import { defineStore } from "pinia";
 import * as api from "@/api/approvals";
 import type { ApprovalCount, HistoryRow, Inbox, MyRequestRow, SentBackRow } from "@/api/approvals";
 import { clearApprovalsCache, loadInbox, saveInbox } from "@/features/approvals/cache";
+import { plainText } from "@/features/approvals/plain-text";
 import { isOnline } from "@/app/online";
 import { useSessionStore } from "@/stores/session";
 
@@ -94,7 +95,7 @@ const listSeq: Record<ListName, number> = { mine: 0, sentBack: 0, history: 0 };
 let stopPoll: (() => void) | null = null;
 
 function messageOf(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+  return plainText(error instanceof Error ? error.message : String(error));
 }
 
 /** Drop every list answer still on its way (a reset, or another user). */

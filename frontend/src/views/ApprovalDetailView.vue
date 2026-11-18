@@ -34,7 +34,8 @@ import {
 } from "@/features/approvals/detail-display";
 import { downloadPrivateFile } from "@/features/approvals/detail-download";
 import { failureOf } from "@/features/approvals/detail-failure";
-import { fileAccess, fileLabel } from "@/features/approvals/detail-file";
+import { fileAccess, fileLabel, safeLinkUrl } from "@/features/approvals/detail-file";
+import { safeDeskUrl } from "@/features/approvals/lists";
 import { buildTimeline } from "@/features/approvals/detail-timeline";
 import { priorityTone } from "@/features/approvals/format";
 import { useApprovalsStore } from "@/stores/approvals";
@@ -127,6 +128,12 @@ const barItems = computed<BarItem[]>(() => {
     items.splice(at < 0 ? items.length : at, 0, { kind: "forward" });
   }
   return items;
+});
+
+/** The document's desk page, or "" when the server's address is not one (no link is then shown). */
+const deskHref = computed(() => {
+  const url = safeDeskUrl(detail.value?.desk_url ?? "");
+  return url ? absoluteUrl(url) : "";
 });
 
 const currency = computed(() => detail.value?.currency || session.currency || "");
@@ -316,7 +323,7 @@ async function onRefused(message: string) {
         </ul>
         <p v-if="linesNote" class="muted small more">
           {{ linesNote }}
-          <a v-if="!cannotRead" :href="absoluteUrl(detail.desk_url)" target="_blank" rel="noopener">
+          <a v-if="!cannotRead && deskHref" :href="deskHref" target="_blank" rel="noopener">
             {{ t("approvalsDetail.lines.openAll") }}
           </a>
         </p>
@@ -327,7 +334,7 @@ async function onRefused(message: string) {
         <ul class="files">
           <li v-for="(file, i) in detail.attachments" :key="i">
             <!-- Web, and public files on the phone: a plain link. -->
-            <a v-if="fileAccess(file, native) === 'link'" :href="absoluteUrl(file.url)" target="_blank" rel="noopener">
+            <a v-if="fileAccess(file, native) === 'link' && safeLinkUrl(file.url)" :href="absoluteUrl(safeLinkUrl(file.url))" target="_blank" rel="noopener">
               <Icon name="invoice" :size="18" />
               <span class="file-name ltr">{{ fileLabel(file) }}</span>
             </a>
@@ -407,7 +414,7 @@ async function onRefused(message: string) {
 
       <p v-if="!showBar" class="muted small read-only">{{ t("approvalsDetail.readOnly") }}</p>
 
-      <a v-if="!cannotRead" class="desk" :href="absoluteUrl(detail.desk_url)" target="_blank" rel="noopener">
+      <a v-if="!cannotRead && deskHref" class="desk" :href="deskHref" target="_blank" rel="noopener">
         {{ t("approvalsDetail.openFull") }}
         <Icon name="chevron-right" :size="16" />
       </a>

@@ -23,6 +23,7 @@ import { applyBulk } from "@/api/approvals";
 import type { ApprovalItem, BulkRow } from "@/api/approvals";
 import { useOnline } from "@/app/online";
 import { useSessionStore } from "@/stores/session";
+import { plainText } from "@/features/approvals/plain-text";
 import { actionTone } from "@/features/approvals/inbox";
 import { bulkShared } from "@/features/approvals/rules";
 import {
@@ -120,7 +121,7 @@ function failure(name: string): string {
 }
 
 function messageOf(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+  return plainText(error instanceof Error ? error.message : String(error));
 }
 
 async function apply() {
@@ -317,7 +318,7 @@ onBeforeUnmount(() => {
 .name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .amount { font-variant-numeric: tabular-nums; white-space: nowrap; }
 .sub { font-size: var(--text-sm); color: var(--text-muted); overflow-wrap: anywhere; }
-.result { font-size: var(--text-sm); font-weight: 600; overflow-wrap: anywhere; }
+.result { font-size: var(--text-sm); font-weight: 600; overflow-wrap: anywhere; white-space: pre-line; }
 .result.ok { color: var(--success); }
 .result.failed { color: var(--danger); }
 .result.idle { color: var(--warning); }

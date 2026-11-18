@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { fileAccess, fileLabel, isPrivateFile, isSitePath } from "../detail-file";
+import { fileAccess, fileLabel, isPrivateFile, isSitePath, safeLinkUrl } from "../detail-file";
 
 const file = (over: Partial<{ name: string; url: string | null; is_private: boolean }> = {}) => ({
   name: "a1b2c3d4e5",
@@ -69,5 +69,25 @@ describe("fileLabel", () => {
   it("falls back to the record's name when there is no URL", () => {
     expect(fileLabel(file({ url: null }))).toBe("a1b2c3d4e5");
     expect(fileLabel(file({ url: "/files/" }))).toBe("a1b2c3d4e5");
+  });
+});
+
+describe("safeLinkUrl", () => {
+  it("keeps a path on this site and an http(s) address", () => {
+    expect(safeLinkUrl("/files/cheque.jpg")).toBe("/files/cheque.jpg");
+    expect(safeLinkUrl("/private/files/a%20b.pdf?fid=1")).toBe("/private/files/a%20b.pdf?fid=1");
+    expect(safeLinkUrl(" https://cdn.example.com/x.pdf ")).toBe("https://cdn.example.com/x.pdf");
+    expect(safeLinkUrl("http://cdn.example.com/x.pdf")).toBe("http://cdn.example.com/x.pdf");
+  });
+  it("never lets a script, a data address, a protocol-relative or a backslash address become a link", () => {
+    expect(safeLinkUrl("javascript:alert(1)")).toBe("");
+    expect(safeLinkUrl(" JavaScript:alert(1)")).toBe("");
+    expect(safeLinkUrl("data:text/html,<script>1</script>")).toBe("");
+    expect(safeLinkUrl("//evil.example.com/x")).toBe("");
+    expect(safeLinkUrl("/\\evil.example.com/x")).toBe("");
+    expect(safeLinkUrl("files/x.pdf")).toBe("");
+    expect(safeLinkUrl("")).toBe("");
+    expect(safeLinkUrl(null)).toBe("");
+    expect(safeLinkUrl(undefined)).toBe("");
   });
 });

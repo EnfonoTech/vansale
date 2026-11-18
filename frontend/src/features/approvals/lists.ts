@@ -4,6 +4,8 @@
  * screens pass the words through `t()`.
  */
 import type { ApprovalItem, BulkRow, HistoryRow } from "@/api/approvals";
+import { siteUrl } from "@/app/platform";
+import { plainText } from "./plain-text";
 
 /** The most documents one bulk batch may hold (the server refuses more). */
 export const BULK_LIMIT = 20;
@@ -58,7 +60,7 @@ export function bulkTotals(items: ApprovalItem[], fallback: string): { totals: M
   return { totals, unknown };
 }
 
-/** What the batch shows for one document: waiting, done, or refused (with the server's words). */
+/** What the batch shows for one document: waiting, done, or refused (with the server's words, as plain text). */
 export type RowState = { kind: "idle" } | { kind: "ok" } | { kind: "failed"; message: string };
 
 /** The state of each of `names` after the answers `rows`; a document without an answer is idle. */
@@ -68,7 +70,7 @@ export function rowStates(names: string[], rows: BulkRow[]): Map<string, RowStat
   for (const name of names) {
     const row = byName.get(name);
     if (!row) out.set(name, { kind: "idle" });
-    else out.set(name, row.ok ? { kind: "ok" } : { kind: "failed", message: row.message });
+    else out.set(name, row.ok ? { kind: "ok" } : { kind: "failed", message: plainText(row.message) });
   }
   return out;
 }
@@ -132,11 +134,45 @@ const EDIT_ROUTE: Record<string, string> = {
   "Sales Invoice": "invoice-edit",
 };
 
-/** `url` when it is a path on this site or an http(s) address; "" otherwise (never a script). */
-export function safeDeskUrl(url: string): string {
+/**
+ * The origins a desk address may name: the page's own (the web build is served
+ * by the site itself) and, on the phone app, the server address it was set up
+ * with (the page there is the app's own, not the site).
+ */
+function pageOrigins(): string[] {
+  const origins: string[] = [];
+  try {
+    origins.push(window.location.origin);
+  } catch {
+    /* no window: nothing is trusted */
+  }
+  try {
+    const site = siteUrl();
+    if (site) origins.push(new URL(site).origin);
+  } catch {
+    /* an unreadable site address trusts nothing extra */
+  }
+  return origins;
+}
+
+/**
+ * `url` when it opens a desk page of this site, "" otherwise. Only a path that
+ * starts with `/app/`, or an absolute address on one of `origins` (the page's
+ * own by default) whose path starts with `/app/`. A backslash anywhere refuses
+ * the address: browsers read `/\host` as `//host`, which leaves the site. A
+ * script, a data address and a protocol-relative `//host` are never desk pages.
+ */
+export function safeDeskUrl(url: string, origins: string[] = pageOrigins()): string {
   const text = (url || "").trim();
-  if (/^\/(?!\/)/.test(text)) return text;
-  return /^https?:\/\//i.test(text) ? text : "";
+  if (text.includes("\\")) return "";
+  if (text.startsWith("/app/")) return text;
+  if (!/^https?:\/\//i.test(text)) return "";
+  try {
+    const parsed = new URL(text);
+    return origins.includes(parsed.origin) && parsed.pathname.startsWith("/app/") ? text : "";
+  } catch {
+    return "";
+  }
 }
 
 /**

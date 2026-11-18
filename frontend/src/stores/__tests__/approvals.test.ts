@@ -202,6 +202,13 @@ describe("refresh", () => {
     expect(store.error).toBe("HTTP 500");
   });
 
+  it("an error that carries markup is stored as plain text", async () => {
+    api.inbox.mockRejectedValue(new Error("<b>Not allowed</b> &amp; logged"));
+    const store = useApprovalsStore();
+    await store.refresh();
+    expect(store.error).toBe("Not allowed & logged");
+  });
+
   it("a later success clears the error", async () => {
     api.inbox.mockRejectedValueOnce(new Error("HTTP 500"));
     const store = useApprovalsStore();

@@ -16,6 +16,18 @@ describe("failureOf", () => {
       message: "Document has been modified",
     });
   });
+  it("hands on a server message as plain text: no tags, entities decoded", () => {
+    expect(failureOf(named("ApiError", "x", "<div>Row 3 &amp; 4: <b>Debit</b> must equal Credit</div>"))).toEqual({
+      kind: "server",
+      message: "Row 3 & 4: Debit must equal Credit",
+    });
+  });
+  it("a server message that is only markup says nothing readable", () => {
+    expect(failureOf(named("ApiError", "HTTP 417", "<br>"))).toEqual({ kind: "unknown", message: "" });
+  });
+  it("an ordinary error's text is plain too", () => {
+    expect(failureOf(new Error("<i>boom</i> &lt;now&gt;"))).toEqual({ kind: "unknown", message: "boom <now>" });
+  });
   it("says nothing of its own for an HTTP error without a readable message", () => {
     expect(failureOf(named("ApiError", "HTTP 500"))).toEqual({ kind: "unknown", message: "" });
     expect(failureOf(named("ApiError", "HTTP 500", "  "))).toEqual({ kind: "unknown", message: "" });

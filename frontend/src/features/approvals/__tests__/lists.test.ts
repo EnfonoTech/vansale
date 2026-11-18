@@ -101,6 +101,13 @@ describe("bulk results", () => {
     expect(states.get("C")).toEqual({ kind: "idle" });
   });
 
+  it("rowStates: a refusal that came with markup and entities is shown as plain text", () => {
+    const states = rowStates(["A"], [
+      { docname: "A", ok: false, message: "<b>Row 2</b>: Tom &amp; Co&#39;s limit<br>is exceeded" },
+    ]);
+    expect(states.get("A")).toEqual({ kind: "failed", message: "Row 2: Tom & Co's limit\nis exceeded" });
+  });
+
   it("retryNames: everything that is not done, in the batch's order", () => {
     expect(retryNames(["C", "B", "A"], rows)).toEqual(["C", "B"]);
     expect(retryNames(["A"], rows)).toEqual([]);
@@ -198,18 +205,53 @@ describe("bulkStateAfterFailure", () => {
 });
 
 describe("safeDeskUrl", () => {
-  it("keeps a path on this site and an http(s) address", () => {
+  const SITE = ["https://erp.example.com"];
+
+  it("keeps a desk path on this site", () => {
     expect(safeDeskUrl("/app/sales-order/SO-1")).toBe("/app/sales-order/SO-1");
-    expect(safeDeskUrl(" https://erp.example.com/app/x ")).toBe("https://erp.example.com/app/x");
-    expect(safeDeskUrl("http://erp.example.com/app/x")).toBe("http://erp.example.com/app/x");
+    expect(safeDeskUrl("  /app/journal-entry/ACC-JV-1 ")).toBe("/app/journal-entry/ACC-JV-1");
+  });
+
+  it("keeps an absolute address on this site's own origin when its path is a desk path", () => {
+    expect(safeDeskUrl("https://erp.example.com/app/x", SITE)).toBe("https://erp.example.com/app/x");
+    expect(safeDeskUrl(" https://erp.example.com/app/x?a=1 ", SITE)).toBe("https://erp.example.com/app/x?a=1");
+  });
+
+  it("uses the page's own origin when none is given", () => {
+    expect(safeDeskUrl(`${window.location.origin}/app/x`)).toBe(`${window.location.origin}/app/x`);
+  });
+
+  it("drops an address on another site, even a desk-shaped one", () => {
+    expect(safeDeskUrl("https://evil.com", SITE)).toBe("");
+    expect(safeDeskUrl("https://evil.com/app/x", SITE)).toBe("");
+    expect(safeDeskUrl("http://erp.example.com/app/x", SITE)).toBe("");
+    expect(safeDeskUrl("https://erp.example.com.evil.com/app/x", SITE)).toBe("");
+    expect(safeDeskUrl("https://erp.example.com@evil.com/app/x", SITE)).toBe("");
+  });
+
+  it("drops an address on this site that is not a desk path", () => {
+    expect(safeDeskUrl("https://erp.example.com/", SITE)).toBe("");
+    expect(safeDeskUrl("https://erp.example.com/private/files/x.pdf", SITE)).toBe("");
+    expect(safeDeskUrl("/files/x.pdf")).toBe("");
+    expect(safeDeskUrl("/appx/y")).toBe("");
+    expect(safeDeskUrl("/app")).toBe("");
+  });
+
+  it("drops a backslash anywhere: browsers read /\\host as //host", () => {
+    expect(safeDeskUrl("/\\evil.com/x")).toBe("");
+    expect(safeDeskUrl("/app/x\\y")).toBe("");
+    expect(safeDeskUrl("\\\\evil.com/app/x")).toBe("");
+    expect(safeDeskUrl("https://erp.example.com/app/x\\y", SITE)).toBe("");
   });
 
   it("drops anything else", () => {
     expect(safeDeskUrl("")).toBe("");
     expect(safeDeskUrl("//evil.example.com/x")).toBe("");
+    expect(safeDeskUrl("//evil.example.com/app/x")).toBe("");
     expect(safeDeskUrl("javascript:alert(1)")).toBe("");
     expect(safeDeskUrl("data:text/html,x")).toBe("");
     expect(safeDeskUrl("app/x")).toBe("");
+    expect(safeDeskUrl("https://")).toBe("");
   });
 });
 

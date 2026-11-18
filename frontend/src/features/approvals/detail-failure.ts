@@ -1,6 +1,7 @@
 /**
  * What went wrong with a call, in the three kinds the sheets treat differently.
- * Pure (reads the error's shape, imports nothing), so it needs no network layer.
+ * Pure (reads the error's shape), so it needs no network layer. Every message
+ * it hands on is plain text: the server's markup and entities are removed.
  *
  * - `server`: the server answered and said no (a rule, a state that changed).
  *   The sheet closes and the screen reloads; `message` is the server's own text.
@@ -8,6 +9,8 @@
  *   typed is not lost; there is no message of our own, the screen words it.
  * - `unknown`: anything else; `message` is whatever the error carried.
  */
+import { plainText } from "./plain-text";
+
 export type Failure =
   | { kind: "server"; message: string }
   | { kind: "network"; message: "" }
@@ -17,12 +20,12 @@ export function failureOf(error: unknown): Failure {
   const named = error as { name?: string; message?: string; serverMessage?: string } | null;
   if (named && named.name === "NetworkError") return { kind: "network", message: "" };
   if (named && named.name === "ApiError") {
-    const said = (named.serverMessage ?? "").trim();
+    const said = plainText(named.serverMessage);
     // Without a readable server message, "HTTP 500" says nothing to an approver.
     return said ? { kind: "server", message: said } : { kind: "unknown", message: "" };
   }
   const text = error instanceof Error ? error.message : typeof error === "string" ? error : "";
-  return { kind: "unknown", message: text.trim() };
+  return { kind: "unknown", message: plainText(text) };
 }
 
 /**
