@@ -95,9 +95,12 @@ export interface AttachmentPayload {
   base64: string;
 }
 
-/** Read `file` into what `attach` takes. Throws a plain Error when the file is too large. */
-export async function readAttachment(file: File): Promise<AttachmentPayload> {
-  let filename = attachmentName(file);
+/**
+ * Read `file` into what `attach` takes, under `name` (the one already shown to
+ * the approver). Throws an Error saying "tooLarge" when it is over the cap.
+ */
+export async function readAttachment(file: File, name = attachmentName(file)): Promise<AttachmentPayload> {
+  let filename = name;
   let blob: Blob = file;
   if ((file.type || "").startsWith("image/")) {
     blob = await shrink(file);
