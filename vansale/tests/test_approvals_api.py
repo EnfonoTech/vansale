@@ -193,61 +193,91 @@ def _module(name: str, **attrs) -> types.ModuleType:
     return module
 
 
-class TestPmNamespace(unittest.TestCase):
-    def test_pm_imports_lazily_and_maps_every_callable(self):
-        pm_approvals = _module(
-            "approvals",
-            get_my_pending_approvals=sentinel.pending,
-            get_document_lifecycle=sentinel.lifecycle,
-            get_sent_back_documents=sentinel.sent_back,
-            get_my_approval_history=sentinel.history,
-            transaction_label=sentinel.label,
-            _hidden_doctypes=sentinel.hidden,
-        )
-        pm_workflow = _module(
-            "workflow",
-            get_workflow=sentinel.workflow,
-            get_transitions=sentinel.transitions,
-            apply_workflow=sentinel.apply,
-            has_approval_access=sentinel.access,
-            get_open_return_adhoc_action=sentinel.open_return,
-        )
-        pm_actions = _module(
-            "pm_workflow_action",
-            forward_workflow_action=sentinel.forward,
-            return_adhoc_to_originator=sentinel.return_adhoc,
-            _can_act_on=sentinel.can_act,
-        )
-        modules = {
-            "permission_manager.permission_manager.api": _module("api", approvals=pm_approvals),
-            "permission_manager.permission_manager": _module("pm", workflow=pm_workflow),
-            "permission_manager.permission_manager.doctype.pm_workflow_action": _module(
-                "action", pm_workflow_action=pm_actions
-            ),
-        }
+EXPECTED_PM_NAMES = {
+    "get_my_pending_approvals": sentinel.pending,
+    "get_transitions": sentinel.transitions,
+    "apply_workflow": sentinel.apply,
+    "has_approval_access": sentinel.access,
+    "get_open_return_adhoc_action": sentinel.open_return,
+    "get_document_lifecycle": sentinel.lifecycle,
+    "forward_workflow_action": sentinel.forward,
+    "return_adhoc_to_originator": sentinel.return_adhoc,
+    "get_sent_back_documents": sentinel.sent_back,
+    "get_my_approval_history": sentinel.history,
+    "can_act_on": sentinel.can_act,
+    "get_workflow": sentinel.workflow,
+    "hidden_doctypes": sentinel.hidden,
+    "transaction_label": sentinel.label,
+}
 
-        with patch.dict(sys.modules, modules):
+
+def _pm_modules(drop: str = "") -> dict:
+    """PM's three modules as `sys.modules` entries, `drop` left out of them."""
+
+    def module(name, **attrs):
+        return _module(name, **{key: value for key, value in attrs.items() if key != drop})
+
+    pm_approvals = module(
+        "approvals",
+        get_my_pending_approvals=sentinel.pending,
+        get_document_lifecycle=sentinel.lifecycle,
+        get_sent_back_documents=sentinel.sent_back,
+        get_my_approval_history=sentinel.history,
+        transaction_label=sentinel.label,
+        _hidden_doctypes=sentinel.hidden,
+    )
+    pm_workflow = module(
+        "workflow",
+        get_workflow=sentinel.workflow,
+        get_transitions=sentinel.transitions,
+        apply_workflow=sentinel.apply,
+        has_approval_access=sentinel.access,
+        get_open_return_adhoc_action=sentinel.open_return,
+    )
+    pm_actions = module(
+        "pm_workflow_action",
+        forward_workflow_action=sentinel.forward,
+        return_adhoc_to_originator=sentinel.return_adhoc,
+        _can_act_on=sentinel.can_act,
+    )
+    return {
+        "permission_manager.permission_manager.api": _module("api", approvals=pm_approvals),
+        "permission_manager.permission_manager": _module("pm", workflow=pm_workflow),
+        "permission_manager.permission_manager.doctype.pm_workflow_action": _module(
+            "action", pm_workflow_action=pm_actions
+        ),
+    }
+
+
+class TestPmNamespace(unittest.TestCase):
+    def test_pm_maps_every_callable(self):
+        with patch.dict(sys.modules, _pm_modules()):
+            pm = approvals._pm()
+            mapped = {name: getattr(pm, name) for name in EXPECTED_PM_NAMES}
+
+        self.assertEqual(mapped, EXPECTED_PM_NAMES)
+        self.assertEqual(set(approvals.PM_FUNCTIONS), set(EXPECTED_PM_NAMES))
+
+    def test_pm_imports_nothing_until_a_function_is_used(self):
+        # PM is not installed here: making the namespace must not fail
+        pm = approvals._pm()
+
+        with self.assertRaises(ImportError):
+            pm.get_my_pending_approvals
+
+    def test_a_pm_without_one_private_name_breaks_only_what_needs_it(self):
+        with patch.dict(sys.modules, _pm_modules(drop="_can_act_on")):
             pm = approvals._pm()
 
-        self.assertEqual(
-            vars(pm),
-            {
-                "get_my_pending_approvals": sentinel.pending,
-                "get_transitions": sentinel.transitions,
-                "apply_workflow": sentinel.apply,
-                "has_approval_access": sentinel.access,
-                "get_open_return_adhoc_action": sentinel.open_return,
-                "get_document_lifecycle": sentinel.lifecycle,
-                "forward_workflow_action": sentinel.forward,
-                "return_adhoc_to_originator": sentinel.return_adhoc,
-                "get_sent_back_documents": sentinel.sent_back,
-                "get_my_approval_history": sentinel.history,
-                "can_act_on": sentinel.can_act,
-                "get_workflow": sentinel.workflow,
-                "hidden_doctypes": sentinel.hidden,
-                "transaction_label": sentinel.label,
-            },
-        )
+            with self.assertRaises(AttributeError):
+                pm.can_act_on
+            self.assertIs(pm.get_my_pending_approvals, sentinel.pending)
+            self.assertIs(pm.hidden_doctypes, sentinel.hidden)
+            self.assertIs(pm.forward_workflow_action, sentinel.forward)
+
+    def test_a_name_pm_is_not_asked_for_is_an_attribute_error(self):
+        with self.assertRaises(AttributeError):
+            approvals._pm().delete_everything
 
 
 # ─── inbox and count ──────────────────────────────────────────────────────────

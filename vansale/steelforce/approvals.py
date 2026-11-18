@@ -14,7 +14,6 @@ Items PM hides from the desk's own inbox (Stock Entry and any workflow flagged
 from __future__ import annotations
 
 from html import unescape
-from types import SimpleNamespace
 from typing import Optional
 from urllib.parse import quote
 
@@ -62,32 +61,60 @@ def is_available() -> bool:
     return PM_APP in frappe.get_installed_apps() and bool(frappe.db.table_exists(PM_ACTION))
 
 
-def _pm() -> SimpleNamespace:
+def _pm_workflow():
+    from permission_manager.permission_manager import workflow
+
+    return workflow
+
+
+def _pm_approvals():
+    from permission_manager.permission_manager.api import approvals as pm_approvals
+
+    return pm_approvals
+
+
+def _pm_actions_module():
+    from permission_manager.permission_manager.doctype.pm_workflow_action import pm_workflow_action
+
+    return pm_workflow_action
+
+
+PM_FUNCTIONS = {
+    "get_workflow": (_pm_workflow, "get_workflow"),
+    "hidden_doctypes": (_pm_approvals, "_hidden_doctypes"),
+    "transaction_label": (_pm_approvals, "transaction_label"),
+    "get_my_pending_approvals": (_pm_approvals, "get_my_pending_approvals"),
+    "get_transitions": (_pm_workflow, "get_transitions"),
+    "apply_workflow": (_pm_workflow, "apply_workflow"),
+    "has_approval_access": (_pm_workflow, "has_approval_access"),
+    "get_open_return_adhoc_action": (_pm_workflow, "get_open_return_adhoc_action"),
+    "get_document_lifecycle": (_pm_approvals, "get_document_lifecycle"),
+    "forward_workflow_action": (_pm_actions_module, "forward_workflow_action"),
+    "return_adhoc_to_originator": (_pm_actions_module, "return_adhoc_to_originator"),
+    "get_sent_back_documents": (_pm_approvals, "get_sent_back_documents"),
+    "get_my_approval_history": (_pm_approvals, "get_my_approval_history"),
+    "can_act_on": (_pm_actions_module, "_can_act_on"),
+}
+"""The PM functions this module calls: our name -> (PM module, PM's name)."""
+
+
+class _PmFunctions:
+    """PM's functions, each looked up when it is used, so a PM release that
+    lacks one (several are private) breaks only the endpoint that needs it."""
+
+    def __getattr__(self, name: str):
+        source = PM_FUNCTIONS.get(name)
+        if source is None:
+            raise AttributeError(name)
+        module_of, pm_name = source
+        return getattr(module_of(), pm_name)
+
+
+def _pm() -> _PmFunctions:
     """The PM functions this module calls, imported on first use so the module
     loads on a site without PM. Every PM call goes through here; tests replace
     this one function."""
-    from permission_manager.permission_manager import workflow as pm_workflow
-    from permission_manager.permission_manager.api import approvals as pm_approvals
-    from permission_manager.permission_manager.doctype.pm_workflow_action import (
-        pm_workflow_action as pm_actions,
-    )
-
-    return SimpleNamespace(
-        get_workflow=pm_workflow.get_workflow,
-        hidden_doctypes=pm_approvals._hidden_doctypes,
-        transaction_label=pm_approvals.transaction_label,
-        get_my_pending_approvals=pm_approvals.get_my_pending_approvals,
-        get_transitions=pm_workflow.get_transitions,
-        apply_workflow=pm_workflow.apply_workflow,
-        has_approval_access=pm_workflow.has_approval_access,
-        get_open_return_adhoc_action=pm_workflow.get_open_return_adhoc_action,
-        get_document_lifecycle=pm_approvals.get_document_lifecycle,
-        forward_workflow_action=pm_actions.forward_workflow_action,
-        return_adhoc_to_originator=pm_actions.return_adhoc_to_originator,
-        get_sent_back_documents=pm_approvals.get_sent_back_documents,
-        get_my_approval_history=pm_approvals.get_my_approval_history,
-        can_act_on=pm_actions._can_act_on,
-    )
+    return _PmFunctions()
 
 
 # ─── Endpoints ────────────────────────────────────────────────────────────────
