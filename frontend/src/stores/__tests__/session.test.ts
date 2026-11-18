@@ -6,7 +6,7 @@ import { useSessionStore } from "../session";
 
 /** Settings as the server sends them: only the role flags matter here. */
 function settings(
-  flags: Partial<Pick<ConfigDefaults, "is_van_user" | "is_van_manager" | "van_code" | "approvals">>,
+  flags: Partial<Pick<ConfigDefaults, "is_van_user" | "is_van_manager" | "is_system_manager" | "van_code" | "approvals">>,
 ): ConfigDefaults {
   return { is_van_user: false, is_van_manager: false, van_code: null, ...flags } as ConfigDefaults;
 }
@@ -53,6 +53,21 @@ describe("hasVanShell", () => {
     session.defaults = settings({ van_code: "VAN-01" });
     expect(session.isVanUser).toBe(false);
     expect(session.hasVanShell).toBe(true);
+  });
+
+  it("is true for a System Manager with no van role and no van code: they keep the van screens", () => {
+    const session = useSessionStore();
+    session.defaults = settings({ is_system_manager: true });
+    expect(session.isVanUser).toBe(false);
+    expect(session.hasVanShell).toBe(true);
+  });
+
+  it("is false for a plain approver, and for an older server that sends no System Manager flag", () => {
+    const session = useSessionStore();
+    session.defaults = settings({ is_system_manager: false });
+    expect(session.hasVanShell).toBe(false);
+    session.defaults = settings({});
+    expect(session.hasVanShell).toBe(false);
   });
 
   it("is false for no role and no van code, or a blank one", () => {
@@ -102,11 +117,26 @@ describe("approvalsOnly with the session store", () => {
     expect(approvalsOnly(session)).toBe(true);
   });
 
+  it("a System Manager with no van setup keeps the van shell and still has approvals", () => {
+    const session = useSessionStore();
+    session.defaults = settings({ is_system_manager: true, ...on });
+    expect(approvalsOnly(session)).toBe(false);
+    expect(session.approvalsEnabled).toBe(true);
+  });
+
+  it("a plain approver with none of the van signs and approvals on is approvals-only", () => {
+    const session = useSessionStore();
+    session.defaults = settings({ is_system_manager: false, van_code: null, ...on });
+    expect(approvalsOnly(session)).toBe(true);
+  });
+
   it("with Permission Manager off (approvals disabled) nobody gets the approvals-only shell", () => {
     const session = useSessionStore();
     session.defaults = settings(off);
     expect(approvalsOnly(session)).toBe(false);
     session.defaults = settings({ van_code: "VAN-01", ...off });
+    expect(approvalsOnly(session)).toBe(false);
+    session.defaults = settings({ is_system_manager: false, ...off });
     expect(approvalsOnly(session)).toBe(false);
   });
 

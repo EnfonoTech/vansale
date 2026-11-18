@@ -6,7 +6,8 @@ export interface ConfigDefaults {
   language: string;
   is_van_user: boolean;
   is_van_manager: boolean;
-  is_system_manager: boolean;
+  /** Administrator, or a user holding the System Manager role. Absent on a server older than this field. */
+  is_system_manager?: boolean;
   roles: string[];
   company: string | null;
   branch: string | null;
