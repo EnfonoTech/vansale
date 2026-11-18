@@ -8,7 +8,7 @@ Every `@frappe.whitelist()` function is a **public HTTP endpoint** reachable at
 
 - **120 endpoints**
 - **5 reachable without login** (`allow_guest=True`)
-- **97 with no in-body permission call** - see the note below
+- **95 with no in-body permission call** - see the note below
 
 ## Guest-reachable endpoints
 
@@ -119,8 +119,7 @@ anything here that writes, or reads another user's data, needs an explicit
 | `vansale.steelforce.api.cancellation_options` | doctype: str, name: str |
 | `vansale.steelforce.api.drivers` | - |
 | `vansale.steelforce.api.request_cancellation` | doctype: str, name: str, reason: str, details: Optional[str] = None |
-| `vansale.steelforce.approvals.apply` | doctype: str, name: str, action: str, comment: str = '', priority: str = 'Medium' |
-| `vansale.steelforce.approvals.apply_bulk` | doctype: str, names: str, action: str, comment: str = '', priority: str = 'Medium' |
+| `vansale.steelforce.approvals.apply` | doctype: str, name: str, action: str, comment: str = '', priority: str = '', expected_state: str = '' |
 | `vansale.steelforce.approvals.availability` | - |
 | `vansale.steelforce.approvals.count` | - |
 | `vansale.steelforce.approvals.inbox` | - |
@@ -128,7 +127,6 @@ anything here that writes, or reads another user's data, needs an explicit
 | `vansale.steelforce.approvals_extra.history` | limit: int = 100, from_date: str = '', to_date: str = '', transaction: str = '' |
 | `vansale.steelforce.approvals_extra.my_requests` | - |
 | `vansale.steelforce.approvals_extra.return_to_originator` | action_id: str, comment: str = '' |
-| `vansale.steelforce.approvals_extra.sent_back` | - |
 
 ## All endpoints by module
 
@@ -672,7 +670,7 @@ For Van Managers: list all Vansale Configurations (admin picker).
 (no arguments)
 ```
 
-<sub>vansale/api/me.py:570</sub>
+<sub>vansale/api/me.py:571</sub>
 
 
 ### `vansale.api.payment`
@@ -1322,25 +1320,25 @@ Send a submitted quotation / order to the office for cancellation, with a reason
 
 #### `apply` - POST / _no perm call_
 
-Take `action` on one document as the signed-in user, through Permission Manager. The action must be one the document offers the user now, with the comment or attachment it requires. Any refusal (PM's or the document's own) is raised unchanged. Returns `{"ok": True, "new_state", "recommended"}`; `recommended` is true when the user was asked for advice and the document did not move.
+Take `action` on one document as the signed-in user, through Permission Manager. The action must be one the document offers the user now, with the comment or attachment it requires. `expected_state` is the document's workflow state when the user opened it: when given and the document has moved since, it is refused before PM is asked. A blank `priority` leaves the transition's own priority; a chosen one is Low, Medium, High or Critical. Any refusal (PM's or the document's own) is raised unchanged. Returns `{"ok": True, "new_state", "recommended"}`; `recommended` is true when the user was asked for advice and the document did not move.
 
 ```
 /api/method/vansale.steelforce.approvals.apply
-(doctype: str, name: str, action: str, comment: str = '', priority: str = 'Medium')
+(doctype: str, name: str, action: str, comment: str = '', priority: str = '', expected_state: str = '')
 ```
 
-<sub>vansale/steelforce/approvals.py:199</sub>
+<sub>vansale/steelforce/approvals.py:226</sub>
 
-#### `apply_bulk` - POST / _no perm call_
+#### `apply_bulk` - POST
 
-Take `action` on up to 20 documents of one type, one by one, with the same checks as `apply`. `names` is a JSON list (duplicates are dropped). Each document is committed on success and rolled back on failure, and one failure never stops the others. Returns `{"results": [{"docname", "ok", "message"}], "ok_count", "failed_count"}`, where `message` is the refusal text as it was raised.
+Take `action` on up to 20 documents of one type, one by one, with the same checks as `apply`. `names` is a JSON list (duplicates are dropped); `expected_states` is a JSON object `{docname: state when listed}`, and a document that moved since fails (a name not in it is not checked). A document on which the user was only asked for advice fails too: that is answered from its own screen. Each document is committed on success and rolled back on failure, and one failure never stops the others. Returns `{"results": [{"docname", "ok", "message"}], "ok_count", "failed_count"}`, where `message` is the refusal as plain text.
 
 ```
 /api/method/vansale.steelforce.approvals.apply_bulk
-(doctype: str, names: str, action: str, comment: str = '', priority: str = 'Medium')
+(doctype: str, names: str, action: str, comment: str = '', priority: str = '', expected_states: str = '')
 ```
 
-<sub>vansale/steelforce/approvals.py:211</sub>
+<sub>vansale/steelforce/approvals.py:255</sub>
 
 #### `availability` - GET / _no perm call_
 
@@ -1351,7 +1349,7 @@ Whether approvals are available on this site (Permission Manager is installed): 
 (no arguments)
 ```
 
-<sub>vansale/steelforce/approvals.py:97</sub>
+<sub>vansale/steelforce/approvals.py:124</sub>
 
 #### `count` - GET / _no perm call_
 
@@ -1362,7 +1360,7 @@ The inbox numbers only, for badges: `total` (PM's own total, the same as the des
 (no arguments)
 ```
 
-<sub>vansale/steelforce/approvals.py:151</sub>
+<sub>vansale/steelforce/approvals.py:178</sub>
 
 #### `detail` - GET
 
@@ -1373,7 +1371,7 @@ One document as the Approvals screen reviews it: header (state, priority, party,
 (doctype: str, name: str)
 ```
 
-<sub>vansale/steelforce/approvals.py:169</sub>
+<sub>vansale/steelforce/approvals.py:196</sub>
 
 #### `inbox` - GET / _no perm call_
 
@@ -1384,7 +1382,7 @@ The signed-in user's approval inbox, as Permission Manager lists it.
 (no arguments)
 ```
 
-<sub>vansale/steelforce/approvals.py:104</sub>
+<sub>vansale/steelforce/approvals.py:131</sub>
 
 
 ### `vansale.steelforce.approvals_extra`
@@ -1398,11 +1396,11 @@ Attach a file (base64, no data-URL prefix) to a document the signed-in user has 
 (doctype: str, name: str, filename: str, content_base64: str)
 ```
 
-<sub>vansale/steelforce/approvals_extra.py:220</sub>
+<sub>vansale/steelforce/approvals_extra.py:234</sub>
 
 #### `forward` - POST / _no perm call_
 
-Forward the signed-in user's open approval `action_id` to `to_user`, through Permission Manager (which checks the caller may act on it and that it is still open, makes the other person's approval, and does not share the document). `return_to_originator` asks the other person for advice only: the approval comes back to the caller. Returns PM's answer, `{"adhoc_action", "return_to_originator"}`. `to_user` must be an enabled system user other than the caller who may read the document, as the people offered by `forward_targets` are; anyone else is refused before PM is asked. Approvals on Stock Entry or a type PM hides are refused.
+Forward the signed-in user's open approval `action_id` to `to_user`, through Permission Manager (which makes the other person's approval and does not share the document). The caller must hold the approval (PM lets them act on it and it is still open); otherwise, and for an approval on Stock Entry or a type PM hides, the answer is "Approval not found", the same as for an id that does not exist. `return_to_originator` asks the other person for advice only: the approval comes back to the caller. Returns PM's answer, `{"adhoc_action", "return_to_originator"}`. `to_user` must be an enabled system user other than the caller who may read the document, as the people offered by `forward_targets` are; anyone else is refused before PM is asked.
 
 ```
 /api/method/vansale.steelforce.approvals_extra.forward
@@ -1431,7 +1429,7 @@ The decisions the signed-in user took (and what happened to documents they submi
 (limit: int = 100, from_date: str = '', to_date: str = '', transaction: str = '')
 ```
 
-<sub>vansale/steelforce/approvals_extra.py:411</sub>
+<sub>vansale/steelforce/approvals_extra.py:442</sub>
 
 #### `my_requests` - GET / _no perm call_
 
@@ -1442,27 +1440,27 @@ The documents the signed-in user submitted that are still moving through approva
 (no arguments)
 ```
 
-<sub>vansale/steelforce/approvals_extra.py:260</sub>
+<sub>vansale/steelforce/approvals_extra.py:276</sub>
 
 #### `return_to_originator` - POST / _no perm call_
 
-Hand an approval that was forwarded "return to me" back to the person who asked, through Permission Manager (which checks the caller may act on it, that it is open and ad hoc). Returns `{"ok": True}` plus anything PM answers. Approvals on Stock Entry or a type PM hides are refused.
+Hand an approval that was forwarded "return to me" back to the person who asked, through Permission Manager (which also checks it is ad hoc). The caller must hold it open, as for `forward`; otherwise, and for Stock Entry or a type PM hides, the answer is "Approval not found". Returns `{"ok": True}` plus anything PM answers.
 
 ```
 /api/method/vansale.steelforce.approvals_extra.return_to_originator
 (action_id: str, comment: str = '')
 ```
 
-<sub>vansale/steelforce/approvals_extra.py:189</sub>
+<sub>vansale/steelforce/approvals_extra.py:193</sub>
 
-#### `sent_back` - GET / _no perm call_
+#### `sent_back` - GET
 
-The documents an approver sent back to the signed-in user for correction, as Permission Manager lists them (who sent it back, when, the role and the reason). `sent_back_on` is a UTC ISO time to the second. Empty when Permission Manager is not installed.
+The documents an approver sent back to the signed-in user for correction, as Permission Manager lists them (who sent it back, when, the role and the reason), as `{"items": [...], "unavailable": bool}`. `sent_back_on` is a UTC ISO time to the second. When PM cannot build the list for this user (its read of one document type is refused, which it does not handle) the answer is no items and `unavailable` true. Empty when Permission Manager is not installed.
 
 ```
 /api/method/vansale.steelforce.approvals_extra.sent_back
 (no arguments)
 ```
 
-<sub>vansale/steelforce/approvals_extra.py:399</sub>
+<sub>vansale/steelforce/approvals_extra.py:415</sub>
 
