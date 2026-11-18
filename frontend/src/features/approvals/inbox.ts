@@ -88,12 +88,21 @@ export function parseServerTime(stamp: string | null | undefined): Date | null {
 }
 
 /**
- * The user has no van setup, so the app is Approvals and More only and no van
- * endpoint is called for them. Unknown until the user's settings have loaded
- * (`defaults` is null): nobody is moved by a guess.
+ * The user has no van app (neither Van User nor Van Manager: the session's
+ * `hasVanShell`), so the app is Approvals and More only and no van endpoint is
+ * called for them. Unknown until the user's settings have loaded (`defaults`
+ * is null): nobody is moved by a guess.
  */
-export function approvalsOnly(session: { defaults: unknown; isVanUser: boolean }): boolean {
-  return session.defaults != null && !session.isVanUser;
+export function approvalsOnly(session: { defaults: unknown; hasVanShell: boolean }): boolean {
+  return session.defaults != null && !session.hasVanShell;
+}
+
+/** The screens a user without the van app may open; every other screen is a van screen. */
+const WITHOUT_VAN = new Set(["approvals", "approval-detail", "more", "pin", "login", "setup"]);
+
+/** Whether the route named `name` may be opened by a user without the van app. */
+export function routeAllowedWithoutVan(name: string | symbol | null | undefined): boolean {
+  return typeof name === "string" && WITHOUT_VAN.has(name);
 }
 
 /** The text function the screens pass in (`t` from vue-i18n), so wording stays in the language files. */

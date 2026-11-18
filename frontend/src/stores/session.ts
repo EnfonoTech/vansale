@@ -82,6 +82,18 @@ export const useSessionStore = defineStore("session", {
     defaultCompany: (s) => s.defaults?.company ?? null,
     currency: (s) => s.defaults?.currency ?? null,
     isVanUser: (s) => Boolean(s.defaults?.is_van_user),
+    /**
+     * The app has its van screens (Home, Sales, Customers, Stock or Route):
+     * the user is a Van User or a Van Manager. Anyone else gets the
+     * approvals-only shell and no van endpoint is called for them.
+     *
+     * While the settings have not loaded (`defaults` is null) the answer is
+     * yes, like the other getters for unloaded settings, so the nav does not
+     * flicker and nobody is moved by a guess. Code that must not call a van
+     * endpoint before it knows (App.vue's cache warm-up) checks `defaults`
+     * itself as well.
+     */
+    hasVanShell: (s) => (s.defaults == null ? true : Boolean(s.defaults.is_van_user || s.defaults.is_van_manager)),
     /** Approvals (Permission Manager) are on for this site; off on older servers. */
     approvalsEnabled: (s) => s.defaults?.approvals?.enabled === true,
     requireLocation: (s) => Boolean(s.defaults?.require_location),

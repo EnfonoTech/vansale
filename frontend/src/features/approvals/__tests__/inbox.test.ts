@@ -15,6 +15,7 @@ import {
   isOverdue,
   itemKey,
   parseServerTime,
+  routeAllowedWithoutVan,
 } from "../inbox";
 import { BULK_MIXED_TYPES } from "../rules";
 import { flag, item } from "./fixtures";
@@ -151,16 +152,49 @@ describe("parseServerTime", () => {
 });
 
 describe("approvalsOnly", () => {
-  it("is for a signed-in user whose settings say no van", () => {
-    expect(approvalsOnly({ defaults: { is_van_user: false }, isVanUser: false })).toBe(true);
+  it("is for a signed-in user whose settings say no van app", () => {
+    expect(approvalsOnly({ defaults: { is_van_user: false }, hasVanShell: false })).toBe(true);
   });
 
-  it("is not for a van user", () => {
-    expect(approvalsOnly({ defaults: { is_van_user: true }, isVanUser: true })).toBe(false);
+  it("is not for a user who has the van app", () => {
+    expect(approvalsOnly({ defaults: { is_van_user: true }, hasVanShell: true })).toBe(false);
   });
 
   it("waits for the settings: unknown is not approvals-only", () => {
-    expect(approvalsOnly({ defaults: null, isVanUser: false })).toBe(false);
+    expect(approvalsOnly({ defaults: null, hasVanShell: false })).toBe(false);
+    expect(approvalsOnly({ defaults: null, hasVanShell: true })).toBe(false);
+  });
+});
+
+describe("routeAllowedWithoutVan", () => {
+  it.each(["approvals", "approval-detail", "more", "pin", "login", "setup"])("allows %s", (name) => {
+    expect(routeAllowedWithoutVan(name)).toBe(true);
+  });
+
+  it.each([
+    "dashboard",
+    "customers",
+    "customer-detail",
+    "invoices",
+    "invoice-new",
+    "payment-new",
+    "leads",
+    "quotations",
+    "orders",
+    "returns",
+    "route-today",
+    "van-stock",
+    "sync-errors",
+    "sync-edit-entry",
+    "print-view",
+  ])("sends %s (a van screen) to approvals", (name) => {
+    expect(routeAllowedWithoutVan(name)).toBe(false);
+  });
+
+  it("does not allow an unnamed route", () => {
+    expect(routeAllowedWithoutVan(undefined)).toBe(false);
+    expect(routeAllowedWithoutVan(null)).toBe(false);
+    expect(routeAllowedWithoutVan(Symbol("x"))).toBe(false);
   });
 });
 
