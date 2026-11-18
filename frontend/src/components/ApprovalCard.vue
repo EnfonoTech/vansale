@@ -10,13 +10,16 @@
  * why it cannot.
  *
  * A long press asks for selection (`select`); the click that follows a long
- * press is swallowed, so the document does not also open.
+ * press is swallowed, so the document does not also open. If that click never
+ * comes it is forgotten shortly after the finger lifts (and by the next press),
+ * so it cannot swallow a later tap.
  */
-import { computed, onBeforeUnmount, ref } from "vue";
+import { computed, onBeforeUnmount } from "vue";
 import { useI18n } from "vue-i18n";
 import type { ApprovalItem } from "@/api/approvals";
 import { ageText, formatAmount, isOverdue } from "@/features/approvals/inbox";
 import { priorityTone } from "@/features/approvals/format";
+import { createClickSwallow } from "@/features/approvals/long-press";
 import { useSessionStore } from "@/stores/session";
 import Icon from "@/components/Icon.vue";
 import SarSymbol from "@/components/SarSymbol.vue";
@@ -67,8 +70,8 @@ const MOVE_PX = 10;
 let holdTimer: number | undefined;
 let startX = 0;
 let startY = 0;
-/** The press that just ended was a long one: the click after it is not a tap. */
-const swallowClick = ref(false);
+/** The press that just ended was a long one: the click after it is not a tap (and a click that never comes is forgotten). */
+const swallow = createClickSwallow();
 
 function cancelHold() {
   window.clearTimeout(holdTimer);
@@ -76,15 +79,23 @@ function cancelHold() {
 }
 
 function onPointerDown(event: PointerEvent) {
+  // A new press is a new gesture: nothing left from the last one may swallow its click.
+  swallow.reset();
   if (props.selecting || !props.canSelect || event.button > 0) return;
   startX = event.clientX;
   startY = event.clientY;
   cancelHold();
   holdTimer = window.setTimeout(() => {
     holdTimer = undefined;
-    swallowClick.value = true;
+    swallow.arm();
     emit("select", props.item);
   }, HOLD_MS);
+}
+
+/** The finger lifted or the pointer was lost: stop the hold, and give the click that follows a moment to arrive. */
+function onPointerEnd() {
+  cancelHold();
+  swallow.released();
 }
 
 function onPointerMove(event: PointerEvent) {
@@ -92,13 +103,13 @@ function onPointerMove(event: PointerEvent) {
   if (Math.abs(event.clientX - startX) > MOVE_PX || Math.abs(event.clientY - startY) > MOVE_PX) cancelHold();
 }
 
-onBeforeUnmount(cancelHold);
+onBeforeUnmount(() => {
+  cancelHold();
+  swallow.reset();
+});
 
 function activate() {
-  if (swallowClick.value) {
-    swallowClick.value = false;
-    return;
-  }
+  if (swallow.consume()) return;
   if (props.selecting) {
     // A greyed card is not ticked; one already in stays tickable (to leave).
     if (!greyed.value) emit("toggle", props.item);
@@ -123,9 +134,9 @@ function activate() {
     @keyup.space.prevent="activate"
     @pointerdown="onPointerDown"
     @pointermove="onPointerMove"
-    @pointerup="cancelHold"
-    @pointercancel="cancelHold"
-    @pointerleave="cancelHold"
+    @pointerup="onPointerEnd"
+    @pointercancel="onPointerEnd"
+    @pointerleave="onPointerEnd"
     @contextmenu.prevent
   >
     <span v-if="selecting" class="tick" :class="{ on: selected }" aria-hidden="true">
