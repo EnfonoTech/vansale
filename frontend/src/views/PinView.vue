@@ -3,6 +3,7 @@ import { computed, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { changePin, loginWithPin, setupPin } from "@/api/auth";
 import { configDefaults } from "@/api/me";
+import { useApprovalsStore } from "@/stores/approvals";
 import { useSessionStore } from "@/stores/session";
 import { ApiError, NetworkError } from "@/app/frappe";
 import { isOnline } from "@/app/online";
@@ -14,6 +15,7 @@ import BrandMark from "@/components/BrandMark.vue";
 const router = useRouter();
 const route = useRoute();
 const session = useSessionStore();
+const approvals = useApprovalsStore();
 const toasts = useToastStore();
 
 if (!session.email) {
@@ -175,6 +177,8 @@ async function unlockOffline(email: string) {
 
 function signInAgain() {
   forgetPin();
+  // The approvals held in memory (and the poll) are the previous user's: they go with them.
+  approvals.reset();
   session.logout();
   void router.replace({ name: "login" });
 }

@@ -9,6 +9,7 @@ import Icon from "@/components/Icon.vue";
 import { useRouteVisitStore } from "@/stores/routeVisit";
 import { useOnline } from "@/app/online";
 import { useSessionStore } from "@/stores/session";
+import { useApprovalsStore } from "@/stores/approvals";
 import { warmCaches } from "@/offline/warm";
 import { useSyncStore } from "@/stores/sync";
 
@@ -18,6 +19,7 @@ const visit = useRouteVisitStore();
 const online = useOnline();
 const session = useSessionStore();
 const sync = useSyncStore();
+const approvals = useApprovalsStore();
 
 /**
  * Send what was saved offline. Nothing did this on its own: the badge that
@@ -38,6 +40,18 @@ function syncPending() {
   });
 }
 
+/**
+ * The number on the Approvals entry points is only read when a screen opens,
+ * so an approval that arrived while the app sat in the background would not
+ * show until the next navigation. Reading it when the app comes back to the
+ * front keeps the badge honest. Numbers only (no inbox), and nothing at all
+ * on a site without approvals; offline it asks nothing.
+ */
+function refreshApprovalsBadge() {
+  if (!session.isAuthenticated || !session.approvalsEnabled) return;
+  void approvals.refreshCount();
+}
+
 // Offline→online transition: opportunistically warm the item + customer
 // caches so the next screen the driver opens has fresh data. The warm
 // helper internally rate-limits to once per 10 min so this never spams.
@@ -50,6 +64,7 @@ watch(online, async (isNow, wasNow) => {
     // loaded) warm nothing.
     await session.refreshDefaults();
     syncPending();
+    refreshApprovalsBadge();
     if (session.defaults !== null && session.hasVanShell) {
       void warmCaches({
         warehouse: session.defaultWarehouse ?? undefined,
@@ -79,6 +94,7 @@ onMounted(() => {
         if (isActive && session.isAuthenticated) {
           void session.refreshDefaults();
           syncPending();
+          refreshApprovalsBadge();
         }
       });
     } catch {
@@ -91,6 +107,7 @@ onMounted(() => {
     if (document.visibilityState === "visible" && session.isAuthenticated) {
       void session.refreshDefaults();
       syncPending();
+      refreshApprovalsBadge();
     }
   });
 });

@@ -16,7 +16,7 @@
 import { defineStore } from "pinia";
 import * as api from "@/api/approvals";
 import type { ApprovalCount, HistoryRow, Inbox, MyRequestRow, SentBackRow } from "@/api/approvals";
-import { clearApprovalsCache, loadInbox, saveInbox } from "@/features/approvals/cache";
+import { clearApprovalsCache, forgetCacheNotOwnedBy, loadInbox, saveInbox } from "@/features/approvals/cache";
 import { plainText } from "@/features/approvals/plain-text";
 import { isOnline } from "@/app/online";
 import { useSessionStore } from "@/stores/session";
@@ -89,6 +89,8 @@ function blank(): State {
 
 /** Bumped by every fetch, and by a reset or user change: only the latest answer may land. */
 let fetchSeq = 0;
+/** Bumped by every `refreshCount`, and by a reset or user change: only the latest count may land. */
+let countSeq = 0;
 /** The same for each list tab, so a tab's answer never lands on the inbox's sequence or another tab's. */
 const listSeq: Record<ListName, number> = { mine: 0, sentBack: 0, history: 0 };
 /** Stops the running poll (timer and listeners); null when none runs. */
@@ -117,17 +119,21 @@ export const useApprovalsStore = defineStore("approvals", {
   },
   actions: {
     /**
-     * Take on `user`: what belongs to someone else is dropped first. Nothing
-     * is dropped on the first call after a reset or a fresh start (nobody
-     * owns anything yet, so whatever a tab already set is this user's).
+     * Take on `user`: what belongs to someone else is dropped first, in memory
+     * and on the phone (a saved copy of the previous user's inbox must not
+     * outlive the switch). Nothing in memory is dropped on the first call after
+     * a reset or a fresh start (nobody owns anything yet, so whatever a tab
+     * already set is this user's); a saved copy left by someone else still goes.
      */
     adopt(user: string) {
       if (this.owner === user) return;
+      forgetCacheNotOwnedBy(user);
       if (this.owner === null) {
         this.owner = user;
         return;
       }
       fetchSeq++;
+      countSeq++;
       dropListAnswers();
       this.$patch({ ...blank(), owner: user });
     },
@@ -181,14 +187,22 @@ export const useApprovalsStore = defineStore("approvals", {
       }
     },
 
-    /** Just the numbers, for a badge on a screen that does not list the inbox. */
+    /**
+     * Just the numbers, for a badge on a screen that does not list the inbox.
+     * An answer is dropped when it is no longer the newest: a later count was
+     * asked for, or the inbox was fetched after this one was asked (its answer
+     * carries newer numbers), or the user changed or the store was reset.
+     */
     async refreshCount(): Promise<void> {
       const session = useSessionStore();
       const user = session.user;
       if (!user || !isOnline()) return;
       this.adopt(user);
+      const mine = ++countSeq;
+      const inboxSeq = fetchSeq;
       try {
         const counts = await api.count();
+        if (mine !== countSeq || inboxSeq !== fetchSeq) return;
         if (this.owner !== user || session.user !== user) return;
         this.counts = counts;
       } catch {
@@ -302,6 +316,7 @@ export const useApprovalsStore = defineStore("approvals", {
     reset() {
       this.stopPolling();
       fetchSeq++;
+      countSeq++;
       dropListAnswers();
       this.$patch(blank());
       clearApprovalsCache();

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { clearApprovalsCache, loadInbox, saveInbox } from "../cache";
+import { clearApprovalsCache, forgetCacheNotOwnedBy, loadInbox, saveInbox } from "../cache";
 import { inbox, item } from "./fixtures";
 
 const KEY = "vansale.approvals.cache.v1";
@@ -20,6 +20,23 @@ describe("approvals cache", () => {
   it("never shows one user's inbox to another", () => {
     saveInbox("a@x", inbox());
     expect(loadInbox("b@x")).toBeNull();
+  });
+
+  it("forgetCacheNotOwnedBy removes another user's copy and leaves the user's own", () => {
+    saveInbox("a@x", inbox());
+    forgetCacheNotOwnedBy("b@x");
+    expect(window.localStorage.getItem(KEY)).toBeNull();
+
+    saveInbox("b@x", inbox({ total: 5 }));
+    forgetCacheNotOwnedBy("b@x");
+    expect(loadInbox("b@x")?.inbox.total).toBe(5);
+  });
+
+  it("forgetCacheNotOwnedBy removes a copy it cannot read, and does nothing when there is none", () => {
+    expect(() => forgetCacheNotOwnedBy("a@x")).not.toThrow();
+    window.localStorage.setItem(KEY, "{not json");
+    forgetCacheNotOwnedBy("a@x");
+    expect(window.localStorage.getItem(KEY)).toBeNull();
   });
 
   it("saving for another user replaces the first user's copy", () => {

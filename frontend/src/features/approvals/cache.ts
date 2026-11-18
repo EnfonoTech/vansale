@@ -37,6 +37,28 @@ export function loadInbox(user: string): { inbox: Inbox; savedAt: string } | nul
   }
 }
 
+/**
+ * Remove the saved copy unless it is `user`'s own (or there is none): after a
+ * different user signs in, the previous user's inbox must not stay on the
+ * phone until something happens to overwrite it. A copy that cannot be read
+ * is removed too.
+ */
+export function forgetCacheNotOwnedBy(user: string): void {
+  try {
+    const raw = window.localStorage.getItem(KEY);
+    if (!raw) return;
+    let owner: unknown = null;
+    try {
+      owner = (JSON.parse(raw) as Partial<Stored> | null)?.user;
+    } catch {
+      /* unreadable: treated as nobody's */
+    }
+    if (owner !== user) window.localStorage.removeItem(KEY);
+  } catch {
+    /* storage unavailable: nothing to forget */
+  }
+}
+
 export function clearApprovalsCache(): void {
   try {
     window.localStorage.removeItem(KEY);

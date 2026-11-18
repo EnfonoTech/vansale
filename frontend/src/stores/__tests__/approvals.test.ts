@@ -267,6 +267,30 @@ describe("refresh", () => {
     expect(loadInbox("b@x")?.inbox.total).toBe(4);
   });
 
+  it("a user switch clears the previous user's saved copy from the phone at once, not when the new answer lands", () => {
+    const store = useApprovalsStore();
+    saveInbox("a@x", THREE);
+    store.adopt("a@x");
+    expect(loadInbox("a@x")).not.toBeNull();
+
+    store.adopt("b@x");
+
+    expect(loadInbox("a@x")).toBeNull();
+    expect(window.localStorage.getItem("vansale.approvals.cache.v1")).toBeNull();
+  });
+
+  it("the first user after a fresh start does not keep a copy left by someone else, but keeps their own", () => {
+    saveInbox("old@x", THREE);
+    const store = useApprovalsStore();
+    store.adopt("a@x");
+    expect(window.localStorage.getItem("vansale.approvals.cache.v1")).toBeNull();
+
+    setActivePinia(createPinia());
+    saveInbox("a@x", THREE);
+    useApprovalsStore().adopt("a@x");
+    expect(loadInbox("a@x")?.inbox).toEqual(THREE);
+  });
+
   it("what a tab already set before the first refresh is kept", async () => {
     const store = useApprovalsStore();
     store.history = [
@@ -299,6 +323,48 @@ describe("refreshCount", () => {
     expect(api.inbox).not.toHaveBeenCalled();
     expect(store.needsYou).toBe(7);
     expect(store.badge).toBe(7);
+  });
+
+  it("an answer older than the latest inbox refresh is ignored", async () => {
+    const slow = deferred<{ total: number; needs_you: number; waiting: number; high: number; overdue: number }>();
+    api.count.mockReturnValue(slow.promise);
+    const store = useApprovalsStore();
+    const counting = store.refreshCount();
+
+    // The inbox is asked for after the count was, and its answer lands first.
+    await store.refresh();
+    expect(store.needsYou).toBe(2);
+    slow.resolve({ total: 9, needs_you: 7, waiting: 2, high: 1, overdue: 1 });
+    await counting;
+
+    expect(store.needsYou).toBe(2);
+  });
+
+  it("of two counts in flight the later one wins, whichever answers last", async () => {
+    const first = deferred<{ total: number; needs_you: number; waiting: number; high: number; overdue: number }>();
+    const second = deferred<{ total: number; needs_you: number; waiting: number; high: number; overdue: number }>();
+    api.count.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
+    const store = useApprovalsStore();
+    const a = store.refreshCount();
+    const b = store.refreshCount();
+
+    second.resolve({ total: 5, needs_you: 5, waiting: 0, high: 0, overdue: 0 });
+    await b;
+    first.resolve({ total: 1, needs_you: 1, waiting: 0, high: 0, overdue: 0 });
+    await a;
+
+    expect(store.needsYou).toBe(5);
+  });
+
+  it("an answer that arrives after a reset is dropped", async () => {
+    const slow = deferred<{ total: number; needs_you: number; waiting: number; high: number; overdue: number }>();
+    api.count.mockReturnValue(slow.promise);
+    const store = useApprovalsStore();
+    const counting = store.refreshCount();
+    store.reset();
+    slow.resolve({ total: 9, needs_you: 7, waiting: 2, high: 1, overdue: 1 });
+    await counting;
+    expect(store.needsYou).toBe(0);
   });
 
   it("offline: calls nothing", async () => {
