@@ -818,10 +818,26 @@ def _workflow_of(doc):
     return _pm().get_workflow(doc.doctype, docname=doc.name, doc=doc, throw=False)
 
 
+def _hidden_types() -> set[str]:
+    """Stock Entry and every type PM hides from its approval inbox, lower-cased
+    (the database finds a type whatever case it is written in)."""
+    return {cstr(doctype).lower() for doctype in (*HIDDEN_DOCTYPES, *(_pm().hidden_doctypes() or []))}
+
+
+def _is_hidden(doctype: str, hidden: Optional[set[str]] = None) -> bool:
+    """Whether the approvals never handle this type, whatever its case.
+    `hidden` is `_hidden_types()` when the caller has it; Stock Entry is
+    refused without asking PM."""
+    wanted = cstr(doctype).lower()
+    if wanted in {always.lower() for always in HIDDEN_DOCTYPES}:
+        return True
+    return wanted in (_hidden_types() if hidden is None else hidden)
+
+
 def _refuse_if_hidden(doctype: str) -> None:
     """Refuse a type the approvals never handle: Stock Entry, or a type PM
     hides from its inbox (decided per type, before any document is read)."""
-    if doctype in HIDDEN_DOCTYPES or doctype in (_pm().hidden_doctypes() or []):
+    if _is_hidden(doctype):
         _refuse_hidden(doctype)
 
 

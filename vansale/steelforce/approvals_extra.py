@@ -269,7 +269,7 @@ def my_requests() -> dict:
     if not approvals.is_available():
         return {"items": []}
 
-    hidden = _hidden_types()
+    hidden = approvals._hidden_types()
     # `get_all` is safe here: the read is scoped to the user's own submissions
     # (`for_submitter` is the signed-in user), so it never lists another
     # person's approvals; the documents themselves are not read, only their
@@ -283,7 +283,7 @@ def my_requests() -> dict:
     oldest: dict[tuple[str, str], dict] = {}
     for row in rows:
         key = (row.get("reference_doctype"), row.get("reference_name"))
-        if key[0] in hidden:
+        if approvals._is_hidden(key[0], hidden):
             continue
         waiting = oldest.get(key)
         if waiting is None or get_datetime(row.get("creation")) < get_datetime(waiting.get("creation")):
@@ -430,8 +430,8 @@ def _without_hidden(rows: list[dict]) -> list[dict]:
     """The rows whose document type the approvals handle. PM's own-history read
     does not leave Stock Entry or hidden types out the way its inbox does, so
     every row is checked here, whichever list it came from."""
-    hidden = _hidden_types()
-    return [row for row in rows if row.get("doctype") not in hidden]
+    hidden = approvals._hidden_types()
+    return [row for row in rows if not approvals._is_hidden(row.get("doctype"), hidden)]
 
 
 def _with_iso_times(row: dict) -> dict:
@@ -444,11 +444,6 @@ def _with_iso_times(row: dict) -> dict:
 
 
 # ─── Shared ───────────────────────────────────────────────────────────────────
-
-
-def _hidden_types() -> set[str]:
-    """Stock Entry and every type PM hides from its approval inbox."""
-    return {*approvals.HIDDEN_DOCTYPES, *(approvals._pm().hidden_doctypes() or [])}
 
 
 def _require_document(doctype: str, name: str) -> None:

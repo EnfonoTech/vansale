@@ -1803,6 +1803,19 @@ class TestHiddenTypesAreRefused(DetailCase):
                 self._assert_nothing_happened()
         self.pm.hidden_doctypes.assert_called_with()
 
+    def test_the_type_is_compared_without_regard_to_case(self):
+        # the database finds "stock entry" as Stock Entry, so the refusal must too
+        self.pm.hidden_doctypes.return_value = ["gate PASS"]
+        self.docs[("stock entry", "STE-1")] = FakeDoc("stock entry", "STE-1", workflow_state="Pending")
+        self.docs[("Gate Pass", "GP-1")] = FakeDoc("Gate Pass", "GP-1", workflow_state="Pending")
+
+        for doctype, name in (("stock entry", "STE-1"), ("STOCK ENTRY", "STE-1"), ("Gate Pass", "GP-1")):
+            for endpoint, call in self._endpoints(doctype, name).items():
+                with self.subTest(doctype=doctype, endpoint=endpoint):
+                    with self.assertRaises(frappe.PermissionError):
+                        call()
+                    self._assert_nothing_happened()
+
     def test_an_ordinary_type_is_unaffected(self):
         self.pm.hidden_doctypes.return_value = ["Gate Pass"]
 

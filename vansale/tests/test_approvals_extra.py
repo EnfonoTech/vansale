@@ -872,6 +872,17 @@ class TestAttach(AttachCase):
         self.upload.assert_not_called()
         self.has_permission.assert_not_called()
 
+    def test_a_hidden_type_is_refused_whatever_its_case(self):
+        self.pm.hidden_doctypes.return_value = ["sales invoice"]
+
+        for doctype, name in (("stock entry", "STE-1"), ("Stock ENTRY", "STE-1"), ("Sales Invoice", "SINV-1")):
+            with self.subTest(doctype=doctype):
+                with self.assertRaises(frappe.PermissionError):
+                    self.attach(doctype, name)
+
+        self.assert_nothing_happened()
+        self.upload.assert_not_called()
+
     def test_a_blank_type_or_name_is_refused_before_anything_is_read(self):
         for doctype, name in (("", "SINV-1"), ("Sales Invoice", ""), (None, None)):
             with self.subTest(doctype=doctype, name=name):
@@ -1451,6 +1462,16 @@ class TestHistory(ExtraCase):
         self.assertEqual(
             [row["docname"] for row in approvals_extra.history()["items"]], ["SINV-1", "SINV-2"]
         )
+
+    def test_a_hidden_type_is_matched_whatever_its_case(self):
+        self.pm.hidden_doctypes.return_value = ["gate pass"]
+        self.pm.get_my_approval_history.return_value = [
+            history_row("SINV-1"),
+            history_row("STE-1", doctype="stock entry"),
+            history_row("GP-1", doctype="Gate Pass"),
+        ]
+
+        self.assertEqual([row["docname"] for row in approvals_extra.history()["items"]], ["SINV-1"])
 
     def test_nothing_without_pm(self):
         self.available.return_value = False
