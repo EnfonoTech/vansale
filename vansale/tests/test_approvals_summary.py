@@ -392,5 +392,71 @@ class TestFirstLines(unittest.TestCase):
         self.assertEqual(again["columns"], ["Account", "Debit", "Credit"])
 
 
+
+def _shout(text: str) -> str:
+    """A stand-in translator that makes a translated string easy to spot."""
+    return f"<{text}>"
+
+
+class TestTranslateAndFollowUps(unittest.TestCase):
+    def test_check_yes_no_go_through_translate(self):
+        self.assertEqual(format_value("Check", 1, 0, translate=_shout), "<Yes>")
+        self.assertEqual(format_value("Check", 0, 0, translate=_shout), "<No>")
+
+    def test_translate_is_not_applied_to_other_values(self):
+        self.assertEqual(format_value("Data", "Acme", 0, translate=_shout), "Acme")
+        self.assertEqual(format_value("Currency", 5, 2, translate=_shout), "5.00")
+
+    def test_key_facts_translate_labels_and_yes_no(self):
+        fields = [_field("customer"), _field("is_return", "Check")]
+        facts = key_facts(fields, {"customer": "Acme", "is_return": 1}, 2, translate=_shout)
+        self.assertEqual(
+            facts,
+            [{"label": "<Customer>", "value": "Acme"}, {"label": "<Is Return>", "value": "<Yes>"}],
+        )
+
+    def test_key_facts_translate_a_fieldname_used_as_label(self):
+        field = SimpleNamespace(fieldname="po_no", fieldtype="Data")
+        facts = key_facts([field], {"po_no": "PO-1"}, 2, translate=_shout)
+        self.assertEqual(facts, [{"label": "<po_no>", "value": "PO-1"}])
+
+    def test_first_lines_translate_column_headers_only(self):
+        doc = {"items": [{"item_name": "Steel Bar", "qty": 2, "amount": 10}]}
+        lines = first_lines("Sales Invoice", doc, 2, translate=_shout)
+        self.assertEqual(lines["columns"], ["<Item>", "<Qty>", "<Amount>"])
+        self.assertEqual(lines["rows"], [["Steel Bar", "2", "10.00"]])
+
+    def test_without_translate_nothing_changes(self):
+        lines = first_lines("Sales Invoice", {"items": [{"item_name": "X", "qty": 1, "amount": 1}]}, 3)
+        self.assertEqual(lines["columns"], ["Item", "Qty", "Amount"])
+
+    def test_qty_has_no_forced_decimals_and_keeps_grouping(self):
+        doc = {
+            "items": [
+                {"item_name": "A", "qty": 2, "amount": 1},
+                {"item_name": "B", "qty": 2.5, "amount": 1},
+                {"item_name": "C", "qty": 1200, "amount": 1},
+                {"item_name": "D", "qty": 2.000, "amount": 1},
+                {"item_name": "E", "qty": None, "amount": 1},
+                {"item_name": "F", "qty": Decimal("1200.500"), "amount": 1},
+            ]
+        }
+        lines = first_lines("Sales Invoice", doc, 3, limit=6)
+        self.assertEqual([row[1] for row in lines["rows"]], ["2", "2.5", "1,200", "2", "", "1,200.5"])
+        # the amount column still uses the currency precision
+        self.assertEqual(lines["rows"][0][2], "1.000")
+
+    def test_stock_reconciliation_qty_is_plain_too(self):
+        doc = {"items": [{"item_code": "BAR", "qty": 3.0, "valuation_rate": 4}]}
+        self.assertEqual(first_lines("Stock Reconciliation", doc, 3)["rows"], [["BAR", "3", "4.000"]])
+
+    def test_datetime_has_seconds_and_no_microseconds(self):
+        self.assertEqual(
+            format_value("Datetime", datetime(2026, 11, 19, 9, 30, 5, 123456), 0),
+            "2026-11-19T09:30:05",
+        )
+        self.assertEqual(format_value("Datetime", datetime(2026, 11, 19, 9, 30), 0), "2026-11-19T09:30:00")
+        self.assertEqual(format_value("Date", date(2026, 11, 19), 0), "2026-11-19")
+
 if __name__ == "__main__":
     unittest.main()
