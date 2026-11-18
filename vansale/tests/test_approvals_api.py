@@ -1682,9 +1682,34 @@ class TestBulkHardening(DetailCase):
 
         result = self._bulk()
 
-        self.assertEqual([r["ok"] for r in result["results"]], [True, False, True])
+        self.assertEqual(
+            result["results"],
+            [
+                {"docname": "SINV-1", "ok": True, "message": ""},
+                # never the exception's own text, which can show internals
+                {"docname": "SINV-2", "ok": False, "message": "Could not apply this document. It was logged."},
+                {"docname": "SINV-3", "ok": True, "message": ""},
+            ],
+        )
         self.log_error.assert_called_once()
         self.assertTrue(self.log_error.call_args.kwargs.get("defer_insert"))
+
+    def test_the_generic_message_for_an_unexpected_error_is_translated(self):
+        self._patch("vansale.steelforce.approvals._", side_effect=lambda text: f"ar:{text}")
+        self.pm.apply_workflow.side_effect = AttributeError("'NoneType' object has no attribute 'rate'")
+
+        result = self._bulk('["SINV-1"]')
+
+        self.assertEqual(result["results"][0]["message"], "ar:Could not apply this document. It was logged.")
+        self.assertNotIn("NoneType", result["results"][0]["message"])
+
+    def test_a_failing_commit_shows_the_generic_message(self):
+        frappe.local.db.commit.side_effect = Exception("Deadlock found when trying to get lock")
+
+        result = self._bulk('["SINV-1"]')
+
+        self.assertEqual(result["results"][0]["message"], "Could not apply this document. It was logged.")
+        self.log_error.assert_called_once()
 
     def test_a_refusal_is_not_logged(self):
         self.pm.apply_workflow.side_effect = frappe.ValidationError("Invalid Workflow Action: Approve")

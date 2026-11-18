@@ -292,10 +292,14 @@ def apply_bulk(
             )
             frappe.db.commit()
         except Exception as error:  # one document's trouble must not stop the batch
-            message = _plain(_error_text(error))
-            if not isinstance(error, (frappe.ValidationError, frappe.PermissionError)):
-                # Not a refusal: something broke. Deferred, as the rollback
-                # below would discard a row inserted now.
+            if isinstance(error, (frappe.ValidationError, frappe.PermissionError)):
+                # A refusal (PM's, the document's or another app's): its own words.
+                message = _plain(_error_text(error))
+            else:
+                # Not a refusal: something broke. Its text can show internals,
+                # so the user gets a plain note and the error goes to the log,
+                # deferred, as the rollback below would discard a row inserted now.
+                message = _("Could not apply this document. It was logged.")
                 frappe.log_error(title="vansale approvals: bulk apply", defer_insert=True)
             _rollback()
             results.append({"docname": docname, "ok": False, "message": message})
