@@ -4,6 +4,12 @@
     "raisedBy": "Raised by {name}",
     "facts": "Key facts",
     "attachments": "Attachments ({count})",
+    "file": {
+      "saveHint": "Saves a copy to this phone",
+      "saved": "Saved to this phone: {name}",
+      "failed": "The file could not be downloaded. Open it in the web app.",
+      "explain": "Open this file in the web app."
+    },
     "openFull": "Open full document",
     "readOnly": "You have nothing to decide on this document. This is a read-only view.",
     "recommend": "Recommend {action}",

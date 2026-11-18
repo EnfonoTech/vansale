@@ -18,8 +18,8 @@ import { computed, onMounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import { useI18n } from "vue-i18n";
 import * as api from "@/api/approvals";
-import type { ActionSpec, Detail, RouteStep } from "@/api/approvals";
-import { absoluteUrl } from "@/app/platform";
+import type { ActionSpec, Detail, DetailAttachment, RouteStep } from "@/api/approvals";
+import { absoluteUrl, isNative } from "@/app/platform";
 import { useOnline } from "@/app/online";
 import {
   bannerMessage,
@@ -32,7 +32,9 @@ import {
   orderActions,
   priorityPillTone,
 } from "@/features/approvals/detail-display";
+import { downloadPrivateFile } from "@/features/approvals/detail-download";
 import { failureOf } from "@/features/approvals/detail-failure";
+import { fileAccess, fileLabel } from "@/features/approvals/detail-file";
 import { buildTimeline } from "@/features/approvals/detail-timeline";
 import { priorityTone } from "@/features/approvals/format";
 import { useApprovalsStore } from "@/stores/approvals";
@@ -169,6 +171,25 @@ const timelineOpen = ref(false);
 const timeline = computed(() => (detail.value ? buildTimeline(detail.value.comments, detail.value.route.events) : []));
 const timelineShown = computed(() => (timelineOpen.value ? timeline.value : timeline.value.slice(0, TIMELINE_SHORT)));
 
+/** The phone app signs in with a token header, so its WebView cannot follow a private file's link. */
+const native = isNative();
+/** The files being saved to the phone (by URL), so a second tap waits. */
+const saving = ref<string[]>([]);
+
+async function saveFile(file: DetailAttachment) {
+  if (saving.value.includes(file.url)) return;
+  saving.value.push(file.url);
+  const label = fileLabel(file);
+  try {
+    await downloadPrivateFile(file.url, label);
+    toasts.success(t("approvalsDetail.file.saved", { name: label }));
+  } catch {
+    toasts.error(t("approvalsDetail.file.failed"));
+  } finally {
+    saving.value = saving.value.filter((url) => url !== file.url);
+  }
+}
+
 function actionLabel(spec: ActionSpec): string {
   return spec.recommend_only ? t("approvalsDetail.recommend", { action: spec.action }) : spec.action;
 }
@@ -290,11 +311,34 @@ async function onRefused(message: string) {
       <section v-if="detail.attachments.length" class="card">
         <h3 class="section-h">{{ t("approvalsDetail.attachments", { count: detail.attachments.length }) }}</h3>
         <ul class="files">
-          <li v-for="file in detail.attachments" :key="file.url">
-            <a :href="absoluteUrl(file.url)" target="_blank" rel="noopener">
+          <li v-for="(file, i) in detail.attachments" :key="i">
+            <!-- Web, and public files on the phone: a plain link. -->
+            <a v-if="fileAccess(file, native) === 'link'" :href="absoluteUrl(file.url)" target="_blank" rel="noopener">
               <Icon name="invoice" :size="18" />
-              <span class="file-name ltr">{{ file.name }}</span>
+              <span class="file-name ltr">{{ fileLabel(file) }}</span>
             </a>
+            <!-- A private file on the phone: fetched with the app's token and saved. -->
+            <button
+              v-else-if="fileAccess(file, native) === 'download'"
+              type="button"
+              class="file-save"
+              :disabled="saving.includes(file.url) || !online"
+              @click="saveFile(file)"
+            >
+              <Icon :name="saving.includes(file.url) ? 'sync' : 'invoice'" :size="18" />
+              <span class="file-text">
+                <span class="file-name ltr">{{ fileLabel(file) }}</span>
+                <span class="muted xsmall">{{ t("approvalsDetail.file.saveHint") }}</span>
+              </span>
+            </button>
+            <!-- Nothing here can open it: say where to. -->
+            <div v-else class="file-plain">
+              <Icon name="invoice" :size="18" />
+              <span class="file-text">
+                <span class="file-name ltr">{{ fileLabel(file) }}</span>
+                <span class="xsmall">{{ t("approvalsDetail.file.explain") }}</span>
+              </span>
+            </div>
           </li>
         </ul>
       </section>
@@ -597,13 +641,38 @@ async function onRefused(message: string) {
   flex-direction: column;
   gap: 0.2rem;
 }
-.files a {
+.files a,
+.file-save,
+.file-plain {
   display: flex;
   align-items: center;
   gap: 0.55rem;
   min-height: 2.5rem;
   font-size: var(--text-sm);
   font-weight: 500;
+}
+/* The phone's save button looks like the link beside it. */
+.file-save {
+  width: 100%;
+  justify-content: flex-start;
+  padding: 0;
+  background: transparent;
+  color: var(--primary);
+  text-align: start;
+}
+.file-plain {
+  color: var(--text-muted);
+}
+.file-plain .xsmall {
+  font-weight: 400;
+}
+.file-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.file-text .xsmall {
+  font-weight: 400;
 }
 .file-name {
   overflow: hidden;
