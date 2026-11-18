@@ -143,19 +143,23 @@ def _first_roles(doc, users: list[str]) -> dict[str, str]:
 @frappe.whitelist(methods=["POST"])
 def forward(action_id: str, to_user: str, comment: str = "", return_to_originator: int = 0) -> dict:
     """Forward the signed-in user's open approval `action_id` to `to_user`,
-    through Permission Manager (which checks the caller may act on it and that
-    it is still open, makes the other person's approval, and does not share the
-    document). `return_to_originator` asks the other person for advice only: the
-    approval comes back to the caller. Returns PM's answer, `{"adhoc_action",
-    "return_to_originator"}`. `to_user` must be an enabled system user other
-    than the caller who may read the document, as the people offered by
-    `forward_targets` are; anyone else is refused before PM is asked. Approvals
-    on Stock Entry or a type PM hides are refused."""
+    through Permission Manager (which makes the other person's approval and
+    does not share the document). The caller must hold the approval (PM lets
+    them act on it and it is still open); otherwise, and for an approval on
+    Stock Entry or a type PM hides, the answer is "Approval not found", the
+    same as for an id that does not exist. `return_to_originator` asks the
+    other person for advice only: the approval comes back to the caller.
+    Returns PM's answer, `{"adhoc_action", "return_to_originator"}`.
+    `to_user` must be an enabled system user other than the caller who may
+    read the document, as the people offered by `forward_targets` are; anyone
+    else is refused before PM is asked."""
     approvals._require_available()
     action_id, to_user, comment = cstr(action_id).strip(), cstr(to_user).strip(), cstr(comment)
     if not to_user:
         frappe.throw(_("Choose who to forward this to"))
-    doctype, docname = _refuse_hidden_action(action_id)
+    # The caller's own hold comes first: nothing about the recipient (who
+    # exists, who may read the document) is told to someone who does not hold it.
+    doctype, docname = _held_open_action(action_id)
     recipient = _forward_recipient(to_user, doctype, docname)
     return approvals._pm().forward_workflow_action(action_id, recipient, comment, cint(return_to_originator))
 
@@ -188,28 +192,38 @@ def _forward_recipient(to_user: str, doctype: str, docname: str) -> str:
 @frappe.whitelist(methods=["POST"])
 def return_to_originator(action_id: str, comment: str = "") -> dict:
     """Hand an approval that was forwarded "return to me" back to the person who
-    asked, through Permission Manager (which checks the caller may act on it,
-    that it is open and ad hoc). Returns `{"ok": True}` plus anything PM
-    answers. Approvals on Stock Entry or a type PM hides are refused."""
+    asked, through Permission Manager (which also checks it is ad hoc). The
+    caller must hold it open, as for `forward`; otherwise, and for Stock Entry
+    or a type PM hides, the answer is "Approval not found". Returns
+    `{"ok": True}` plus anything PM answers."""
     approvals._require_available()
     action_id, comment = cstr(action_id).strip(), cstr(comment)
-    _refuse_hidden_action(action_id)
+    _held_open_action(action_id)
     answer = approvals._pm().return_adhoc_to_originator(action_id, comment)
     return {"ok": True, **(answer if isinstance(answer, dict) else {})}
 
 
-def _refuse_hidden_action(action_id: str) -> tuple[str, str]:
-    """Refuse an approval that is not there, or whose document type the
-    approvals never handle, before PM is asked anything; otherwise answer the
-    `(doctype, name)` of the document it is about."""
+def _held_open_action(action_id: str) -> tuple[str, str]:
+    """The `(doctype, name)` of the document an approval is about, once the
+    caller is known to hold it: it exists, names a document of a type the
+    approvals handle, is still Open, and PM lets the caller act on it. Any
+    other approval gets one answer, "Approval not found" as a PermissionError,
+    so an id cannot be used to learn whether it exists, what it is about or
+    who holds it. Checked before PM is asked anything."""
     if not action_id:
         frappe.throw(_("Choose an approval first"))
     action = frappe.db.get_value(
-        PM_ACTION, action_id, ["reference_doctype", "reference_name"], as_dict=True
+        PM_ACTION, action_id, ["reference_doctype", "reference_name", "status"], as_dict=True
     )
-    if not (action and action.get("reference_doctype")):
-        frappe.throw(_("Approval not found"), frappe.DoesNotExistError)
-    approvals._refuse_if_hidden(action.get("reference_doctype"))
+    if (
+        not action
+        or not action.get("reference_doctype")
+        or not action.get("reference_name")
+        or approvals._is_hidden(action.get("reference_doctype"))
+        or action.get("status") != "Open"
+        or not approvals._pm().can_act_on(frappe.get_doc(PM_ACTION, action_id), frappe.session.user)
+    ):
+        frappe.throw(_("Approval not found"), frappe.PermissionError)
     return action.get("reference_doctype"), action.get("reference_name")
 
 

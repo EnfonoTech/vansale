@@ -369,15 +369,22 @@ def user_record(user: str, **overrides) -> dict:
 
 
 class ActionCase(ExtraCase):
-    """WA-1 is an action on Sales Invoice SINV-1 (the document type is read to
-    refuse a hidden one, the document to check the recipient may read it).
-    Omar and Fatima are enabled system users, sara is the caller; `readers`
-    says who may read the document (None: everybody)."""
+    """WA-1 is an open action on Sales Invoice SINV-1 that sara, the caller,
+    may act on (the document type is read to refuse a hidden one, the
+    document to check the recipient may read it). Omar and Fatima are enabled
+    system users; `readers` says who may read the document (None: everybody);
+    `held` lists the actions PM lets sara act on."""
 
     def setUp(self):
         super().setUp()
         self.action_doctypes = {"WA-1": "Sales Invoice"}
         self.action_docnames = {"WA-1": "SINV-1"}
+        self.action_status: dict[str, str] = {}
+        self.held = {"WA-1", "WA-2"}
+        self.pm.can_act_on.side_effect = lambda action_doc, user: (
+            user == ME and action_doc.name in self.held
+        )
+        self.get_doc = self._patch("frappe.get_doc", side_effect=self._get_doc)
         self.users = {user: user_record(user) for user in (ME, OMAR, FATIMA)}
         self.readers: set[str] | None = None
         self.has_permission = self._patch(
@@ -390,14 +397,21 @@ class ActionCase(ExtraCase):
         self.pm.forward_workflow_action.return_value = {"adhoc_action": "WA-9", "return_to_originator": 1}
         self.pm.return_adhoc_to_originator.return_value = None
 
+    def _get_doc(self, doctype, name=None, *args, **kwargs):
+        if doctype == PM_ACTION:
+            return types.SimpleNamespace(doctype=doctype, name=name)
+        raise AssertionError(f"unexpected get_doc({doctype!r}, {name!r})")
+
     def _db_value(self, doctype, name, fieldname, *args, **kwargs):
-        if (doctype, fieldname) == (PM_ACTION, ["reference_doctype", "reference_name"]):
+        if doctype == PM_ACTION:
+            self.assertEqual(fieldname, ["reference_doctype", "reference_name", "status"])
             self.assertTrue(kwargs.get("as_dict"))
             if name not in self.action_doctypes:
                 return None
             return frappe._dict(
                 reference_doctype=self.action_doctypes[name],
                 reference_name=self.action_docnames.get(name, "DOC-1"),
+                status=self.action_status.get(name, "Open"),
             )
         if (doctype, fieldname) == ("User", ["name", "enabled", "user_type"]):
             self.assertTrue(kwargs.get("as_dict"))
@@ -463,30 +477,31 @@ class TestForward(ActionCase):
         frappe.local.db.get_value.assert_not_called()
 
     def test_an_unknown_action_is_not_found(self):
-        with self.assertRaises(frappe.DoesNotExistError):
+        with self.assertRaises(frappe.PermissionError) as raised:
             approvals_extra.forward("WA-404", OMAR)
 
+        self.assertEqual(str(raised.exception), NOT_FOUND)
         self.assert_pm_not_asked()
 
     def test_an_action_on_stock_entry_is_refused_before_pm(self):
         self.action_doctypes["WA-1"] = "Stock Entry"
 
-        with self.assertRaises(frappe.PermissionError):
+        with self.assertRaises(frappe.PermissionError) as raised:
             approvals_extra.forward("WA-1", OMAR)
 
+        self.assertEqual(str(raised.exception), NOT_FOUND)
         self.assert_pm_not_asked()
-        self.assertEqual(frappe.local.message_log, [])
         self.assertEqual(self.reader.calls, [])
         self.assert_only_the_action_was_read()
 
     def test_an_action_on_a_type_pm_hides_is_refused_before_pm(self):
         self.pm.hidden_doctypes.return_value = ["Sales Invoice"]
 
-        with self.assertRaises(frappe.PermissionError):
+        with self.assertRaises(frappe.PermissionError) as raised:
             approvals_extra.forward("WA-1", OMAR)
 
+        self.assertEqual(str(raised.exception), NOT_FOUND)
         self.assert_pm_not_asked()
-        self.assertEqual(frappe.local.message_log, [])
         self.assert_only_the_action_was_read()
 
     def test_pms_refusal_is_raised_unchanged(self):
@@ -616,6 +631,79 @@ class TestForwardRecipient(ActionCase):
         self.assert_only_the_action_was_read()
 
 
+NOT_FOUND = "Approval not found"
+
+
+class TestForwardNeedsTheCallersOwnOpenApproval(ActionCase):
+    """Before anything about the recipient is looked at, the caller must hold
+    the approval (PM's own rule: they may act on it and it is still open).
+    Every way of not holding it gets the same answer, so nobody can probe
+    approval ids, document types or what colleagues may read."""
+
+    def assert_refused_before_the_recipient(self, action_id="WA-1", to_user=OMAR):
+        with self.assertRaises(frappe.PermissionError) as raised:
+            approvals_extra.forward(action_id, to_user, "please check", 1)
+        self.assertEqual(str(raised.exception), NOT_FOUND)
+        self.assert_pm_not_asked()
+        self.has_permission.assert_not_called()
+        self.assertNotIn("User", [c.args[0] for c in frappe.local.db.get_value.call_args_list])
+        return raised.exception
+
+    def test_an_approval_the_caller_may_not_act_on_is_not_found(self):
+        self.held = set()
+
+        self.assert_refused_before_the_recipient()
+
+        (action_doc, user), _kwargs = self.pm.can_act_on.call_args
+        self.assertEqual((action_doc.name, user), ("WA-1", ME))
+
+    def test_an_approval_that_is_no_longer_open_is_not_found(self):
+        for status in ("Completed", "Forwarded", "Reassigned"):
+            with self.subTest(status=status):
+                self.action_status["WA-1"] = status
+
+                self.assert_refused_before_the_recipient()
+
+    def test_an_approval_without_a_document_name_is_not_found(self):
+        self.action_docnames["WA-1"] = ""
+
+        self.assert_refused_before_the_recipient()
+
+    def test_a_third_partys_read_rights_are_never_told_to_a_caller_who_does_not_hold_it(self):
+        self.held = set()
+        self.readers = {FATIMA}
+
+        # whether omar can read the document or not, the answer is the same
+        self.assert_refused_before_the_recipient(to_user=OMAR)
+        self.assert_refused_before_the_recipient(to_user=FATIMA)
+        self.assert_refused_before_the_recipient(to_user="nobody@example.com")
+
+    def test_every_way_of_not_holding_it_gives_the_same_answer(self):
+        answers = set()
+        self.action_doctypes["WA-5"] = "Stock Entry"
+        self.action_doctypes["WA-6"] = "Sales Invoice"
+        self.action_docnames["WA-6"] = ""
+        self.action_doctypes["WA-7"] = "Sales Invoice"
+        self.action_status["WA-8"] = "Completed"
+        self.action_doctypes["WA-8"] = "Sales Invoice"
+        self.held = {"WA-5", "WA-6", "WA-8"}
+
+        for action_id in ("WA-404", "WA-5", "WA-6", "WA-7", "WA-8"):
+            with self.subTest(action_id=action_id):
+                error = self.assert_refused_before_the_recipient(action_id)
+                answers.add((type(error), str(error)))
+
+        self.assertEqual(answers, {(frappe.PermissionError, NOT_FOUND)})
+
+    def test_the_caller_holding_the_open_approval_goes_on_to_the_recipient_checks(self):
+        self.readers = {OMAR}
+
+        approvals_extra.forward("WA-1", OMAR)
+
+        self.pm.forward_workflow_action.assert_called_once_with("WA-1", OMAR, "", 0)
+        self.pm.can_act_on.assert_called_once()
+
+
 class TestReturnToOriginator(ActionCase):
     def test_the_action_and_comment_go_to_pm(self):
         approvals_extra.return_to_originator("WA-1", "looks fine to me")
@@ -646,9 +734,10 @@ class TestReturnToOriginator(ActionCase):
         frappe.local.db.get_value.assert_not_called()
 
     def test_an_unknown_action_is_not_found(self):
-        with self.assertRaises(frappe.DoesNotExistError):
+        with self.assertRaises(frappe.PermissionError) as raised:
             approvals_extra.return_to_originator("WA-404")
 
+        self.assertEqual(str(raised.exception), NOT_FOUND)
         self.assert_pm_not_asked()
 
     def test_a_hidden_type_is_refused_before_pm(self):
@@ -657,11 +746,22 @@ class TestReturnToOriginator(ActionCase):
                 self.action_doctypes["WA-1"] = hidden
                 self.pm.hidden_doctypes.return_value = ["Gate Pass"]
 
-                with self.assertRaises(frappe.PermissionError):
+                with self.assertRaises(frappe.PermissionError) as raised:
                     approvals_extra.return_to_originator("WA-1")
 
+                self.assertEqual(str(raised.exception), NOT_FOUND)
                 self.assert_pm_not_asked()
-                self.assertEqual(frappe.local.message_log, [])
+
+    def test_an_approval_the_caller_does_not_hold_open_is_not_found(self):
+        for held, status in ((set(), "Open"), ({"WA-1"}, "Completed")):
+            with self.subTest(held=held, status=status):
+                self.held, self.action_status["WA-1"] = held, status
+
+                with self.assertRaises(frappe.PermissionError) as raised:
+                    approvals_extra.return_to_originator("WA-1")
+
+                self.assertEqual(str(raised.exception), NOT_FOUND)
+                self.assert_pm_not_asked()
 
     def test_pms_refusal_is_raised_unchanged(self):
         refusal = frappe.ValidationError("This is not an ad-hoc action.")
