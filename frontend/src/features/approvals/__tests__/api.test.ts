@@ -56,13 +56,31 @@ describe("approvals api", () => {
 
   it("applyBulk sends the names as a JSON string, as the server reads them", async () => {
     await api.applyBulk("Journal Entry", ["JV-1", "JV-2"], "Approve");
-    expect(apiCall).toHaveBeenCalledWith("POST", `${BASE}.apply_bulk`, {
-      doctype: "Journal Entry",
-      names: '["JV-1","JV-2"]',
-      action: "Approve",
-      comment: "",
-      priority: "Medium",
-    });
+    expect(apiCall).toHaveBeenCalledWith(
+      "POST",
+      `${BASE}.apply_bulk`,
+      {
+        doctype: "Journal Entry",
+        names: '["JV-1","JV-2"]',
+        action: "Approve",
+        comment: "",
+        priority: "Medium",
+      },
+      api.BULK_TIMEOUT_MS,
+    );
+  });
+
+  it("applyBulk waits two minutes, not the usual 20 seconds: the server decides the documents one by one", async () => {
+    await api.applyBulk("Journal Entry", ["JV-1"], "Approve");
+    expect(api.BULK_TIMEOUT_MS).toBe(120_000);
+    expect(apiCall.mock.calls[0][3]).toBe(120_000);
+  });
+
+  it("no other call asks for a longer wait", async () => {
+    await api.inbox();
+    await api.apply("Journal Entry", "JV-1", "Approve");
+    await api.history();
+    for (const call of apiCall.mock.calls) expect(call).toHaveLength(call[0] === "POST" ? 3 : 2);
   });
 
   it("forwardTargets searches by the typed text", async () => {

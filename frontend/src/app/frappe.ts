@@ -211,6 +211,9 @@ function parseServerError(body: unknown): string | undefined {
   return text || undefined;
 }
 
+/** How long a call may take before it is given up (a flaky mobile network). A slow endpoint asks for more. */
+export const DEFAULT_TIMEOUT_MS = 20_000;
+
 /**
  * Call a whitelisted method.
  *
@@ -219,13 +222,16 @@ function parseServerError(body: unknown): string | undefined {
  *   await apiCall("POST", "vansale.api.auth.setup_pin", { pin: "1234" });
  *
  * GET params must be in the URL (fatehhr lesson #13).
+ * `timeoutMs` is how long to wait for the answer; the default suits an
+ * ordinary call, and an endpoint that does a lot of work asks for more.
  */
 export async function apiCall<T>(
   method: "GET" | "POST" | "PUT" | "DELETE",
   path: string,
   body?: unknown,
+  timeoutMs: number = DEFAULT_TIMEOUT_MS,
 ): Promise<T> {
-  return callOnce<T>(method, path, body, false);
+  return callOnce<T>(method, path, body, false, timeoutMs);
 }
 
 async function callOnce<T>(
@@ -233,6 +239,7 @@ async function callOnce<T>(
   path: string,
   body: unknown,
   csrfRetried: boolean,
+  timeoutMs: number,
 ): Promise<T> {
   const hasDotted = /^[a-z_][\w.]+$/i.test(path.split("?")[0]);
   const url = apiUrl(path, hasDotted);
@@ -246,10 +253,10 @@ async function callOnce<T>(
     init.body = JSON.stringify(body);
   }
 
-  // 20s timeout so mobile WebView doesn't hang forever on flaky networks.
+  // 20s timeout (by default) so mobile WebView doesn't hang forever on flaky networks.
   // Without this, slow/failing requests surface as indefinite blank screens.
   const controller = new AbortController();
-  const timeoutId = window.setTimeout(() => controller.abort(), 20_000);
+  const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
   init.signal = controller.signal;
 
   let res: Response;
@@ -279,7 +286,7 @@ async function callOnce<T>(
     (data as { exc_type?: string } | null)?.exc_type === "CSRFTokenError"
   ) {
     resetCsrfToken();
-    return callOnce<T>(method, path, body, true);
+    return callOnce<T>(method, path, body, true, timeoutMs);
   }
 
   if (!res.ok) {

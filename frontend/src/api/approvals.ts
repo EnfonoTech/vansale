@@ -319,6 +319,13 @@ export function apply(
   return apiCall("POST", `${BASE}.apply`, { doctype, name, action, comment, priority });
 }
 
+/**
+ * How long a bulk decision may take. The server decides and commits the
+ * documents one by one (up to 20, one to three seconds each), so the client's
+ * usual 20 s would give up on a request that is still working.
+ */
+export const BULK_TIMEOUT_MS = 120_000;
+
 /** Take `action` on up to 20 documents of one type; each succeeds or fails alone. */
 export function applyBulk(
   doctype: string,
@@ -328,13 +335,18 @@ export function applyBulk(
   priority = "Medium",
 ): Promise<BulkResult> {
   // The server reads `names` as a JSON string.
-  return apiCall("POST", `${BASE}.apply_bulk`, {
-    doctype,
-    names: JSON.stringify(names),
-    action,
-    comment,
-    priority,
-  });
+  return apiCall(
+    "POST",
+    `${BASE}.apply_bulk`,
+    {
+      doctype,
+      names: JSON.stringify(names),
+      action,
+      comment,
+      priority,
+    },
+    BULK_TIMEOUT_MS,
+  );
 }
 
 /** Users the document can be forwarded to (at most 20), narrowed by what was typed. */
