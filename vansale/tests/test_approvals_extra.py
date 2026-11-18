@@ -785,7 +785,7 @@ class TestReturnToOriginator(ActionCase):
 
 
 class FakeFile:
-    """The File document `file_upload.upload` builds: what it was made from, and
+    """The File document `file_upload._save_file` builds: what it was made from, and
     what the real `File` would set when saved."""
 
     def __init__(self, values: dict):
@@ -845,7 +845,7 @@ class AttachCase(ExtraCase):
         self.upload = None
         if self.stub_upload:
             self.upload = self._patch(
-                "vansale.api.file_upload.upload",
+                "vansale.api.file_upload._save_file",
                 return_value={"file_url": "/private/files/scan.pdf", "file_name": "scan.pdf", "is_private": 1},
             )
 
@@ -1003,8 +1003,9 @@ class TestAttach(AttachCase):
 
 
 class TestAttachUsesTheExistingUpload(AttachCase):
-    """The real `file_upload.upload` (it decodes and cleans the name) with the
-    File document stubbed: the endpoint adds the permission check, not a copy of it."""
+    """The real `file_upload._save_file` (it decodes and cleans the name) with
+    the File document stubbed: the endpoint adds the permission check, not a
+    copy of it."""
 
     stub_upload = False
 

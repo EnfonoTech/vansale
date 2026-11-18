@@ -247,7 +247,9 @@ def attach(doctype: str, name: str, filename: str, content_base64: str) -> dict:
     if not (held and frappe.has_permission(doctype, "read", doc=name)):
         frappe.throw(_("You cannot attach files to this document"), frappe.PermissionError)
 
-    saved = file_upload.upload(
+    # `_save_file`, not the `upload` endpoint: that one asks for write
+    # permission, and an approver may hold an approval without it.
+    saved = file_upload._save_file(
         cstr(filename),
         cstr(content_base64),
         attach_to_doctype=doctype,
@@ -255,7 +257,7 @@ def attach(doctype: str, name: str, filename: str, content_base64: str) -> dict:
         is_private=1,
     )
     url = saved["file_url"]
-    # `upload` answers the file's url and name, not the File record's own name
+    # the save answers the file's url and name, not the File record's own name
     file_name = frappe.db.get_value(
         "File",
         {"file_url": url, "attached_to_doctype": doctype, "attached_to_name": name},
