@@ -58,6 +58,9 @@
       "retry": "Try again"
     },
     "offline": {
+      "bannerNone": "You are offline.",
+      "emptyTitle": "No saved list on this phone",
+      "emptyHint": "Open Approvals once while you are online. The list is then saved here for when you are offline.",
       "banner": "You are offline. This is the saved list.",
       "updated": "Last updated {time}",
       "disabled": "Approvals need a connection."

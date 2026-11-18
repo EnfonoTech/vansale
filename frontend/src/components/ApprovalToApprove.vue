@@ -7,8 +7,10 @@
  * search text) and lays it out. The sections keep the order the server sent,
  * which is Permission Manager's own: its categories, urgency first.
  *
- * Offline it shows the saved list with when it was fetched. A failed fetch
- * with a list on screen keeps the list and says so.
+ * Offline it shows the saved list with when it was fetched, and the banner
+ * says why nothing can be decided (approvals need a connection). Offline with
+ * no saved list it says so, instead of a blank screen. A failed fetch with a
+ * list on screen keeps the list and says so.
  *
  * Selection (a long press, or Select): tick documents that can be decided
  * together, then take one action on all of them. `bulkShared` says which
@@ -174,9 +176,13 @@ function categoryName(category: string): string {
 
 <template>
   <div class="to-approve" :class="{ 'has-bar': selecting }">
+    <!-- The reason the buttons are off is said here, where it is seen: a tooltip does not show on a phone. -->
     <div v-if="!online" class="note" data-tone="warning" role="status">
       <Icon name="wifi-off" :size="16" />
-      <span>{{ t("approvalsInbox.offline.banner") }}</span>
+      <span>
+        {{ inbox ? t("approvalsInbox.offline.banner") : t("approvalsInbox.offline.bannerNone") }}
+        {{ t("approvalsInbox.offline.disabled") }}
+      </span>
     </div>
 
     <div v-if="selecting" class="selecting-head">
@@ -236,6 +242,13 @@ function categoryName(category: string): string {
       <div class="skeleton" style="height: 4.25rem" />
       <div class="skeleton" style="height: 4.25rem" />
       <div class="skeleton" style="height: 4.25rem" />
+    </div>
+
+    <!-- Offline, and the phone has no saved copy of the list to show. -->
+    <div v-else-if="!inbox && !online" class="empty">
+      <Icon name="wifi-off" :size="32" class="empty-icon" />
+      <strong>{{ t("approvalsInbox.offline.emptyTitle") }}</strong>
+      <span>{{ t("approvalsInbox.offline.emptyHint") }}</span>
     </div>
 
     <div v-else-if="inbox && everything.length === 0" class="empty">
