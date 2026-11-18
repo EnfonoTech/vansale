@@ -1,0 +1,112 @@
+{
+  "approvalsDetail": {
+    "retry": "Try again",
+    "raisedBy": "Raised by {name}",
+    "facts": "Key facts",
+    "attachments": "Attachments ({count})",
+    "openFull": "Open full document",
+    "readOnly": "You have nothing to decide on this document. This is a read-only view.",
+    "recommend": "Recommend {action}",
+    "priority": {
+      "Low": "Low",
+      "Medium": "Medium",
+      "High": "High",
+      "Critical": "Critical"
+    },
+    "lines": {
+      "title": "Lines ({count})",
+      "more": "1 more line | {count} more lines",
+      "openAll": "Open the full document to see them"
+    },
+    "route": {
+      "title": "Route",
+      "you": "you",
+      "by": "by {name}",
+      "final": "final step",
+      "finished": "This document has finished its route.",
+      "canActNow": "Can act now",
+      "more": "+{count} more",
+      "done": "Done",
+      "current": "Current step",
+      "upcoming": "Upcoming"
+    },
+    "timeline": {
+      "title": "Comments and history",
+      "moved": "Moved from {from} to {to}",
+      "all": "Show all {count}",
+      "less": "Show fewer"
+    },
+    "bar": {
+      "label": "Actions",
+      "forward": "Forward",
+      "offline": "Approvals need a connection. Reconnect to take action."
+    },
+    "banner": {
+      "recommend": "{name} asked for your advice. Your answer goes back to them; the document will not advance.",
+      "recommendAnon": "You were asked for advice. Your answer goes back to the person who asked; the document will not advance.",
+      "waiting": "With {name} for their decision. Nothing to do on your side for now.",
+      "waitingAnon": "With someone else for their decision. Nothing to do on your side for now.",
+      "selfOwned": "You raised this document, so you cannot approve it yourself.",
+      "cannotRead": "You hold an approval on this document, but your account cannot open it. Ask an administrator for access."
+    },
+    "toast": {
+      "done": "Done: {action} on {name}",
+      "forwarded": "Forwarded to {name}. It now shows under Waiting on others.",
+      "recommended": "Your advice was sent",
+      "recommendedTo": "Your advice was sent to {name}"
+    },
+    "errors": {
+      "network": "The connection dropped. Check your signal and try again.",
+      "generic": "Something went wrong. Try again.",
+      "loadFailed": "This document could not be loaded.",
+      "offlineLoad": "Open this document when you are back online. Approvals need a connection."
+    },
+    "sheet": {
+      "confirm": "Confirm {action}",
+      "sendRecommendation": "Send recommendation",
+      "attaching": "Attaching file...",
+      "applying": "Working...",
+      "adviceLabel": "Your advice",
+      "adviceHint": "Optional, but a short reason helps whoever asked.",
+      "reasonLabel": "Reason",
+      "reasonHint": "Required: a returned document needs a reason.",
+      "commentLabel": "Comment",
+      "commentHint": "Required: this action needs a comment.",
+      "noteLabel": "Note",
+      "addNote": "Add a note (optional)",
+      "required": "Required",
+      "attachment": "Attachment",
+      "attachmentHint": "A file is required for this action.",
+      "camera": "Camera",
+      "file": "File",
+      "attached": "attached",
+      "removeFile": "Remove file",
+      "priority": "Priority",
+      "needsConnection": "Needs a connection. Approvals are never queued offline.",
+      "offline": "You are offline. Reconnect to confirm.",
+      "cancel": "Cancel"
+    },
+    "attach": {
+      "type": "This file type cannot be attached. Use a photo, PDF or office file.",
+      "empty": "The file is empty.",
+      "tooLarge": "The file is too large (limit 8 MB)."
+    },
+    "forward": {
+      "title": "Forward",
+      "intro": "Ask another person for their input on",
+      "search": "Search people",
+      "people": "People who can read this document",
+      "chosen": "Selected: {name}",
+      "noMatch": "No one matching \"{text}\" can be asked. Only people who can read this document are listed.",
+      "nobody": "Nobody who can read this document was found. Forwarding does not share it, so a person who cannot open it could not answer.",
+      "note": "Note (optional)",
+      "returnToMe": "Return to me after their input",
+      "returnOn": "Their answer comes back to you and you decide.",
+      "returnOff": "They can approve or reject it themselves.",
+      "sending": "Forwarding...",
+      "forwardTo": "Forward to {name}",
+      "pick": "Choose a person",
+      "offline": "You are offline. Reconnect to search for people."
+    }
+  }
+}
