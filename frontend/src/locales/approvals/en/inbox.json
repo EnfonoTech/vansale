@@ -1,0 +1,98 @@
+{
+  "approvalsInbox": {
+    "title": "Approvals",
+    "detailTitle": "Approval",
+    "nav": {
+      "approvals": "Approvals"
+    },
+    "tabs": {
+      "label": "Approval lists",
+      "toApprove": "To approve",
+      "myRequests": "My requests",
+      "sentBack": "Sent back",
+      "history": "History"
+    },
+    "stats": {
+      "needsYou": "need you",
+      "high": "high priority",
+      "overdue": "over 30 days"
+    },
+    "areas": {
+      "label": "Filter by area",
+      "All": "All",
+      "Accounts": "Accounts",
+      "Purchase": "Purchase",
+      "Sales": "Sales",
+      "Masters": "Masters"
+    },
+    "search": "Search document, party or type",
+    "sections": {
+      "needsYou": "Needs you",
+      "waiting": "Waiting on others",
+      "uncategorised": "Other"
+    },
+    "card": {
+      "forwardedBy": "Forwarded by {name}",
+      "with": "With {name}",
+      "select": "Select {name}",
+      "open": "Open {name}"
+    },
+    "age": {
+      "today": "Today",
+      "one": "1 day",
+      "many": "{count} days"
+    },
+    "priority": {
+      "Low": "Low",
+      "Medium": "Medium",
+      "High": "High",
+      "Critical": "Critical"
+    },
+    "empty": {
+      "title": "Nothing is waiting for you",
+      "hint": "New approvals appear here as they reach you.",
+      "noMatch": "No matches",
+      "noMatchHint": "Nothing found for this search or area."
+    },
+    "error": {
+      "load": "Could not load approvals",
+      "retry": "Try again"
+    },
+    "offline": {
+      "banner": "You are offline. This is the saved list.",
+      "updated": "Last updated {time}",
+      "disabled": "Approvals need a connection."
+    },
+    "unavailable": "Approvals are not available on this site.",
+    "refresh": "Refresh",
+    "pull": {
+      "pull": "Pull to refresh",
+      "release": "Release to refresh"
+    },
+    "selection": {
+      "select": "Select",
+      "cancel": "Cancel",
+      "count": "{count} selected",
+      "action": "{action} {count}",
+      "limit": "Up to {max} documents at once.",
+      "noShared": "No action is shared with the selected documents.",
+      "reviewOnly": "Needs a closer look: open it to decide.",
+      "hint": "Press and hold a document to select it.",
+      "bar": "Decide the selected documents"
+    },
+    "home": {
+      "title": "Approvals",
+      "waiting": "{count} waiting for you",
+      "none": "Nothing waiting for you"
+    },
+    "more": {
+      "label": "Approvals",
+      "sub": "Documents waiting for your decision"
+    }
+  },
+  "approvals": {
+    "bulk": {
+      "mixedTypes": "Only documents of the same type can be decided together."
+    }
+  }
+}
