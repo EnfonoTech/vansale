@@ -202,6 +202,7 @@ class TestPmNamespace(unittest.TestCase):
             get_sent_back_documents=sentinel.sent_back,
             get_my_approval_history=sentinel.history,
             transaction_label=sentinel.label,
+            _hidden_doctypes=sentinel.hidden,
         )
         pm_workflow = _module(
             "workflow",
@@ -243,6 +244,7 @@ class TestPmNamespace(unittest.TestCase):
                 "get_my_approval_history": sentinel.history,
                 "can_act_on": sentinel.can_act,
                 "get_workflow": sentinel.workflow,
+                "hidden_doctypes": sentinel.hidden,
                 "transaction_label": sentinel.label,
             },
         )
@@ -960,9 +962,10 @@ class DetailCase(ApiCase):
         super().setUp()
         frappe.local.session.user = ME
         self.workflow = types.SimpleNamespace(
-            name="SI Approval", workflow_state_field="workflow_state", hide_from_approval_inbox=0
+            name="SI Approval", workflow_state_field="workflow_state"
         )
         self.pm.get_workflow.return_value = self.workflow
+        self.pm.hidden_doctypes.return_value = []
         self.pm.get_open_return_adhoc_action.return_value = None
         self.pm.get_transitions.return_value = [
             transition("Approve", priority="High"),
@@ -1584,8 +1587,10 @@ class TestReadCheckOnApply(DetailCase):
 
 
 class TestHiddenTypesAreRefused(DetailCase):
-    """Stock Entry and any workflow flagged `hide_from_approval_inbox` never
-    appear here: every endpoint refuses them before reading or applying."""
+    """Stock Entry and every type PM hides from its inbox (`_hidden_doctypes()`:
+    any workflow of the type flagged `hide_from_approval_inbox`, active or
+    not) never appear here: every endpoint refuses them before reading or
+    applying."""
 
     def setUp(self):
         super().setUp()
@@ -1596,6 +1601,7 @@ class TestHiddenTypesAreRefused(DetailCase):
         self.get_doc.assert_not_called()
         self.assertEqual(self.get_all.calls, [])
         self.assertEqual(self.get_list.calls, [])
+        self.pm.get_workflow.assert_not_called()
         self.pm.get_transitions.assert_not_called()
         self.pm.apply_workflow.assert_not_called()
         self.pm.get_document_lifecycle.assert_not_called()
@@ -1617,27 +1623,71 @@ class TestHiddenTypesAreRefused(DetailCase):
                 with self.assertRaises(frappe.PermissionError):
                     call()
                 self._assert_nothing_happened()
-                self.pm.get_workflow.assert_not_called()
 
-    def test_a_workflow_hidden_from_the_inbox_is_refused_by_every_endpoint(self):
-        self.workflow.hide_from_approval_inbox = 1
+    def test_a_type_pm_hides_is_refused_even_when_its_governing_workflow_is_not_flagged(self):
+        # Two workflows for Sales Invoice: the one PM would pick for SINV-1 is
+        # not flagged; another one (inactive, or for another company) is. PM
+        # hides the type, so the approvals do too.
+        self.pm.hidden_doctypes.return_value = ["Sales Invoice", "Gate Pass"]
+        self.workflow.hide_from_approval_inbox = 0
 
         for endpoint, call in self._endpoints("Sales Invoice", "SINV-1").items():
             with self.subTest(endpoint=endpoint):
                 with self.assertRaises(frappe.PermissionError):
                     call()
                 self._assert_nothing_happened()
-
-        self.pm.get_workflow.assert_called_with("Sales Invoice", throw=False)
+        self.pm.hidden_doctypes.assert_called_with()
 
     def test_an_ordinary_type_is_unaffected(self):
+        self.pm.hidden_doctypes.return_value = ["Gate Pass"]
+
         self.assertEqual(approvals.detail("Sales Invoice", "SINV-1")["docname"], "SINV-1")
         self.assertTrue(approvals.apply("Sales Invoice", "SINV-1", "Approve")["ok"])
         self.assertEqual(
             approvals.apply_bulk("Sales Invoice", '["SINV-1"]', "Approve")["ok_count"], 1
         )
-        self.pm.get_workflow.assert_called_with("Sales Invoice", throw=False)
+        self.pm.get_workflow.assert_called_with("Sales Invoice", docname="SINV-1", doc=self.doc, throw=False)
 
+
+class TestTheWorkflowFollowsTheDocument(DetailCase):
+    """A type can have several workflows (a standard one and an Oman one, say).
+    PM picks the one that governs a document from the document itself, so the
+    lookup is given the document, and its transitions and state field are used."""
+
+    def setUp(self):
+        super().setUp()
+        self.oman = types.SimpleNamespace(name="SI Oman", workflow_state_field="custom_oman_status")
+        self.doc._fields.update(company="Steel Oman", custom_oman_status="Pending GM")
+
+        def get_workflow(doctype, docname=None, doc=None, throw=True):
+            if doc is not None and doc.get("company") == "Steel Oman":
+                return self.oman
+            return self.workflow  # the viewer's default company
+
+        self.pm.get_workflow.side_effect = get_workflow
+        self.pm.get_open_return_adhoc_action.return_value = "WA-2"
+        self.tables["PM Workflow Transition"] = [transition("Approve", state="Pending GM")]
+
+    def _db_value(self, doctype, name, fieldname, *args, **kwargs):
+        if (doctype, name, fieldname) == ("Sales Invoice", "SINV-1", "custom_oman_status"):
+            return "Pending GM"
+        raise AssertionError(f"unexpected db.get_value({doctype!r}, {name!r}, {fieldname!r})")
+
+    def test_apply_reads_the_documents_own_workflow(self):
+        result = approvals.apply("Sales Invoice", "SINV-1", "Approve")
+
+        self.assertEqual(result, {"ok": True, "new_state": "Pending GM", "recommended": True})
+        self.pm.get_workflow.assert_called_with("Sales Invoice", docname="SINV-1", doc=self.doc, throw=False)
+        self.pm.get_open_return_adhoc_action.assert_called_once_with(self.doc, "Pending GM", ME)
+        (_doctype, kwargs), = [c for c in self.get_all.calls if c[0] == "PM Workflow Transition"]
+        self.assertEqual(kwargs["filters"], {"parent": "SI Oman", "state": "Pending GM"})
+
+    def test_detail_shows_the_documents_own_state_and_actions(self):
+        result = approvals.detail("Sales Invoice", "SINV-1")
+
+        self.assertEqual(result["state"], "Pending GM")
+        self.assertEqual(result["actions"], [spec("Approve", recommend_only=True)])
+        self.pm.get_workflow.assert_called_with("Sales Invoice", docname="SINV-1", doc=self.doc, throw=False)
 
 if __name__ == "__main__":
     unittest.main()
