@@ -363,21 +363,54 @@ class TestForwardTargetsRefusals(ForwardTargetsCase):
 # ─── forward and return_to_originator ─────────────────────────────────────────
 
 
+def user_record(user: str, **overrides) -> dict:
+    """The little of a User that `forward` reads: an enabled system user."""
+    return {"name": user, "enabled": 1, "user_type": "System User", **overrides}
+
+
 class ActionCase(ExtraCase):
-    """WA-1 is an action on a Sales Invoice (the one read the code makes of it
-    is its document type, to refuse a hidden one)."""
+    """WA-1 is an action on Sales Invoice SINV-1 (the document type is read to
+    refuse a hidden one, the document to check the recipient may read it).
+    Omar and Fatima are enabled system users, sara is the caller; `readers`
+    says who may read the document (None: everybody)."""
 
     def setUp(self):
         super().setUp()
         self.action_doctypes = {"WA-1": "Sales Invoice"}
+        self.action_docnames = {"WA-1": "SINV-1"}
+        self.users = {user: user_record(user) for user in (ME, OMAR, FATIMA)}
+        self.readers: set[str] | None = None
+        self.has_permission = self._patch(
+            "frappe.has_permission",
+            side_effect=lambda doctype, ptype="read", doc=None, user=None, **kw: (
+                self.readers is None or user in self.readers
+            ),
+        )
         frappe.local.db.get_value.side_effect = self._db_value
         self.pm.forward_workflow_action.return_value = {"adhoc_action": "WA-9", "return_to_originator": 1}
         self.pm.return_adhoc_to_originator.return_value = None
 
     def _db_value(self, doctype, name, fieldname, *args, **kwargs):
-        if (doctype, fieldname) == (PM_ACTION, "reference_doctype"):
-            return self.action_doctypes.get(name)
+        if (doctype, fieldname) == (PM_ACTION, ["reference_doctype", "reference_name"]):
+            self.assertTrue(kwargs.get("as_dict"))
+            if name not in self.action_doctypes:
+                return None
+            return frappe._dict(
+                reference_doctype=self.action_doctypes[name],
+                reference_name=self.action_docnames.get(name, "DOC-1"),
+            )
+        if (doctype, fieldname) == ("User", ["name", "enabled", "user_type"]):
+            self.assertTrue(kwargs.get("as_dict"))
+            # the database matches a user id without regard to case, and answers its own
+            matches = [row for user, row in self.users.items() if user.lower() == name.lower()]
+            return frappe._dict(matches[0]) if matches else None
         raise AssertionError(f"unexpected db.get_value({doctype!r}, {name!r}, {fieldname!r})")
+
+    def assert_only_the_action_was_read(self):
+        """A hidden type is refused after reading the action and before the
+        recipient or the document are looked at."""
+        self.assertEqual([c.args[0] for c in frappe.local.db.get_value.call_args_list], [PM_ACTION])
+        self.has_permission.assert_not_called()
 
     def assert_pm_not_asked(self):
         self.pm.forward_workflow_action.assert_not_called()
@@ -444,6 +477,7 @@ class TestForward(ActionCase):
         self.assert_pm_not_asked()
         self.assertEqual(frappe.local.message_log, [])
         self.assertEqual(self.reader.calls, [])
+        self.assert_only_the_action_was_read()
 
     def test_an_action_on_a_type_pm_hides_is_refused_before_pm(self):
         self.pm.hidden_doctypes.return_value = ["Sales Invoice"]
@@ -453,6 +487,7 @@ class TestForward(ActionCase):
 
         self.assert_pm_not_asked()
         self.assertEqual(frappe.local.message_log, [])
+        self.assert_only_the_action_was_read()
 
     def test_pms_refusal_is_raised_unchanged(self):
         refusal = frappe.PermissionError("You can only forward actions assigned to you.")
@@ -472,6 +507,113 @@ class TestForward(ActionCase):
         self.assertIn("Approvals are not available on this site", str(raised.exception))
         self.assert_pm_not_asked()
         frappe.local.db.get_value.assert_not_called()
+
+
+class TestForwardRecipient(ActionCase):
+    """PM only checks that the user exists, so `forward` checks the recipient
+    itself, before PM marks the approval forwarded and mails the other person:
+    not the caller, enabled, a system user, and able to read the document (a
+    recipient who cannot read it could only see a bare record and could not
+    act on it)."""
+
+    def refused(self, to_user: str):
+        with self.assertRaises(frappe.ValidationError) as raised:
+            approvals_extra.forward("WA-1", to_user, "please check", 1)
+        self.assert_pm_not_asked()
+        return raised.exception
+
+    def test_the_caller_is_refused_before_the_document_is_even_checked(self):
+        self.refused(ME)
+
+        self.has_permission.assert_not_called()
+
+    def test_the_caller_under_another_spelling_is_refused(self):
+        # the database matches a user id without regard to case
+        self.refused(ME.upper())
+
+    def test_a_disabled_user_is_refused(self):
+        self.users[OMAR] = user_record(OMAR, enabled=0)
+
+        self.refused(OMAR)
+
+        self.has_permission.assert_not_called()
+
+    def test_a_website_user_is_refused(self):
+        self.users[OMAR] = user_record(OMAR, user_type="Website User")
+
+        self.refused(OMAR)
+
+        self.has_permission.assert_not_called()
+
+    def test_a_user_that_does_not_exist_is_refused(self):
+        self.refused("nobody@example.com")
+
+        self.has_permission.assert_not_called()
+
+    def test_guest_and_administrator_are_refused_even_as_enabled_system_users(self):
+        # the picker never offers them either
+        for user in ("Guest", "Administrator"):
+            with self.subTest(user=user):
+                self.users[user] = user_record(user)
+
+                self.refused(user)
+
+        self.has_permission.assert_not_called()
+
+    def test_a_user_who_cannot_read_the_document_is_refused(self):
+        self.readers = {FATIMA}
+
+        self.refused(OMAR)
+
+        # judged as that user, on the document the approval is about
+        self.has_permission.assert_called_once_with("Sales Invoice", "read", doc="SINV-1", user=OMAR)
+
+    def test_the_document_checked_is_the_one_the_approval_is_about(self):
+        self.action_doctypes["WA-2"] = "Purchase Invoice"
+        self.action_docnames["WA-2"] = "PINV-9"
+        self.readers = {OMAR}
+
+        approvals_extra.forward("WA-2", OMAR)
+
+        self.has_permission.assert_called_once_with("Purchase Invoice", "read", doc="PINV-9", user=OMAR)
+
+    def test_an_enabled_system_user_who_can_read_it_gets_pm_with_the_arguments_unchanged(self):
+        self.readers = {OMAR}
+
+        result = approvals_extra.forward("WA-1", OMAR, "please check", 1)
+
+        self.pm.forward_workflow_action.assert_called_once_with("WA-1", OMAR, "please check", 1)
+        self.assertEqual(result, {"adhoc_action": "WA-9", "return_to_originator": 1})
+        self.has_permission.assert_called_once_with("Sales Invoice", "read", doc="SINV-1", user=OMAR)
+
+    def test_pm_and_the_read_check_get_the_users_own_id_not_the_spelling_typed(self):
+        approvals_extra.forward("WA-1", OMAR.upper(), "", 0)
+
+        self.pm.forward_workflow_action.assert_called_once_with("WA-1", OMAR, "", 0)
+        self.assertEqual(self.has_permission.call_args.kwargs["user"], OMAR)
+
+    def test_the_refusals_are_translated_and_never_echo_what_was_typed(self):
+        self._patch("vansale.steelforce.approvals_extra._", side_effect=lambda text: f"ar:{text}")
+        self.readers = set()
+        typed = "<img src=x onerror=alert(1)>@example.com"
+        self.users[typed] = user_record(typed)
+
+        for to_user in (ME, "nobody@example.com", typed, OMAR):
+            with self.subTest(to_user=to_user):
+                error = self.refused(to_user)
+
+                self.assertTrue(str(error).startswith("ar:"), str(error))
+                self.assertNotIn("onerror", str(error))
+                self.assertNotIn(to_user.split("@")[0], str(error))
+
+    def test_the_recipient_is_checked_after_the_hidden_type_refusal_not_before(self):
+        self.action_doctypes["WA-1"] = "Stock Entry"
+
+        with self.assertRaises(frappe.PermissionError):
+            approvals_extra.forward("WA-1", ME)
+
+        self.assert_pm_not_asked()
+        self.assert_only_the_action_was_read()
 
 
 class TestReturnToOriginator(ActionCase):

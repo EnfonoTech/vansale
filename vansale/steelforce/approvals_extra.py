@@ -147,14 +147,42 @@ def forward(action_id: str, to_user: str, comment: str = "", return_to_originato
     it is still open, makes the other person's approval, and does not share the
     document). `return_to_originator` asks the other person for advice only: the
     approval comes back to the caller. Returns PM's answer, `{"adhoc_action",
-    "return_to_originator"}`. Approvals on Stock Entry or a type PM hides are
-    refused."""
+    "return_to_originator"}`. `to_user` must be an enabled system user other
+    than the caller who may read the document, as the people offered by
+    `forward_targets` are; anyone else is refused before PM is asked. Approvals
+    on Stock Entry or a type PM hides are refused."""
     approvals._require_available()
     action_id, to_user, comment = cstr(action_id).strip(), cstr(to_user).strip(), cstr(comment)
     if not to_user:
         frappe.throw(_("Choose who to forward this to"))
-    _refuse_hidden_action(action_id)
-    return approvals._pm().forward_workflow_action(action_id, to_user, comment, cint(return_to_originator))
+    doctype, docname = _refuse_hidden_action(action_id)
+    recipient = _forward_recipient(to_user, doctype, docname)
+    return approvals._pm().forward_workflow_action(action_id, recipient, comment, cint(return_to_originator))
+
+
+def _forward_recipient(to_user: str, doctype: str, docname: str) -> str:
+    """The user id to forward the approval on `doctype` `docname` to, after the
+    checks PM leaves out (it only checks that the user exists): an enabled
+    system user (so not a website user, Guest or Administrator, none of whom
+    the picker offers), not the caller, and one who may read the document, since
+    a forward does not share it and someone who cannot read it could not act on
+    it. The user id is the record's own, as the database matches an id without
+    regard to case. The messages carry nothing the caller typed."""
+    record = frappe.db.get_value("User", to_user, ["name", "enabled", "user_type"], as_dict=True)
+    if (
+        not record
+        or not cint(record.get("enabled"))
+        or record.get("user_type") != "System User"
+        or record.get("name") in STANDARD_USERS
+    ):
+        frappe.throw(_("Choose an active system user to forward to"))
+
+    user = record.get("name")
+    if user == frappe.session.user:
+        frappe.throw(_("You cannot forward an approval to yourself"))
+    if not frappe.has_permission(doctype, "read", doc=docname, user=user):
+        frappe.throw(_("That person cannot read this document, so it cannot be forwarded to them"))
+    return user
 
 
 @frappe.whitelist(methods=["POST"])
@@ -170,15 +198,19 @@ def return_to_originator(action_id: str, comment: str = "") -> dict:
     return {"ok": True, **(answer if isinstance(answer, dict) else {})}
 
 
-def _refuse_hidden_action(action_id: str) -> None:
+def _refuse_hidden_action(action_id: str) -> tuple[str, str]:
     """Refuse an approval that is not there, or whose document type the
-    approvals never handle, before PM is asked anything."""
+    approvals never handle, before PM is asked anything; otherwise answer the
+    `(doctype, name)` of the document it is about."""
     if not action_id:
         frappe.throw(_("Choose an approval first"))
-    doctype = frappe.db.get_value(PM_ACTION, action_id, "reference_doctype")
-    if not doctype:
+    action = frappe.db.get_value(
+        PM_ACTION, action_id, ["reference_doctype", "reference_name"], as_dict=True
+    )
+    if not (action and action.get("reference_doctype")):
         frappe.throw(_("Approval not found"), frappe.DoesNotExistError)
-    approvals._refuse_if_hidden(doctype)
+    approvals._refuse_if_hidden(action.get("reference_doctype"))
+    return action.get("reference_doctype"), action.get("reference_name")
 
 
 # ─── Attach ───────────────────────────────────────────────────────────────────
