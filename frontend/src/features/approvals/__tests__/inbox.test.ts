@@ -5,6 +5,10 @@ import {
   NO_SHARED_REASON,
   REVIEW_ONLY_REASON,
   actionTone,
+  ageText,
+  formatAmount,
+  formatStamp,
+  approvalsOnly,
   areaCounts,
   blockedReason,
   filterSections,
@@ -143,5 +147,57 @@ describe("parseServerTime", () => {
     expect(parseServerTime("")).toBeNull();
     expect(parseServerTime("not a date")).toBeNull();
     expect(parseServerTime(undefined)).toBeNull();
+  });
+});
+
+describe("approvalsOnly", () => {
+  it("is for a signed-in user whose settings say no van", () => {
+    expect(approvalsOnly({ defaults: { is_van_user: false }, isVanUser: false })).toBe(true);
+  });
+
+  it("is not for a van user", () => {
+    expect(approvalsOnly({ defaults: { is_van_user: true }, isVanUser: true })).toBe(false);
+  });
+
+  it("waits for the settings: unknown is not approvals-only", () => {
+    expect(approvalsOnly({ defaults: null, isVanUser: false })).toBe(false);
+  });
+});
+
+describe("ageText", () => {
+  const t = (key: string, named?: Record<string, unknown>) => (named ? `${key}:${named.count}` : key);
+
+  it("says today for no days, and for rubbish", () => {
+    expect(ageText(0, t)).toBe("approvalsInbox.age.today");
+    expect(ageText(-2, t)).toBe("approvalsInbox.age.today");
+    expect(ageText(Number.NaN, t)).toBe("approvalsInbox.age.today");
+  });
+
+  it("says one day for one", () => {
+    expect(ageText(1, t)).toBe("approvalsInbox.age.one");
+  });
+
+  it("passes the count for more", () => {
+    expect(ageText(34, t)).toBe("approvalsInbox.age.many:34");
+  });
+});
+
+describe("formatAmount", () => {
+  it("keeps the company's decimals, three for BHD and two for SAR", () => {
+    expect(formatAmount(749.82, 3, "en-US")).toBe("749.820");
+    expect(formatAmount(1250.5, 2, "en-US")).toBe("1,250.50");
+  });
+
+  it("shows zero for a number it cannot read", () => {
+    expect(formatAmount(Number.NaN, 3, "en-US")).toBe("0.000");
+  });
+});
+
+describe("formatStamp", () => {
+  it("writes the date and the time", () => {
+    const text = formatStamp(new Date(2026, 10, 19, 11, 30), "en-US");
+    expect(text).toContain("Nov");
+    expect(text).toContain("2026");
+    expect(text).toMatch(/11:30/);
   });
 });

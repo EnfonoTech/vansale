@@ -86,3 +86,34 @@ export function parseServerTime(stamp: string | null | undefined): Date | null {
   const date = new Date(stamp);
   return Number.isNaN(date.getTime()) ? null : date;
 }
+
+/**
+ * The user has no van setup, so the app is Approvals and More only and no van
+ * endpoint is called for them. Unknown until the user's settings have loaded
+ * (`defaults` is null): nobody is moved by a guess.
+ */
+export function approvalsOnly(session: { defaults: unknown; isVanUser: boolean }): boolean {
+  return session.defaults != null && !session.isVanUser;
+}
+
+/** The text function the screens pass in (`t` from vue-i18n), so wording stays in the language files. */
+export type Translate = (key: string, named?: Record<string, unknown>) => string;
+
+/** How long an item has waited: "Today", "1 day", "7 days", in the user's language. */
+export function ageText(days: number, t: Translate): string {
+  if (!(days > 0)) return t("approvalsInbox.age.today");
+  if (days === 1) return t("approvalsInbox.age.one");
+  return t("approvalsInbox.age.many", { count: days });
+}
+
+/** An amount with the company's decimals (BHD 3, SAR 2), grouped the way the phone's language groups digits. */
+export function formatAmount(value: number, precision: number, locale?: string): string {
+  return new Intl.NumberFormat(locale, { minimumFractionDigits: precision, maximumFractionDigits: precision }).format(
+    Number(value) || 0,
+  );
+}
+
+/** A moment in the phone's clock and the app's language: "19 Nov 2026, 11:30". */
+export function formatStamp(when: Date, locale?: string): string {
+  return new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeStyle: "short" }).format(when);
+}
