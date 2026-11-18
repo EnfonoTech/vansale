@@ -1,7 +1,10 @@
 <script setup lang="ts">
 import { computed } from "vue";
+import { useI18n } from "vue-i18n";
 import { useRouter } from "vue-router";
+import { approvalsOnly } from "@/features/approvals/inbox";
 import { useSessionStore } from "@/stores/session";
+import { useApprovalsStore } from "@/stores/approvals";
 import { logout } from "@/api/auth";
 import { forgetPin } from "@/app/pin-offline";
 import { useSyncStore } from "@/stores/sync";
@@ -12,6 +15,8 @@ import SarSymbol from "@/components/SarSymbol.vue";
 
 const router = useRouter();
 const session = useSessionStore();
+const approvals = useApprovalsStore();
+const { t } = useI18n();
 const sync = useSyncStore();
 const confirm = useConfirmStore();
 const appVersion = __APP_VERSION__;
@@ -55,6 +60,7 @@ async function onChangeSite() {
   try {
     await logout();
   } finally {
+    approvals.reset();
     session.logout();
     await clearSiteUrl();
     await router.replace({ name: "setup" });
@@ -87,11 +93,11 @@ async function onLogout() {
   }
   forgetPin();
   try { await logout(); }
-  finally { session.logout(); await router.replace({ name: "login" }); }
+  finally { approvals.reset(); session.logout(); await router.replace({ name: "login" }); }
 }
 
 interface Link {
-  icon: "customer" | "user" | "bag" | "stock" | "sync" | "refresh" | "truck" | "invoice" | "receipt" | "plus" | "payment";
+  icon: "customer" | "user" | "bag" | "stock" | "sync" | "refresh" | "truck" | "invoice" | "receipt" | "plus" | "payment" | "approval";
   label: string;
   sub?: string;
   to: string;
@@ -99,7 +105,24 @@ interface Link {
   badge?: number | null;
 }
 
+/** The Approvals shortcut, with how many wait; none on a site without approvals. */
+const approvalsRow = computed<Link | null>(() =>
+  session.approvalsEnabled
+    ? {
+        icon: "approval",
+        label: t("approvalsInbox.more.label"),
+        sub: t("approvalsInbox.more.sub"),
+        to: "approvals",
+        tone: "warning",
+        badge: approvals.badge > 0 ? approvals.badge : null,
+      }
+    : null,
+);
+
 const links = computed<Link[]>(() => {
+  // No van setup: only what such a user can use. The van shortcuts open
+  // screens that read van endpoints.
+  if (approvalsOnly(session)) return approvalsRow.value ? [approvalsRow.value] : [];
   const rows: Link[] = [
     { icon: "plus", label: "New invoice", sub: "Start a sale", to: "invoice-new", tone: "primary" },
     { icon: "user", label: "Leads", sub: "Prospects to follow up", to: "leads" },
@@ -110,6 +133,8 @@ const links = computed<Link[]>(() => {
     { icon: "receipt", label: "Returns", sub: "Credit notes against invoices", to: "returns", tone: "warning" },
     { icon: "customer", label: "Customers", sub: "Browse & create", to: "customers" },
   ];
+  // Right after "New invoice": the second thing a van user who also approves reaches for.
+  if (approvalsRow.value) rows.splice(1, 0, approvalsRow.value);
   // When route planning is off, Van Stock owns the fourth nav tab, so
   // repeating it here would be dead weight. When it is on, Van Stock has no
   // tab of its own and this is its only entry point.
@@ -136,7 +161,7 @@ const links = computed<Link[]>(() => {
       <div class="identity">
         <strong class="truncate">{{ session.fullName || session.email }}</strong>
         <span class="muted xsmall truncate">{{ session.email }}</span>
-        <div v-if="session.defaults" class="van-chip">
+        <div v-if="session.defaults && !approvalsOnly(session)" class="van-chip">
           <Icon name="truck" :size="14" />
           <span>{{ session.defaults.van_code ?? "—" }}</span>
           <span v-if="session.defaults.default_warehouse" class="dot">·</span>
@@ -145,7 +170,7 @@ const links = computed<Link[]>(() => {
       </div>
     </section>
 
-    <section class="card stack">
+    <section v-if="links.length" class="card stack">
       <h3 class="section-h">Shortcuts</h3>
       <ul class="link-list">
         <li

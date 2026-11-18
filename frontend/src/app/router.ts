@@ -16,10 +16,12 @@
  * Guards:
  *   - Unauthenticated → /login
  *   - Authenticated but stale PIN → /pin (unlock mode)
+ *   - Signed in without a van setup → Home is /approvals (no van screen, no van endpoint)
  */
 import { createRouter, createWebHashHistory, createWebHistory } from "vue-router";
 import type { RouteRecordRaw } from "vue-router";
 import { useSessionStore } from "@/stores/session";
+import { approvalsOnly } from "@/features/approvals/inbox";
 import { isNative, needsSiteSetup } from "./platform";
 
 const WEB_BASE = import.meta.env.DEV ? "/" : "/vansale/";
@@ -261,6 +263,19 @@ const routes: RouteRecordRaw[] = [
     props: true,
   },
   {
+    path: "/approvals",
+    name: "approvals",
+    component: () => import("@/views/ApprovalsView.vue"),
+    meta: { requiresAuth: true, requiresPin: true },
+  },
+  {
+    path: "/approvals/:doctype/:name",
+    name: "approval-detail",
+    component: () => import("@/views/ApprovalDetailView.vue"),
+    meta: { requiresAuth: true, requiresPin: true },
+    props: (route) => ({ doctype: String(route.params.doctype), name: String(route.params.name) }),
+  },
+  {
     path: "/more",
     name: "more",
     component: () => import("@/views/MoreView.vue"),
@@ -307,6 +322,12 @@ router.beforeEach((to) => {
   // history entry cannot resurrect a hidden module.
   if (to.name === "route-today" && session.defaults && !session.routeEnabled) {
     return { name: "dashboard", replace: true };
+  }
+  // A user with no van setup has no Home to show: it is a van screen and
+  // reads van endpoints. Their app starts at Approvals. Decided only once the
+  // user's settings are known, so a van user is never sent away by a guess.
+  if (to.name === "dashboard" && approvalsOnly(session)) {
+    return { name: "approvals", replace: true };
   }
   return true;
 });

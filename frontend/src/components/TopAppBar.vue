@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from "vue";
+import { useI18n } from "vue-i18n";
 import { useRoute, useRouter } from "vue-router";
 import { useOnline } from "@/app/online";
 import { useSessionStore } from "@/stores/session";
@@ -11,6 +12,7 @@ const router = useRouter();
 const session = useSessionStore();
 const sync = useSyncStore();
 const online = useOnline();
+const { t } = useI18n();
 
 const TITLES: Record<string, string> = {
   dashboard: "Home",
@@ -46,6 +48,12 @@ const TITLES: Record<string, string> = {
   "sync-errors": "Sync errors",
   more: "More",
   "print-view": "Print",
+};
+
+/** Screens whose title is translated (the language files), so it is not in `TITLES`. */
+const TRANSLATED_TITLES: Record<string, string> = {
+  approvals: "approvalsInbox.title",
+  "approval-detail": "approvalsInbox.detailTitle",
 };
 
 /**
@@ -117,7 +125,10 @@ const PARENTS: Record<string, (r: RouteLike) => RouteTarget> = {
   },
 };
 
-const title = computed(() => TITLES[String(route.name ?? "")] ?? "Van Sale");
+const title = computed(() => {
+  const name = String(route.name ?? "");
+  return TRANSLATED_TITLES[name] ? t(TRANSLATED_TITLES[name]) : (TITLES[name] ?? "Van Sale");
+});
 
 const subtitle = computed(() => {
   if (!session.defaults) return "";
@@ -146,6 +157,7 @@ const showBack = computed(() => {
     "payment-new",
     "sync-errors",
     "print-view",
+    "approval-detail",
   ].includes(r);
 });
 
@@ -163,6 +175,13 @@ const syncTone = computed(() => {
 
 function onBack() {
   const rn = String(route.name ?? "");
+  // A detail opened from the inbox goes back to it (and its tab); one opened
+  // from a link, with nothing behind it, goes to the inbox.
+  if (rn === "approval-detail") {
+    if (window.history.state?.back) router.back();
+    else void router.push({ name: "approvals" });
+    return;
+  }
   const parent = PARENTS[rn];
   if (parent) {
     void router.push(parent({ name: rn, params: route.params as Record<string, unknown> }));
