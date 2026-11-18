@@ -264,6 +264,18 @@ export interface SentBackRow {
   reason: string;
 }
 
+/**
+ * The Sent back tab's answer. `unavailable` is true when Permission Manager
+ * could not list the user's returned documents (it refuses a user who cannot
+ * read one of the types involved): `items` is then empty and the tab explains
+ * why instead of claiming nothing was sent back. Absent on a server older
+ * than this field: read it as false.
+ */
+export interface SentBackResult {
+  items: SentBackRow[];
+  unavailable?: boolean;
+}
+
 /** A decision the user took (Permission Manager's row). */
 export interface HistoryRow {
   name: string;
@@ -418,7 +430,7 @@ export function myRequests(): Promise<{ items: MyRequestRow[] }> {
   return apiCall("GET", `${EXTRA}.my_requests`);
 }
 
-export function sentBack(): Promise<{ items: SentBackRow[] }> {
+export function sentBack(): Promise<SentBackResult> {
   return apiCall("GET", `${EXTRA}.sent_back`);
 }
 

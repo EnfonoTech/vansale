@@ -53,6 +53,8 @@ interface State {
   /** My requests, Sent back and History: filled by their tabs. */
   mine: MyRequestRow[];
   sentBack: SentBackRow[];
+  /** The server could not list the user's returned documents: the tab says so instead of "nothing". */
+  sentBackUnavailable: boolean;
   history: HistoryRow[];
   /** Loading and error of each list tab (kept apart from the inbox's). */
   lists: Record<ListName, ListStatus>;
@@ -74,6 +76,7 @@ function blank(): State {
     counts: null,
     mine: [],
     sentBack: [],
+    sentBackUnavailable: false,
     history: [],
     lists: { mine: blankList(), sentBack: blankList(), history: blankList() },
     loading: false,
@@ -256,6 +259,7 @@ export const useApprovalsStore = defineStore("approvals", {
     loadSentBack(): Promise<void> {
       return this.loadList("sentBack", api.sentBack, (res) => {
         this.sentBack = res.items ?? [];
+        this.sentBackUnavailable = res.unavailable === true;
       });
     },
 

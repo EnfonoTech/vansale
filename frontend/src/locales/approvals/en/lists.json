@@ -33,6 +33,8 @@
     "sentBack": {
       "emptyTitle": "Nothing sent back",
       "emptyHint": "When an approver returns a document for correction, it shows here with the reason.",
+      "unavailableTitle": "Sent back is not available for your role",
+      "unavailableHint": "Documents returned for correction cannot be listed for your account. Ask an administrator if you need this list.",
       "by": "Sent back by {name}",
       "noReason": "No reason was given.",
       "openAndCorrect": "Open and correct",

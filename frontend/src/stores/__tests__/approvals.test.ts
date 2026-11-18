@@ -723,6 +723,58 @@ describe("list tabs: loadMine, loadSentBack, loadHistory", () => {
     });
   });
 
+  describe("sent back: the server may say the list is unavailable for this user", () => {
+    it("is available unless the server says otherwise (also on a server that sends no flag)", async () => {
+      const store = useApprovalsStore();
+      expect(store.sentBackUnavailable).toBe(false);
+      await store.loadSentBack();
+      expect(store.sentBackUnavailable).toBe(false);
+      api.sentBack.mockResolvedValue({ items: [SENT_BACK_ROW], unavailable: false });
+      await store.loadSentBack();
+      expect(store.sentBackUnavailable).toBe(false);
+    });
+
+    it("records the flag and an empty list when the server cannot list it", async () => {
+      api.sentBack.mockResolvedValue({ items: [], unavailable: true });
+      const store = useApprovalsStore();
+      await store.loadSentBack();
+
+      expect(store.sentBackUnavailable).toBe(true);
+      expect(store.sentBack).toEqual([]);
+      // An answer arrived: the tab shows its explanation, not a skeleton or a retry.
+      expect(store.lists.sentBack).toEqual({ loading: false, error: null, loaded: true });
+    });
+
+    it("a later answer that works clears it", async () => {
+      api.sentBack.mockResolvedValue({ items: [], unavailable: true });
+      const store = useApprovalsStore();
+      await store.loadSentBack();
+      api.sentBack.mockResolvedValue({ items: [SENT_BACK_ROW], unavailable: false });
+      await store.loadSentBack();
+
+      expect(store.sentBackUnavailable).toBe(false);
+      expect(store.sentBack).toEqual([SENT_BACK_ROW]);
+    });
+
+    it("a failed load leaves the last answer's flag alone", async () => {
+      api.sentBack.mockResolvedValue({ items: [], unavailable: true });
+      const store = useApprovalsStore();
+      await store.loadSentBack();
+      api.sentBack.mockRejectedValue(new Error("Request timed out"));
+      await store.loadSentBack();
+
+      expect(store.sentBackUnavailable).toBe(true);
+    });
+
+    it("reset forgets it", async () => {
+      api.sentBack.mockResolvedValue({ items: [], unavailable: true });
+      const store = useApprovalsStore();
+      await store.loadSentBack();
+      store.reset();
+      expect(store.sentBackUnavailable).toBe(false);
+    });
+  });
+
   it("the three lists load independently", async () => {
     const pending = deferred<{ items: MyRequestRow[] }>();
     api.myRequests.mockReturnValue(pending.promise);

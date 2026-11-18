@@ -70,9 +70,9 @@ function openAndCorrect(row: SentBackRow) {
     :loaded="store.lists.sentBack.loaded"
     :count="store.sentBack.length"
     :offline="!online"
-    icon="edit"
-    :empty-title="t('approvalsLists.sentBack.emptyTitle')"
-    :empty-hint="t('approvalsLists.sentBack.emptyHint')"
+    :icon="store.sentBackUnavailable ? 'alert' : 'edit'"
+    :empty-title="store.sentBackUnavailable ? t('approvalsLists.sentBack.unavailableTitle') : t('approvalsLists.sentBack.emptyTitle')"
+    :empty-hint="store.sentBackUnavailable ? t('approvalsLists.sentBack.unavailableHint') : t('approvalsLists.sentBack.emptyHint')"
     @retry="reload"
   >
     <ul class="rows">
