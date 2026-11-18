@@ -1,5 +1,6 @@
-"""Approvals for the app: the user's inbox of documents waiting on them, backed
-by Permission Manager (PM).
+"""Approvals for the app: the user's inbox of documents waiting on them, the
+review of one document and the decision on it, backed by Permission Manager
+(PM).
 
 PM owns who may approve what; every call that decides something goes to PM
 (`_pm()`), and this module only reshapes PM's answer for the phone. Nothing
@@ -12,18 +13,39 @@ Items PM hides from the desk's own inbox (Stock Entry and any workflow flagged
 
 from __future__ import annotations
 
+from html import unescape
 from types import SimpleNamespace
 from typing import Optional
+from urllib.parse import quote
 
 import frappe
-from frappe.utils import cint, cstr, flt, now_datetime
+from erpnext.accounts.utils import get_currency_precision
+from frappe import _
+from frappe.utils import cint, cstr, flt, get_datetime, now_datetime, strip_html
 
 from vansale.api.datetime_util import naive_site_to_utc_iso
-from vansale.steelforce.approvals_rules import area_of, inbox_stats
-from vansale.steelforce.approvals_summary import pick_party_amount
+from vansale.steelforce.approvals_rules import area_of, check_apply, inbox_stats, tone_of
+from vansale.steelforce.approvals_summary import first_lines, key_facts, pick_party_amount
 
 PM_APP = "permission_manager"
 PM_ACTION = "PM Workflow Action"
+PM_TRANSITION = "PM Workflow Transition"
+
+PRIORITIES = ("Low", "Medium", "High", "Critical")
+BULK_LIMIT = 20
+"""The most documents one bulk decision may cover."""
+COMMENT_LIMIT = 20
+"""The most workflow comments the detail shows, newest first."""
+
+_ACTION_FIELDS = [
+    "name", "status", "priority", "workflow_state", "assigned_to", "for_submitter",
+    "completed_by", "is_adhoc", "adhoc_for", "return_to_originator",
+]  # fmt: skip
+_TRANSITION_FIELDS = [
+    "action", "next_state", "require_comment", "require_attachment",
+    "is_return_for_correction", "priority",
+]  # fmt: skip
+_REQUIREMENT_FLAGS = ("require_comment", "require_attachment", "is_return_for_correction")
 
 _CURRENCY_FIELDS = ("currency", "paid_from_account_currency")
 """Where a document keeps the currency of its amount, best first (a Payment
@@ -46,6 +68,8 @@ def _pm() -> SimpleNamespace:
     )
 
     return SimpleNamespace(
+        get_workflow=pm_workflow.get_workflow,
+        transaction_label=pm_approvals.transaction_label,
         get_my_pending_approvals=pm_approvals.get_my_pending_approvals,
         get_transitions=pm_workflow.get_transitions,
         apply_workflow=pm_workflow.apply_workflow,
@@ -133,6 +157,77 @@ def count() -> dict:
         "waiting": len(waiting),
         **inbox_stats(needs_you),
     }
+
+
+@frappe.whitelist(methods=["GET"])
+def detail(doctype: str, name: str) -> dict:
+    """One document as the Approvals screen reviews it: header (state,
+    priority, party, amount, creator), key facts, first lines, attachments,
+    workflow comments, the route from Permission Manager's lifecycle, and the
+    actions the signed-in user may take now, each with what it requires.
+
+    Needs read permission on the document. A user who cannot read it but holds
+    an open approval on it gets the bare record with `banner.kind ==
+    "cannot_read"` and nothing of the document itself; anyone else is
+    refused."""
+    _require_available()
+    doctype, name = cstr(doctype), cstr(name)
+    user = frappe.session.user
+
+    if not frappe.has_permission(doctype, "read", doc=name):
+        actions = _pm_actions(doctype, name)
+        held = _held_action(actions, user)
+        if not held:
+            frappe.throw(
+                _("You do not have permission to open {0} {1}").format(_(doctype), name),
+                frappe.PermissionError,
+            )
+        return _unreadable_detail(doctype, name, held)
+
+    return _readable_detail(frappe.get_doc(doctype, name), user)
+
+
+@frappe.whitelist(methods=["POST"])
+def apply(doctype: str, name: str, action: str, comment: str = "", priority: str = "Medium") -> dict:
+    """Take `action` on one document as the signed-in user, through Permission
+    Manager. The action must be one the document offers the user now, with the
+    comment or attachment it requires. Any refusal (PM's or the document's own)
+    is raised unchanged. Returns `{"ok": True, "new_state", "recommended"}`;
+    `recommended` is true when the user was asked for advice and the document
+    did not move."""
+    _require_available()
+    return _apply_one(cstr(doctype), cstr(name), cstr(action), cstr(comment), _priority(priority))
+
+
+@frappe.whitelist(methods=["POST"])
+def apply_bulk(
+    doctype: str, names: str, action: str, comment: str = "", priority: str = "Medium"
+) -> dict:
+    """Take `action` on up to 20 documents of one type, one by one, with the
+    same checks as `apply`. `names` is a JSON list (duplicates are dropped).
+    Each document is committed on success and rolled back on failure, and one
+    failure never stops the others. Returns `{"results": [{"docname", "ok",
+    "message"}], "ok_count", "failed_count"}`, where `message` is the refusal
+    text as it was raised."""
+    _require_available()
+    doctype, action, comment = cstr(doctype), cstr(action), cstr(comment)
+    priority = _priority(priority)
+    docnames = _bulk_names(names)
+
+    results = []
+    for docname in docnames:
+        try:
+            _apply_one(doctype, docname, action, comment, priority)
+        except Exception as error:  # one document's refusal must not stop the batch
+            frappe.db.rollback()
+            results.append({"docname": docname, "ok": False, "message": _error_text(error)})
+        else:
+            frappe.db.commit()
+            results.append({"docname": docname, "ok": True, "message": ""})
+        frappe.clear_messages()
+
+    ok_count = sum(1 for result in results if result["ok"])
+    return {"results": results, "ok_count": ok_count, "failed_count": len(results) - ok_count}
 
 
 # ─── PM's inbox ───────────────────────────────────────────────────────────────
@@ -386,4 +481,338 @@ def _forwarded_by(items: list[dict]) -> dict[str, str]:
         action_id: full_names.get(completed_by[original]) or completed_by[original]
         for action_id, original in originals.items()
         if original in completed_by
+    }
+
+
+# ─── Actions on one document ──────────────────────────────────────────────────
+
+
+def _actions_for(doc, user: str, workflow=None) -> tuple[list[dict], Optional[str]]:
+    """The actions `user` may take on `doc` now, as ActionSpecs, and the kind of
+    banner that explains them: `"recommend"`, `"self_owned"` or None.
+
+    A user holding an open "return to me" forward (PM answers which) is asked
+    for advice: every transition of the state comes back `recommend_only`.
+    Anyone else gets PM's transitions for them, less the ones PM's self-approval
+    rule refuses; when that leaves nothing, the banner is `"self_owned"`.
+    `workflow` is the document's PM Workflow when the caller has it."""
+    pm = _pm()
+    workflow = workflow or _workflow_of(doc)
+    if not workflow:
+        return [], None
+
+    state = _state_of(doc, workflow)
+    if pm.get_open_return_adhoc_action(doc, state, user):
+        rows = frappe.get_all(
+            PM_TRANSITION,
+            filters={"parent": workflow.name, "state": state},
+            fields=_TRANSITION_FIELDS,
+            order_by="idx asc",
+        )
+        return _specs(rows, recommend_only=True), "recommend"
+
+    transitions = pm.get_transitions(doc) or []
+    allowed = [row for row in transitions if pm.has_approval_access(user, doc, row)]
+    banner = "self_owned" if transitions and not allowed else None
+    return _specs(allowed, recommend_only=False), banner
+
+
+def _specs(rows: list, recommend_only: bool) -> list[dict]:
+    """ActionSpecs from transition rows, one per action name in first-seen
+    order; an action several approver rows share keeps a requirement if any of
+    them sets it."""
+    by_action: dict[str, dict] = {}
+    for row in rows:
+        action = cstr(row.get("action"))
+        flags = {flag: bool(cint(row.get(flag))) for flag in _REQUIREMENT_FLAGS}
+        spec = by_action.get(action)
+        if spec is None:
+            by_action[action] = {
+                "action": action,
+                "next_state": cstr(row.get("next_state")),
+                **flags,
+                "priority": row.get("priority") or "Medium",
+                "recommend_only": recommend_only,
+            }
+        else:
+            for flag, value in flags.items():
+                spec[flag] = spec[flag] or value
+    return [
+        {**spec, "tone": tone_of(spec["action"], spec["is_return_for_correction"])}
+        for spec in by_action.values()
+    ]
+
+
+def _apply_one(doctype: str, name: str, action: str, comment: str, priority: str) -> dict:
+    """`apply` for one document; `apply_bulk` runs every document through it."""
+    doc = frappe.get_doc(doctype, name)
+    workflow = _workflow_of(doc)
+    specs, _banner = _actions_for(doc, frappe.session.user, workflow)
+    spec = next((spec for spec in specs if spec["action"] == action), None)
+
+    refusal = check_apply(spec, comment, bool(spec) and bool(_attachments(doctype, name)))
+    if refusal:
+        frappe.throw(_refusal_text(refusal))
+
+    _pm().apply_workflow(doc.as_dict(), action, comment or None, priority)
+    return {
+        "ok": True,
+        "new_state": cstr(frappe.db.get_value(doctype, name, workflow.workflow_state_field)),
+        "recommended": spec["recommend_only"],
+    }
+
+
+def _refusal_text(reason: str) -> str:
+    if reason == "comment_required":
+        return _("A comment is required for this action")
+    if reason == "attachment_required":
+        return _("Attach a file before this action")
+    return _("This action is not available for this document")
+
+
+def _priority(value) -> str:
+    priority = cstr(value) or "Medium"
+    if priority not in PRIORITIES:
+        frappe.throw(_("Priority must be one of {0}").format(", ".join(_(p) for p in PRIORITIES)))
+    return priority
+
+
+def _bulk_names(names) -> list[str]:
+    """The document names of a bulk request, duplicates dropped, at most 20."""
+    parsed = frappe.parse_json(names) if isinstance(names, str) else names
+    if not isinstance(parsed, list):
+        frappe.throw(_("Send the document names as a list"))
+    docnames = list(dict.fromkeys(cstr(name) for name in parsed if cstr(name)))
+    if len(docnames) > BULK_LIMIT:
+        frappe.throw(_("At most {0} documents can be decided at once").format(BULK_LIMIT))
+    return docnames
+
+
+def _error_text(error: Exception) -> str:
+    """What a failed document shows: the exception's own text, else the
+    message Frappe set for a bare PermissionError, else a plain fallback."""
+    text = cstr(error).strip() or cstr(frappe.flags.pop("error_message", None)).strip()
+    return text or _("The action could not be applied")
+
+
+def _require_available() -> None:
+    if not is_available():
+        frappe.throw(_("Approvals are not available on this site"))
+
+
+# ─── The detail record ────────────────────────────────────────────────────────
+
+
+def _readable_detail(doc, user: str) -> dict:
+    doctype, name = doc.doctype, doc.name
+    pm = _pm()
+    workflow = _workflow_of(doc)
+    # Actions and labels are worked out on the whole document (PM's conditions
+    # read it); the facts below show only the fields the user may read.
+    actions, banner_kind = _actions_for(doc, user, workflow)
+    state = _state_of(doc, workflow)
+    transaction = pm.transaction_label(doctype, cint(doc.get("is_return")))
+
+    pm_actions = _pm_actions(doctype, name)
+    held = _held_action(pm_actions, user)
+    holder = None if held else _waiting_holder(pm_actions, user)
+    creator = (pm_actions[0].get("for_submitter") if pm_actions else None) or doc.owner
+    comments = _workflow_comments(doctype, name)
+    names = _full_names([creator, holder] + [c["user"] for c in comments if not c["by"]])
+
+    if banner_kind == "recommend":
+        forwarder = _forwarded_by([held]).get(held["name"], "") if held else ""
+        banner = {"kind": "recommend", "forwarder": forwarder}
+    elif holder:
+        # Forwarded away: someone else holds it, so nothing is the user's to do.
+        banner = {"kind": "waiting", "holder": names.get(holder) or holder}
+        actions = []
+    elif banner_kind == "self_owned":
+        banner = {"kind": "self_owned"}
+    else:
+        banner = None
+
+    doc.apply_fieldlevel_read_permissions()
+    data = doc.as_dict()
+    precision = get_currency_precision()
+    fact = _doctype_facts(doctype, [name], {}).get((doctype, name)) or {}
+    attachments = _attachments(doctype, name)
+
+    return {
+        **_blank_detail(doctype, name),
+        "transaction": transaction,
+        "state": state,
+        "priority": _action_priority(held, pm_actions),
+        "party": fact.get("party") or "",
+        "amount": fact.get("amount"),
+        "currency": fact.get("currency") or "",
+        "creator": names.get(creator) or creator,
+        "facts": key_facts(frappe.get_meta(doctype).fields, data, precision, translate=_),
+        "lines": first_lines(doctype, data, precision, translate=_),
+        "attachments": attachments,
+        "has_attachment": bool(attachments),
+        "comments": [
+            {"by": c["by"] or names.get(c["user"]) or c["user"], "when": c["when"], "text": c["text"]}
+            for c in comments
+        ],
+        "route": _route(doctype, name),
+        "actions": actions,
+        "action_id": held["name"] if held else None,
+        "banner": banner,
+        "can_forward": bool(held) and not (held.get("is_adhoc") and held.get("return_to_originator")),
+    }
+
+
+def _unreadable_detail(doctype: str, name: str, held: dict) -> dict:
+    """The bare record for a user who holds an approval on a document they may
+    not read: what the approval itself says, nothing of the document."""
+    creator = held.get("for_submitter")
+    names = _full_names([creator])
+    return {
+        **_blank_detail(doctype, name),
+        "state": cstr(held.get("workflow_state")),
+        "priority": held.get("priority") or "Medium",
+        "creator": names.get(creator) or cstr(creator),
+        "action_id": held["name"],
+        "banner": {"kind": "cannot_read"},
+    }
+
+
+def _blank_detail(doctype: str, name: str) -> dict:
+    """A Detail with every key present and nothing known."""
+    return {
+        "doctype": doctype,
+        "docname": name,
+        "transaction": doctype,
+        "state": "",
+        "priority": "Medium",
+        "party": "",
+        "amount": None,
+        "currency": "",
+        "creator": "",
+        "facts": [],
+        "lines": {"columns": [], "rows": [], "total": 0},
+        "attachments": [],
+        "has_attachment": False,
+        "comments": [],
+        "route": _route_of({}),
+        "actions": [],
+        "action_id": None,
+        "banner": None,
+        "can_forward": False,
+        "desk_url": f"/app/{frappe.scrub(doctype).replace('_', '-')}/{quote(name, safe='')}",
+    }
+
+
+def _workflow_of(doc):
+    """The document's active PM Workflow, or None."""
+    return _pm().get_workflow(doc.doctype, docname=doc.name, doc=doc, throw=False)
+
+
+def _state_of(doc, workflow) -> str:
+    return cstr(doc.get(workflow.workflow_state_field)) if workflow else ""
+
+
+def _route(doctype: str, name: str) -> dict:
+    return _route_of(_pm().get_document_lifecycle(doctype, name) or {})
+
+
+def _route_of(lifecycle: dict) -> dict:
+    """PM's lifecycle with its five keys, the missing ones empty."""
+    return {
+        "chain": lifecycle.get("chain") or [],
+        "roles": lifecycle.get("roles") or [],
+        "events": lifecycle.get("events") or [],
+        "current": cstr(lifecycle.get("current")),
+        "finished": bool(lifecycle.get("finished")),
+    }
+
+
+def _pm_actions(doctype: str, name: str) -> list:
+    """Every PM Workflow Action of the document, newest first."""
+    return frappe.get_all(
+        PM_ACTION,
+        filters={"reference_doctype": doctype, "reference_name": name},
+        fields=_ACTION_FIELDS,
+        order_by="creation desc",
+    )
+
+
+def _can_act(action: dict, user: str) -> bool:
+    return bool(_pm().can_act_on(frappe.get_doc(PM_ACTION, action["name"]), user))
+
+
+def _held_action(actions: list, user: str) -> Optional[dict]:
+    """The newest open action PM lets `user` act on, or None."""
+    return next(
+        (action for action in actions if action.get("status") == "Open" and _can_act(action, user)),
+        None,
+    )
+
+
+def _waiting_holder(actions: list, user: str) -> Optional[str]:
+    """Who holds the document when an action `user` could act on was forwarded
+    to someone else: the assignee of the open ad-hoc action made for it."""
+    for action in actions:
+        if action.get("status") != "Forwarded" or not _can_act(action, user):
+            continue
+        for adhoc in actions:
+            if (
+                adhoc.get("status") == "Open"
+                and adhoc.get("adhoc_for") == action["name"]
+                and adhoc.get("assigned_to")
+                and adhoc.get("assigned_to") != user
+            ):
+                return adhoc["assigned_to"]
+    return None
+
+
+def _action_priority(held: Optional[dict], actions: list) -> str:
+    """The priority of the user's open action, else of any open action."""
+    open_action = held or next((a for a in actions if a.get("status") == "Open"), None)
+    return (open_action.get("priority") if open_action else None) or "Medium"
+
+
+def _attachments(doctype: str, name: str) -> list[dict]:
+    return [
+        {"name": row.get("name"), "url": row.get("file_url"), "is_private": bool(cint(row.get("is_private")))}
+        for row in frappe.get_all(
+            "File",
+            filters={"attached_to_doctype": doctype, "attached_to_name": name},
+            fields=["name", "file_url", "is_private"],
+            order_by="creation asc",
+        )
+    ]
+
+
+def _workflow_comments(doctype: str, name: str) -> list[dict]:
+    """The newest workflow comments as `{by, user, when, text}`; `by` is the
+    name stored on the comment, `user` who wrote it."""
+    rows = frappe.get_all(
+        "Comment",
+        filters={"reference_doctype": doctype, "reference_name": name, "comment_type": "Workflow"},
+        fields=["owner", "comment_email", "comment_by", "content", "creation"],
+        order_by="creation desc",
+        limit=COMMENT_LIMIT,
+    )
+    return [
+        {
+            "by": cstr(row.get("comment_by")),
+            "user": cstr(row.get("comment_email") or row.get("owner")),
+            "when": get_datetime(row.get("creation")).strftime("%d/%m/%y %H:%M"),
+            "text": unescape(strip_html(cstr(row.get("content")))).strip(),
+        }
+        for row in rows
+    ]
+
+
+def _full_names(users: list) -> dict[str, str]:
+    """`{user: full name}` for the given users, in one read."""
+    wanted = list(dict.fromkeys(user for user in users if user))
+    if not wanted:
+        return {}
+    return {
+        row.get("name"): row.get("full_name")
+        for row in frappe.get_all("User", filters={"name": ["in", wanted]}, fields=["name", "full_name"])
+        if row.get("full_name")
     }

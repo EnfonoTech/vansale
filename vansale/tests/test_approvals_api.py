@@ -12,6 +12,7 @@ from __future__ import annotations
 import sys
 import types
 import unittest
+from datetime import datetime
 from unittest.mock import MagicMock, patch, sentinel
 
 import frappe
@@ -168,10 +169,17 @@ class TestAvailability(SiteFreeCase):
 
 class TestEndpointsAreWhitelistedGet(unittest.TestCase):
     def test_availability_inbox_and_count_answer_get_only(self):
-        for function in (approvals.availability, approvals.inbox, approvals.count):
+        for function in (approvals.availability, approvals.inbox, approvals.count, approvals.detail):
             with self.subTest(function=function.__name__):
                 self.assertIn(function, frappe.whitelisted)
                 self.assertEqual(frappe.allowed_http_methods_for_whitelisted_func[function], ["GET"])
+                self.assertNotIn(function, frappe.guest_methods)
+
+    def test_apply_and_apply_bulk_answer_post_only(self):
+        for function in (approvals.apply, approvals.apply_bulk):
+            with self.subTest(function=function.__name__):
+                self.assertIn(function, frappe.whitelisted)
+                self.assertEqual(frappe.allowed_http_methods_for_whitelisted_func[function], ["POST"])
                 self.assertNotIn(function, frappe.guest_methods)
 
 
@@ -193,9 +201,11 @@ class TestPmNamespace(unittest.TestCase):
             get_document_lifecycle=sentinel.lifecycle,
             get_sent_back_documents=sentinel.sent_back,
             get_my_approval_history=sentinel.history,
+            transaction_label=sentinel.label,
         )
         pm_workflow = _module(
             "workflow",
+            get_workflow=sentinel.workflow,
             get_transitions=sentinel.transitions,
             apply_workflow=sentinel.apply,
             has_approval_access=sentinel.access,
@@ -232,6 +242,8 @@ class TestPmNamespace(unittest.TestCase):
                 "get_sent_back_documents": sentinel.sent_back,
                 "get_my_approval_history": sentinel.history,
                 "can_act_on": sentinel.can_act,
+                "get_workflow": sentinel.workflow,
+                "transaction_label": sentinel.label,
             },
         )
 
@@ -840,6 +852,674 @@ class TestForwardedBy(SiteFreeCase):
 
         self.assertEqual(approvals._forwarded_by([pm_item("A"), pm_waiting("B")]), {})
         self.assertEqual(get_all.calls, [])
+
+
+# ─── detail, apply and bulk ───────────────────────────────────────────────────
+
+
+ME = "sara@example.com"
+OWNER = "ali@example.com"
+
+
+class FakeDoc:
+    """The little of a `Document` the approvals code uses. Fields named in
+    `hidden` sit above the user's permission level: they are on the document
+    until `apply_fieldlevel_read_permissions()` removes them."""
+
+    def __init__(self, doctype: str, name: str, owner: str = OWNER, hidden=(), **fields):
+        self.doctype = doctype
+        self.name = name
+        self.owner = owner
+        self._fields = {"doctype": doctype, "name": name, "owner": owner, **fields}
+        self._hidden = set(hidden)
+
+    def get(self, key, default=None):
+        return self._fields.get(key, default)
+
+    def as_dict(self) -> dict:
+        return dict(self._fields)
+
+    def apply_fieldlevel_read_permissions(self):
+        for key in self._hidden:
+            self._fields.pop(key, None)
+
+
+def transition(action: str, **overrides) -> frappe._dict:
+    """One PM Workflow Transition row, as `get_transitions` returns it."""
+    row = {
+        "state": "Pending Finance",
+        "action": action,
+        "next_state": "Approved",
+        "require_comment": 0,
+        "require_attachment": 0,
+        "is_return_for_correction": 0,
+        "priority": "Medium",
+        "allow_self_approval": 0,
+    }
+    row.update(overrides)
+    return frappe._dict(row)
+
+
+def pm_action(name: str, **overrides) -> dict:
+    """One PM Workflow Action row."""
+    row = {
+        "name": name,
+        "status": "Open",
+        "priority": "Medium",
+        "workflow_state": "Pending Finance",
+        "assigned_to": None,
+        "for_submitter": OWNER,
+        "completed_by": None,
+        "is_adhoc": 0,
+        "adhoc_for": None,
+        "return_to_originator": 0,
+    }
+    row.update(overrides)
+    return row
+
+
+def pm_has_approval_access(user, doc, transition_row) -> bool:
+    """PM's own rule (workflow.has_approval_access)."""
+    return user == "Administrator" or bool(transition_row.get("allow_self_approval")) or user != doc.owner
+
+
+def _field(fieldname: str, fieldtype: str = "Data", label: str = "", **attrs):
+    return types.SimpleNamespace(fieldname=fieldname, fieldtype=fieldtype, label=label, **attrs)
+
+
+def spec(action: str, **overrides) -> dict:
+    """The ActionSpec the module should build for a transition."""
+    row = {
+        "action": action,
+        "next_state": "Approved",
+        "tone": "approve",
+        "require_comment": False,
+        "require_attachment": False,
+        "is_return_for_correction": False,
+        "priority": "Medium",
+        "recommend_only": False,
+    }
+    row.update(overrides)
+    return row
+
+
+class DetailCase(ApiCase):
+    """The signed-in user is sara; SINV-1 is a Sales Invoice raised by ali,
+    waiting in "Pending Finance" with Approve and Reject (return for
+    correction). Every read the code makes answers from the tables below."""
+
+    def setUp(self):
+        super().setUp()
+        frappe.local.session.user = ME
+        self.workflow = types.SimpleNamespace(name="SI Approval", workflow_state_field="workflow_state")
+        self.pm.get_workflow.return_value = self.workflow
+        self.pm.get_open_return_adhoc_action.return_value = None
+        self.pm.get_transitions.return_value = [
+            transition("Approve", priority="High"),
+            transition("Reject", next_state="Draft", is_return_for_correction=1, require_comment=1),
+        ]
+        self.pm.has_approval_access.side_effect = pm_has_approval_access
+        self.pm.transaction_label.side_effect = lambda doctype, is_return: (
+            "Sales Return" if is_return else doctype
+        )
+        self.pm.get_document_lifecycle.return_value = {"chain": [], "roles": []}
+        self.can_act: set[str] = set()
+        self.pm.can_act_on.side_effect = lambda action_doc, user: (
+            user == ME and action_doc.name in self.can_act
+        )
+        self.pm.apply_workflow.return_value = None
+
+        self.doc = FakeDoc(
+            "Sales Invoice",
+            "SINV-1",
+            hidden=("internal_margin",),
+            workflow_state="Pending Finance",
+            is_return=0,
+            customer_name="Acme Trading",
+            grand_total=1250.5,
+            internal_margin=99.5,
+            items=[{"item_name": "Steel Bar", "qty": 2, "amount": 1250.5}],
+        )
+        self.docs = {("Sales Invoice", "SINV-1"): self.doc}
+        self.get_doc = self._patch("frappe.get_doc", side_effect=self._get_doc)
+
+        self.readable = True
+        self.has_permission = self._patch(
+            "frappe.has_permission",
+            side_effect=lambda doctype, ptype="read", doc=None, **kwargs: self.readable,
+        )
+        fields = [
+            _field("customer_name", label="Customer Name", bold=1),
+            _field("grand_total", "Currency", label="Grand Total"),
+            _field("internal_margin", "Currency", label="Internal Margin"),
+            _field("items", "Table", label="Items"),
+        ]
+        names = {"customer_name", "grand_total", "currency", "company", "internal_margin", "items"}
+        self._patch(
+            "frappe.get_meta",
+            return_value=types.SimpleNamespace(fields=fields, has_field=lambda f: f in names),
+        )
+        self._patch("vansale.steelforce.approvals.get_currency_precision", return_value=3)
+        self._patch("frappe.get_cached_value", return_value="BHD")
+        self.get_list = self._use_get_list(
+            {
+                "Sales Invoice": [
+                    {"name": "SINV-1", "customer_name": "Acme Trading", "grand_total": 1250.5,
+                     "currency": "BHD", "company": "Steel Co"}
+                ]
+            }
+        )
+        self.tables: dict[str, list] = {
+            "PM Workflow Action": [],
+            "User": [
+                {"name": OWNER, "full_name": "Ali Hassan"},
+                {"name": ME, "full_name": "Sara Khan"},
+                {"name": "omar@example.com", "full_name": "Omar Saleh"},
+            ],
+            "File": [],
+            "Comment": [],
+            "PM Workflow Transition": [],
+        }
+        self.get_all = self._use_get_all(self.tables)
+        frappe.local.db.get_value.side_effect = self._db_value
+        self.new_state = "Approved"
+
+    def _get_doc(self, doctype, name=None, *args, **kwargs):
+        if doctype == "PM Workflow Action":
+            return types.SimpleNamespace(doctype=doctype, name=name)
+        if (doctype, name) not in self.docs:
+            raise frappe.DoesNotExistError(f"{doctype} {name} not found")
+        return self.docs[(doctype, name)]
+
+    def _db_value(self, doctype, name, fieldname, *args, **kwargs):
+        if (doctype, fieldname) == ("Sales Invoice", "workflow_state") and (doctype, name) in self.docs:
+            return self.new_state
+        raise AssertionError(f"unexpected db.get_value({doctype!r}, {name!r}, {fieldname!r})")
+
+    def _read_doctypes(self) -> list[str]:
+        return [call[0] for call in self.get_all.calls]
+
+
+class TestActionsFor(DetailCase):
+    def test_a_self_owned_document_without_self_approval_has_no_actions(self):
+        frappe.local.session.user = OWNER
+        self.pm.get_transitions.return_value = [transition("Approve")]
+
+        actions, banner = approvals._actions_for(self.doc, OWNER)
+
+        self.assertEqual(actions, [])
+        self.assertEqual(banner, "self_owned")
+        self.pm.has_approval_access.assert_called_once_with(OWNER, self.doc, self.pm.get_transitions.return_value[0])
+
+    def test_the_submitters_own_send_for_approval_stays_available(self):
+        self.doc._fields["workflow_state"] = "Draft"
+        self.pm.get_transitions.return_value = [
+            transition("Send for Approval", state="Draft", next_state="Pending Finance",
+                       allow_self_approval=1, require_attachment=1),
+            transition("Approve", state="Draft"),
+        ]
+
+        actions, banner = approvals._actions_for(self.doc, OWNER)
+
+        self.assertEqual(
+            actions,
+            [spec("Send for Approval", next_state="Pending Finance", require_attachment=True)],
+        )
+        self.assertIsNone(banner)
+
+    def test_another_user_gets_every_transition_with_its_tone_and_flags(self):
+        actions, banner = approvals._actions_for(self.doc, ME)
+
+        self.assertEqual(
+            actions,
+            [
+                spec("Approve", priority="High"),
+                spec("Reject", next_state="Draft", tone="reject", require_comment=True,
+                     is_return_for_correction=True),
+            ],
+        )
+        self.assertIsNone(banner)
+        self.pm.get_transitions.assert_called_once_with(self.doc)
+
+    def test_a_return_to_me_recipient_gets_the_states_transitions_as_recommendations(self):
+        self.pm.get_open_return_adhoc_action.return_value = "WA-9"
+        self.pm.get_transitions.return_value = []
+        self.tables["PM Workflow Transition"] = [
+            transition("Approve"),
+            transition("Reject", next_state="Draft", is_return_for_correction=1, require_comment=1),
+        ]
+
+        actions, banner = approvals._actions_for(self.doc, ME)
+
+        self.assertEqual(banner, "recommend")
+        self.assertEqual(
+            actions,
+            [
+                spec("Approve", recommend_only=True),
+                spec("Reject", next_state="Draft", tone="reject", require_comment=True,
+                     is_return_for_correction=True, recommend_only=True),
+            ],
+        )
+        self.pm.get_open_return_adhoc_action.assert_called_once_with(self.doc, "Pending Finance", ME)
+        self.pm.get_transitions.assert_not_called()
+        (doctype, kwargs), = [c for c in self.get_all.calls if c[0] == "PM Workflow Transition"]
+        self.assertEqual(kwargs["filters"], {"parent": "SI Approval", "state": "Pending Finance"})
+
+    def test_an_action_two_roles_share_shows_once_with_the_stricter_flags(self):
+        self.pm.get_transitions.return_value = [
+            transition("Approve"),
+            transition("Approve", require_attachment=1),
+        ]
+
+        actions, _banner = approvals._actions_for(self.doc, ME)
+
+        self.assertEqual(actions, [spec("Approve", require_attachment=True)])
+
+    def test_a_blank_priority_falls_back_to_medium(self):
+        self.pm.get_transitions.return_value = [transition("Approve", priority="")]
+
+        actions, _banner = approvals._actions_for(self.doc, ME)
+
+        self.assertEqual(actions[0]["priority"], "Medium")
+
+    def test_no_transitions_at_all_is_no_actions_and_no_banner(self):
+        self.pm.get_transitions.return_value = []
+
+        self.assertEqual(approvals._actions_for(self.doc, ME), ([], None))
+
+
+class TestDetail(DetailCase):
+    def test_a_readable_document_gives_the_whole_detail(self):
+        self.can_act.add("WA-1")
+        self.tables["PM Workflow Action"] = [pm_action("WA-1", priority="High", assigned_to=ME)]
+        self.tables["File"] = [
+            {"name": "F-1", "file_url": "/private/files/quote.pdf", "is_private": 1},
+            {"name": "F-2", "file_url": "/files/photo.jpg", "is_private": 0},
+        ]
+        self.tables["Comment"] = [
+            {"owner": OWNER, "comment_email": OWNER, "comment_by": "",
+             "content": "<p>Please <b>check</b> the rate &amp; qty</p>", "creation": datetime(2026, 11, 18, 14, 5, 9)},
+        ]
+        lifecycle = {
+            "chain": [
+                {"state": "Draft", "status": "done", "roles": ["Sales User"], "by": "Ali Hassan", "final": False},
+                {"state": "Pending Finance", "status": "current", "roles": ["Finance Head"], "by": "", "final": False},
+                {"state": "Approved", "status": "upcoming", "roles": [], "by": "", "final": True},
+            ],
+            "roles": [{"role": "Finance Head", "users": [{"user": ME, "full_name": "Sara Khan"}], "count": 1}],
+            "events": [{"by": "Ali Hassan", "user": OWNER, "role": "", "state": "Draft",
+                        "to_state": "Pending Finance", "action": "Draft to Pending Finance", "on": "18/11/26 14:00"}],
+            "current": "Pending Finance",
+            "finished": False,
+            "something_else": "dropped",
+        }
+        self.pm.get_document_lifecycle.return_value = lifecycle
+
+        result = approvals.detail("Sales Invoice", "SINV-1")
+
+        self.assertEqual(
+            result,
+            {
+                "doctype": "Sales Invoice",
+                "docname": "SINV-1",
+                "transaction": "Sales Invoice",
+                "state": "Pending Finance",
+                "priority": "High",
+                "party": "Acme Trading",
+                "amount": 1250.5,
+                "currency": "BHD",
+                "creator": "Ali Hassan",
+                # the field above the user's permission level is not shown
+                "facts": [
+                    {"label": "Customer Name", "value": "Acme Trading"},
+                    {"label": "Grand Total", "value": "1,250.500"},
+                ],
+                "lines": {"columns": ["Item", "Qty", "Amount"], "rows": [["Steel Bar", "2", "1,250.500"]], "total": 1},
+                "attachments": [
+                    {"name": "F-1", "url": "/private/files/quote.pdf", "is_private": True},
+                    {"name": "F-2", "url": "/files/photo.jpg", "is_private": False},
+                ],
+                "has_attachment": True,
+                "comments": [{"by": "Ali Hassan", "when": "18/11/26 14:05", "text": "Please check the rate & qty"}],
+                "route": {k: v for k, v in lifecycle.items() if k != "something_else"},
+                "actions": [
+                    spec("Approve", priority="High"),
+                    spec("Reject", next_state="Draft", tone="reject", require_comment=True,
+                         is_return_for_correction=True),
+                ],
+                "action_id": "WA-1",
+                "banner": None,
+                "can_forward": True,
+                "desk_url": "/app/sales-invoice/SINV-1",
+            },
+        )
+        self.has_permission.assert_any_call("Sales Invoice", "read", doc="SINV-1")
+        self.pm.get_document_lifecycle.assert_called_once_with("Sales Invoice", "SINV-1")
+        self.assertEqual(frappe.local.message_log, [])
+
+    def test_the_reads_are_scoped_to_the_document(self):
+        approvals.detail("Sales Invoice", "SINV-1")
+
+        calls = dict(self.get_all.calls)
+        self.assertEqual(
+            calls["PM Workflow Action"]["filters"],
+            {"reference_doctype": "Sales Invoice", "reference_name": "SINV-1"},
+        )
+        self.assertEqual(
+            calls["File"]["filters"], {"attached_to_doctype": "Sales Invoice", "attached_to_name": "SINV-1"}
+        )
+        self.assertEqual(
+            calls["Comment"]["filters"],
+            {"reference_doctype": "Sales Invoice", "reference_name": "SINV-1", "comment_type": "Workflow"},
+        )
+        self.assertEqual(calls["Comment"]["limit"], 20)
+        self.assertEqual(calls["Comment"]["order_by"], "creation desc")
+
+    def test_a_return_is_labelled_as_pm_labels_it(self):
+        self.doc._fields["is_return"] = 1
+
+        self.assertEqual(approvals.detail("Sales Invoice", "SINV-1")["transaction"], "Sales Return")
+
+    def test_no_pm_action_means_medium_priority_no_forward_and_the_owner_as_creator(self):
+        result = approvals.detail("Sales Invoice", "SINV-1")
+
+        self.assertEqual(
+            (result["priority"], result["action_id"], result["can_forward"], result["creator"]),
+            ("Medium", None, False, "Ali Hassan"),
+        )
+        self.assertEqual((result["attachments"], result["has_attachment"]), ([], False))
+
+    def test_a_lifecycle_without_a_workflow_fills_the_missing_keys(self):
+        result = approvals.detail("Sales Invoice", "SINV-1")
+
+        self.assertEqual(result["route"], {"chain": [], "roles": [], "events": [], "current": "", "finished": False})
+
+    def test_cannot_read_but_holds_an_action_is_a_dead_end_without_leaks(self):
+        self.readable = False
+        self.can_act.add("WA-1")
+        self.tables["PM Workflow Action"] = [pm_action("WA-1", priority="Critical", assigned_to=ME)]
+
+        result = approvals.detail("Sales Invoice", "SINV-1")
+
+        self.assertEqual(result["banner"], {"kind": "cannot_read"})
+        self.assertEqual((result["party"], result["amount"], result["currency"]), ("", None, ""))
+        self.assertEqual(result["actions"], [])
+        self.assertEqual(result["facts"], [])
+        self.assertEqual(result["lines"], {"columns": [], "rows": [], "total": 0})
+        self.assertEqual((result["comments"], result["attachments"], result["has_attachment"]), ([], [], False))
+        self.assertEqual(result["route"], {"chain": [], "roles": [], "events": [], "current": "", "finished": False})
+        self.assertFalse(result["can_forward"])
+        self.assertEqual((result["state"], result["priority"]), ("Pending Finance", "Critical"))
+        self.assertEqual(result["desk_url"], "/app/sales-invoice/SINV-1")
+        # nothing of the document was read
+        self.assertEqual(self.get_list.calls, [])
+        self.assertNotIn("Comment", self._read_doctypes())
+        self.assertNotIn("File", self._read_doctypes())
+        self.pm.get_transitions.assert_not_called()
+        self.pm.get_document_lifecycle.assert_not_called()
+        self.assertNotIn(("Sales Invoice", "SINV-1"), [c.args[:2] for c in self.get_doc.call_args_list])
+        self.assertEqual(frappe.local.message_log, [])
+
+    def test_cannot_read_and_holds_no_action_is_refused(self):
+        self.readable = False
+        self.tables["PM Workflow Action"] = [pm_action("WA-1", assigned_to="omar@example.com")]
+
+        with self.assertRaises(frappe.PermissionError):
+            approvals.detail("Sales Invoice", "SINV-1")
+        self.pm.get_transitions.assert_not_called()
+        self.assertNotIn("Comment", self._read_doctypes())
+
+    def test_a_return_to_me_recipient_sees_who_forwarded_it_and_cannot_forward(self):
+        self.can_act.add("WA-2")
+        self.pm.get_open_return_adhoc_action.return_value = "WA-2"
+        self.tables["PM Workflow Action"] = [
+            pm_action("WA-2", assigned_to=ME, is_adhoc=1, adhoc_for="WA-1", return_to_originator=1),
+            pm_action("WA-1", status="Forwarded", completed_by="omar@example.com"),
+        ]
+        self.tables["PM Workflow Transition"] = [transition("Approve")]
+
+        result = approvals.detail("Sales Invoice", "SINV-1")
+
+        self.assertEqual(result["banner"], {"kind": "recommend", "forwarder": "Omar Saleh"})
+        self.assertEqual(result["actions"], [spec("Approve", recommend_only=True)])
+        self.assertEqual(result["action_id"], "WA-2")
+        self.assertFalse(result["can_forward"])
+
+    def test_an_ad_hoc_recipient_without_return_to_me_can_forward(self):
+        self.can_act.add("WA-2")
+        self.tables["PM Workflow Action"] = [
+            pm_action("WA-2", assigned_to=ME, is_adhoc=1, adhoc_for="WA-1", return_to_originator=0),
+            pm_action("WA-1", status="Forwarded", completed_by="omar@example.com"),
+        ]
+
+        result = approvals.detail("Sales Invoice", "SINV-1")
+
+        self.assertEqual(result["action_id"], "WA-2")
+        self.assertTrue(result["can_forward"])
+        self.assertIsNone(result["banner"])
+
+    def test_a_forwarded_action_shows_who_holds_it_and_no_actions(self):
+        self.can_act.add("WA-1")  # sara's own action, which she forwarded to omar
+        self.tables["PM Workflow Action"] = [
+            pm_action("WA-2", assigned_to="omar@example.com", is_adhoc=1, adhoc_for="WA-1"),
+            pm_action("WA-1", status="Forwarded", assigned_to=ME, completed_by=ME),
+        ]
+
+        result = approvals.detail("Sales Invoice", "SINV-1")
+
+        self.assertEqual(result["banner"], {"kind": "waiting", "holder": "Omar Saleh"})
+        self.assertEqual(result["actions"], [])
+        self.assertIsNone(result["action_id"])
+        self.assertFalse(result["can_forward"])
+
+    def test_the_submitter_sees_the_self_owned_banner(self):
+        frappe.local.session.user = OWNER
+        self.pm.get_transitions.return_value = [transition("Approve")]
+
+        result = approvals.detail("Sales Invoice", "SINV-1")
+
+        self.assertEqual(result["banner"], {"kind": "self_owned"})
+        self.assertEqual(result["actions"], [])
+
+    def test_a_missing_document_is_not_found(self):
+        self.has_permission.side_effect = frappe.DoesNotExistError("Sales Invoice SINV-404 not found")
+
+        with self.assertRaises(frappe.DoesNotExistError):
+            approvals.detail("Sales Invoice", "SINV-404")
+
+
+class TestApply(DetailCase):
+    def test_a_return_for_correction_without_a_comment_is_refused_before_pm(self):
+        with self.assertRaises(frappe.ValidationError) as caught:
+            approvals.apply("Sales Invoice", "SINV-1", "Reject", comment="   ")
+
+        self.assertEqual(str(caught.exception), "A comment is required for this action")
+        self.pm.apply_workflow.assert_not_called()
+
+    def test_a_required_attachment_is_refused_while_the_document_has_none(self):
+        self.pm.get_transitions.return_value = [transition("Approve", require_attachment=1)]
+
+        with self.assertRaises(frappe.ValidationError) as caught:
+            approvals.apply("Sales Invoice", "SINV-1", "Approve")
+
+        self.assertEqual(str(caught.exception), "Attach a file before this action")
+        self.pm.apply_workflow.assert_not_called()
+
+    def test_a_required_attachment_is_fine_once_a_file_is_attached(self):
+        self.pm.get_transitions.return_value = [transition("Approve", require_attachment=1)]
+        self.tables["File"] = [{"name": "F-1", "file_url": "/files/a.pdf", "is_private": 0}]
+
+        self.assertTrue(approvals.apply("Sales Invoice", "SINV-1", "Approve")["ok"])
+        self.pm.apply_workflow.assert_called_once()
+
+    def test_an_action_the_document_does_not_offer_is_refused(self):
+        with self.assertRaises(frappe.ValidationError) as caught:
+            approvals.apply("Sales Invoice", "SINV-1", "Approve Cancellation", comment="ok")
+
+        self.assertEqual(str(caught.exception), "This action is not available for this document")
+        self.pm.apply_workflow.assert_not_called()
+
+    def test_a_self_owned_document_cannot_be_approved_by_its_owner(self):
+        frappe.local.session.user = OWNER
+        self.pm.get_transitions.return_value = [transition("Approve")]
+
+        with self.assertRaises(frappe.ValidationError):
+            approvals.apply("Sales Invoice", "SINV-1", "Approve")
+        self.pm.apply_workflow.assert_not_called()
+
+    def test_an_allowed_action_goes_to_pm_and_returns_the_new_state(self):
+        result = approvals.apply("Sales Invoice", "SINV-1", "Reject", comment="Wrong rate", priority="High")
+
+        self.pm.apply_workflow.assert_called_once_with(self.doc.as_dict(), "Reject", "Wrong rate", "High")
+        self.assertEqual(result, {"ok": True, "new_state": "Approved", "recommended": False})
+        frappe.local.db.commit.assert_not_called()  # Frappe commits at the end of the POST
+
+    def test_an_empty_comment_reaches_pm_as_none(self):
+        approvals.apply("Sales Invoice", "SINV-1", "Approve")
+
+        self.pm.apply_workflow.assert_called_once_with(self.doc.as_dict(), "Approve", None, "Medium")
+
+    def test_a_recommendation_needs_no_comment_and_says_so(self):
+        self.pm.get_open_return_adhoc_action.return_value = "WA-2"
+        self.tables["PM Workflow Transition"] = [
+            transition("Reject", next_state="Draft", is_return_for_correction=1, require_comment=1)
+        ]
+        self.new_state = "Pending Finance"  # PM records the answer; the document does not move
+
+        result = approvals.apply("Sales Invoice", "SINV-1", "Reject")
+
+        self.assertEqual(result, {"ok": True, "new_state": "Pending Finance", "recommended": True})
+        self.pm.apply_workflow.assert_called_once_with(self.doc.as_dict(), "Reject", None, "Medium")
+
+    def test_a_pm_refusal_is_raised_verbatim_and_nothing_is_committed(self):
+        self.pm.apply_workflow.side_effect = frappe.ValidationError("Invalid Workflow Action: Approve")
+
+        with self.assertRaises(frappe.ValidationError) as caught:
+            approvals.apply("Sales Invoice", "SINV-1", "Approve")
+
+        self.assertEqual(str(caught.exception), "Invalid Workflow Action: Approve")
+        frappe.local.db.commit.assert_not_called()
+
+    def test_an_unknown_priority_is_refused(self):
+        with self.assertRaises(frappe.ValidationError):
+            approvals.apply("Sales Invoice", "SINV-1", "Approve", priority="Urgent")
+        self.pm.apply_workflow.assert_not_called()
+
+    def test_a_user_who_cannot_read_gets_pms_permission_error(self):
+        self.pm.get_transitions.side_effect = frappe.PermissionError
+
+        with self.assertRaises(frappe.PermissionError):
+            approvals.apply("Sales Invoice", "SINV-1", "Approve")
+        self.pm.apply_workflow.assert_not_called()
+
+
+class TestApplyBulk(DetailCase):
+    def setUp(self):
+        super().setUp()
+        for name in ("SINV-2", "SINV-3"):
+            self.docs[("Sales Invoice", name)] = FakeDoc(
+                "Sales Invoice", name, workflow_state="Pending Finance", is_return=0
+            )
+
+    def _db_calls(self) -> list[str]:
+        return [c[0] for c in frappe.local.db.method_calls if c[0] in ("commit", "rollback")]
+
+    def test_one_refusal_does_not_stop_the_batch(self):
+        refusal = "Selling below the minimum price is not allowed for row 2 (Steel Bar)"
+
+        def apply_workflow(doc, action, comment, priority):
+            frappe.msgprint("a message from the document's own hooks")
+            if doc["name"] == "SINV-2":
+                raise frappe.ValidationError(refusal)
+
+        self.pm.apply_workflow.side_effect = apply_workflow
+
+        result = approvals.apply_bulk("Sales Invoice", '["SINV-1", "SINV-2", "SINV-3"]', "Approve")
+
+        self.assertEqual(
+            result,
+            {
+                "results": [
+                    {"docname": "SINV-1", "ok": True, "message": ""},
+                    {"docname": "SINV-2", "ok": False, "message": refusal},
+                    {"docname": "SINV-3", "ok": True, "message": ""},
+                ],
+                "ok_count": 2,
+                "failed_count": 1,
+            },
+        )
+        self.assertEqual(self._db_calls(), ["commit", "rollback", "commit"])
+        self.assertEqual(frappe.local.message_log, [])
+
+    def test_more_than_twenty_documents_are_refused_before_anything_runs(self):
+        names = frappe.as_json([f"SINV-{i}" for i in range(1, 22)])
+
+        with self.assertRaises(frappe.ValidationError):
+            approvals.apply_bulk("Sales Invoice", names, "Approve")
+        self.pm.apply_workflow.assert_not_called()
+        self.assertEqual(self._db_calls(), [])
+
+    def test_duplicates_are_dropped_before_the_cap_and_the_loop(self):
+        names = frappe.as_json(["SINV-1", "SINV-2", "SINV-1"] + ["SINV-3"] * 19)
+
+        result = approvals.apply_bulk("Sales Invoice", names, "Approve")
+
+        self.assertEqual([r["docname"] for r in result["results"]], ["SINV-1", "SINV-2", "SINV-3"])
+        self.assertEqual(self.pm.apply_workflow.call_count, 3)
+
+    def test_the_same_checks_as_a_single_apply_run_for_each_document(self):
+        result = approvals.apply_bulk("Sales Invoice", '["SINV-1", "SINV-2"]', "Reject", comment="")
+
+        self.assertEqual(result["failed_count"], 2)
+        self.assertEqual(
+            [r["message"] for r in result["results"]], ["A comment is required for this action"] * 2
+        )
+        self.pm.apply_workflow.assert_not_called()
+        self.assertEqual(self._db_calls(), ["rollback", "rollback"])
+
+    def test_a_bare_permission_error_reports_frappes_own_message(self):
+        def get_transitions(doc):
+            if doc.name == "SINV-2":
+                frappe.flags.error_message = "You need the 'read' permission on Sales Invoice SINV-2"
+                raise frappe.PermissionError
+            return [transition("Approve")]
+
+        self.pm.get_transitions.side_effect = get_transitions
+
+        result = approvals.apply_bulk("Sales Invoice", '["SINV-2", "SINV-3"]', "Approve")
+
+        self.assertEqual(
+            result["results"],
+            [
+                {"docname": "SINV-2", "ok": False,
+                 "message": "You need the 'read' permission on Sales Invoice SINV-2"},
+                {"docname": "SINV-3", "ok": True, "message": ""},
+            ],
+        )
+
+    def test_a_missing_document_fails_alone(self):
+        result = approvals.apply_bulk("Sales Invoice", '["SINV-404", "SINV-1"]', "Approve")
+
+        self.assertEqual([r["ok"] for r in result["results"]], [False, True])
+        self.assertIn("SINV-404", result["results"][0]["message"])
+
+    def test_names_must_be_a_list(self):
+        with self.assertRaises(frappe.ValidationError):
+            approvals.apply_bulk("Sales Invoice", '"SINV-1"', "Approve")
+
+
+class TestWritesNeedPm(DetailCase):
+    def test_detail_apply_and_bulk_refuse_without_pm(self):
+        self.available.return_value = False
+
+        for call in (
+            lambda: approvals.detail("Sales Invoice", "SINV-1"),
+            lambda: approvals.apply("Sales Invoice", "SINV-1", "Approve"),
+            lambda: approvals.apply_bulk("Sales Invoice", '["SINV-1"]', "Approve"),
+        ):
+            with self.assertRaises(frappe.ValidationError):
+                call()
+        self.assertEqual(self.pm.mock_calls, [])
 
 
 if __name__ == "__main__":
