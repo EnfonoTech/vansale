@@ -20,6 +20,7 @@ export const OVERDUE_DAYS = 30;
 export const NO_SHARED_REASON = "approvalsInbox.selection.noShared";
 export const LIMIT_REASON = "approvalsInbox.selection.limit";
 export const REVIEW_ONLY_REASON = "approvalsInbox.selection.reviewOnly";
+export const ADVICE_ONLY_REASON = "approvalsInbox.selection.adviceOnly";
 
 /** A document's identity in a list: names repeat across types. */
 export function itemKey(item: Pick<ApprovalItem, "doctype" | "docname">): string {
@@ -48,6 +49,18 @@ export function areaCounts(items: ApprovalItem[]): Record<string, number> {
 }
 
 /**
+ * The document was forwarded to the user with "return to me": they are asked
+ * for advice, and whatever they press is recorded as a recommendation while
+ * the document does not move (the server makes every action `recommend_only`
+ * for them). A batch must never offer that as a decision, so such a document
+ * is answered one at a time, from its own screen. A document the user
+ * forwarded away (`is_waiting`) is not theirs to answer at all.
+ */
+export function isAdviceOnly(item: Pick<ApprovalItem, "is_adhoc" | "return_to_originator" | "is_waiting">): boolean {
+  return Boolean(item.is_adhoc && item.return_to_originator && !item.is_waiting);
+}
+
+/**
  * Why `candidate` may not join `selected`, as an i18n key, or null when it may.
  * A document already selected is never blocked (it must stay deselectable).
  */
@@ -56,6 +69,8 @@ export function blockedReason(
   candidate: ApprovalItem,
   max: number = BULK_MAX,
 ): string | null {
+  // Advice is not a decision: it is given from the document's own screen.
+  if (isAdviceOnly(candidate)) return ADVICE_ONLY_REASON;
   // A document that no bulk action can take (every action wants a file) is decided from its own screen.
   if (bulkShared([candidate]).actions.length === 0) return REVIEW_ONLY_REASON;
   if (!selected.length) return null;
@@ -70,14 +85,20 @@ export function blockedReason(
   return null;
 }
 
-const REJECT_WORDS = /reject|return|send back|decline|deny|refuse|cancel|revoke/i;
-const APPROVE_WORDS = /approve|accept|authori[sz]e|confirm|verify|acknowledge|complete|submit/i;
-
-/** How a bulk button is styled: PM's action labels carry no tone, so it is read from the label. */
+/**
+ * How an action button is styled: "reject", "other" or "approve". The same rule
+ * as the server's `tone_of` (`approvals_rules.py`), so the bulk bar, the confirm
+ * sheet and the detail screen agree: a return-for-correction action is always
+ * a reject; otherwise the name decides from its START ("Reject Cancellation"
+ * rejects, "Request Cancellation" is neither, "Approve Return" approves); the
+ * rest approve. Words inside a name mean nothing: PM's labels are not prose.
+ */
 export function actionTone(flag: ActionFlag): ActionTone {
-  if (flag.is_return_for_correction || REJECT_WORDS.test(flag.action)) return "reject";
-  if (APPROVE_WORDS.test(flag.action)) return "approve";
-  return "other";
+  if (flag.is_return_for_correction) return "reject";
+  const name = (flag.action || "").trim().toLowerCase();
+  if (name.startsWith("reject")) return "reject";
+  if (name.startsWith("request")) return "other";
+  return "approve";
 }
 
 /** The server's UTC stamp as a Date, or null when there is none or it is unreadable. */

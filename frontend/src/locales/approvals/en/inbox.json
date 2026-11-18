@@ -76,6 +76,7 @@
       "limit": "Up to {max} documents at once.",
       "noShared": "No action is shared with the selected documents.",
       "reviewOnly": "Needs a closer look: open it to decide.",
+      "adviceOnly": "You were asked for advice: open it to give your answer.",
       "hint": "Press and hold a document to select it.",
       "bar": "Decide the selected documents"
     },

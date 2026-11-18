@@ -31,6 +31,7 @@ import {
   blockedReason,
   filterSections,
   formatStamp,
+  isAdviceOnly,
   itemKey,
   parseServerTime,
 } from "@/features/approvals/inbox";
@@ -90,7 +91,10 @@ const chosen = ref<string[]>([]);
 const needsYou = computed(() => inbox.value?.sections.flatMap((section) => section.items) ?? []);
 const selectedItems = computed<ApprovalItem[]>(() => {
   const byKey = new Map(needsYou.value.map((item) => [itemKey(item), item]));
-  return chosen.value.map((key) => byKey.get(key)).filter((item): item is ApprovalItem => Boolean(item));
+  // A document that turned into a request for advice since it was ticked is not decided in a batch.
+  return chosen.value
+    .map((key) => byKey.get(key))
+    .filter((item): item is ApprovalItem => item !== undefined && !isAdviceOnly(item));
 });
 const shared = computed(() => bulkShared(selectedItems.value));
 /** Reject first, approve last (the way the buttons sit in the bar). */
@@ -103,7 +107,7 @@ const barActions = computed(() => {
 
 // A document someone else decided leaves the list on the next refresh: it leaves the selection too.
 watch(needsYou, (items) => {
-  const present = new Set(items.map(itemKey));
+  const present = new Set(items.filter((item) => !isAdviceOnly(item)).map(itemKey));
   if (chosen.value.some((key) => !present.has(key))) chosen.value = chosen.value.filter((key) => present.has(key));
 });
 

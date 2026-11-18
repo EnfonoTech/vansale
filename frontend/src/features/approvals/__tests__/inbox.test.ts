@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  ADVICE_ONLY_REASON,
   BULK_MAX,
   LIMIT_REASON,
   NO_SHARED_REASON,
@@ -12,6 +13,7 @@ import {
   areaCounts,
   blockedReason,
   filterSections,
+  isAdviceOnly,
   isOverdue,
   itemKey,
   parseServerTime,
@@ -115,27 +117,87 @@ describe("blockedReason", () => {
   it("is not blocked when the candidate is already selected", () => {
     expect(blockedReason([jv1, jv2], jv1)).toBeNull();
   });
+
+  describe("a document forwarded to the user with return-to-me (advice, not a decision)", () => {
+    // The server turns every action on it into a recommendation: the document would not move.
+    const advice = item({ docname: "JV-ADV", is_adhoc: true, return_to_originator: true, forwarded_by: "Mariam K." });
+
+    it("cannot be ticked, alone or with others", () => {
+      expect(blockedReason([], advice)).toBe(ADVICE_ONLY_REASON);
+      expect(blockedReason([jv1], advice)).toBe(ADVICE_ONLY_REASON);
+    });
+
+    it("says so before the batch cap or a mismatch could", () => {
+      const many = Array.from({ length: BULK_MAX }, (_, n) => item({ docname: `FULL-${n}` }));
+      expect(blockedReason(many, advice)).toBe(ADVICE_ONLY_REASON);
+      expect(blockedReason([pi1], advice)).toBe(ADVICE_ONLY_REASON);
+    });
+
+    it("is blocked even when it is somehow already in the selection", () => {
+      expect(blockedReason([advice], advice)).toBe(ADVICE_ONLY_REASON);
+    });
+
+    it("is only when forwarded AND return-to-me: a plain forward acts like any document", () => {
+      const plainForward = item({ docname: "JV-FWD", is_adhoc: true, return_to_originator: false, forwarded_by: "Mariam K." });
+      expect(blockedReason([], plainForward)).toBeNull();
+      expect(blockedReason([jv1], plainForward)).toBeNull();
+    });
+
+    it("is not about a document the user forwarded away (that one is waiting, not theirs to decide)", () => {
+      const mine = item({ docname: "JV-OUT", is_adhoc: true, return_to_originator: true, is_waiting: true });
+      expect(isAdviceOnly(mine)).toBe(false);
+    });
+  });
 });
 
-describe("actionTone", () => {
-  it("reads approving words as approve", () => {
-    expect(actionTone(flag("Approve"))).toBe("approve");
-    expect(actionTone(flag("Accept"))).toBe("approve");
+describe("isAdviceOnly", () => {
+  it("needs a forward, return-to-me, and the document to be the user's to answer", () => {
+    expect(isAdviceOnly(item({ is_adhoc: true, return_to_originator: true }))).toBe(true);
+    expect(isAdviceOnly(item({ is_adhoc: true, return_to_originator: false }))).toBe(false);
+    expect(isAdviceOnly(item({ is_adhoc: false, return_to_originator: true }))).toBe(false);
+    expect(isAdviceOnly(item())).toBe(false);
+  });
+});
+
+describe("actionTone (mirrors the server's tone_of)", () => {
+  // The action names PM has on sft-uat.
+  it.each([
+    ["Approve", "approve"],
+    ["Reject", "reject"],
+    ["Send for Approval", "approve"],
+    ["Submit", "approve"],
+    ["Request Cancellation", "other"],
+    ["Reject Cancellation", "reject"],
+    ["Send for Acceptance", "approve"],
+    ["Approve Cancellation", "approve"],
+    ["Accept", "approve"],
+  ])("%s is %s", (action, tone) => {
+    expect(actionTone(flag(action))).toBe(tone);
   });
 
-  it("reads rejecting and returning words as reject", () => {
-    expect(actionTone(flag("Reject"))).toBe("reject");
-    expect(actionTone(flag("Return for Correction"))).toBe("reject");
-    expect(actionTone(flag("Send Back"))).toBe("reject");
-    expect(actionTone(flag("Cancel"))).toBe("reject");
+  it("reads the name from its start, not from a word inside it", () => {
+    expect(actionTone(flag("Approve Return"))).toBe("approve");
+    expect(actionTone(flag("Approve Cancellation"))).toBe("approve");
+    expect(actionTone(flag("Send for Rejection Review"))).toBe("approve");
+    expect(actionTone(flag("Requested Changes Done"))).toBe("other");
+  });
+
+  it("ignores case and spaces around the name", () => {
+    expect(actionTone(flag("  REJECT  "))).toBe("reject");
+    expect(actionTone(flag("request cancellation"))).toBe("other");
   });
 
   it("treats a return-for-correction flag as reject whatever it is called", () => {
     expect(actionTone(flag("Revise", { is_return_for_correction: true }))).toBe("reject");
+    expect(actionTone(flag("Approve", { is_return_for_correction: true }))).toBe("reject");
+    expect(actionTone(flag("Request Cancellation", { is_return_for_correction: true }))).toBe("reject");
   });
 
-  it("leaves other words neutral", () => {
-    expect(actionTone(flag("Review"))).toBe("other");
+  it("calls anything else approve, as the server does (no guessing from words like cancel or send back)", () => {
+    expect(actionTone(flag("Send Back"))).toBe("approve");
+    expect(actionTone(flag("Cancel"))).toBe("approve");
+    expect(actionTone(flag("Review"))).toBe("approve");
+    expect(actionTone(flag(""))).toBe("approve");
   });
 });
 
