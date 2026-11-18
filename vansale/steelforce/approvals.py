@@ -196,37 +196,63 @@ def detail(doctype: str, name: str) -> dict:
 
 
 @frappe.whitelist(methods=["POST"])
-def apply(doctype: str, name: str, action: str, comment: str = "", priority: str = "Medium") -> dict:
+def apply(
+    doctype: str,
+    name: str,
+    action: str,
+    comment: str = "",
+    priority: str = "",
+    expected_state: str = "",
+) -> dict:
     """Take `action` on one document as the signed-in user, through Permission
     Manager. The action must be one the document offers the user now, with the
-    comment or attachment it requires. Any refusal (PM's or the document's own)
-    is raised unchanged. Returns `{"ok": True, "new_state", "recommended"}`;
-    `recommended` is true when the user was asked for advice and the document
-    did not move."""
+    comment or attachment it requires. `expected_state` is the document's
+    workflow state when the user opened it: when given and the document has
+    moved since, it is refused before PM is asked. A blank `priority` leaves
+    the transition's own priority; a chosen one is Low, Medium, High or
+    Critical. Any refusal (PM's or the document's own) is raised unchanged.
+    Returns `{"ok": True, "new_state", "recommended"}`; `recommended` is true
+    when the user was asked for advice and the document did not move."""
     _require_available()
-    return _apply_one(cstr(doctype), cstr(name), cstr(action), cstr(comment), _priority(priority))
+    return _apply_one(
+        cstr(doctype),
+        cstr(name),
+        cstr(action),
+        _comment(comment),
+        _priority(priority),
+        expected_state=cstr(expected_state),
+    )
 
 
 @frappe.whitelist(methods=["POST"])
 def apply_bulk(
-    doctype: str, names: str, action: str, comment: str = "", priority: str = "Medium"
+    doctype: str,
+    names: str,
+    action: str,
+    comment: str = "",
+    priority: str = "",
+    expected_states: str = "",
 ) -> dict:
     """Take `action` on up to 20 documents of one type, one by one, with the
-    same checks as `apply`. `names` is a JSON list (duplicates are dropped).
-    Each document is committed on success and rolled back on failure, and one
-    failure never stops the others. Returns `{"results": [{"docname", "ok",
-    "message"}], "ok_count", "failed_count"}`, where `message` is the refusal
-    text as it was raised."""
+    same checks as `apply`. `names` is a JSON list (duplicates are dropped);
+    `expected_states` is a JSON object `{docname: state when listed}`, and a
+    document that moved since fails (a name not in it is not checked). A
+    document on which the user was only asked for advice fails too: that is
+    answered from its own screen. Each document is committed on success and
+    rolled back on failure, and one failure never stops the others. Returns
+    `{"results": [{"docname", "ok", "message"}], "ok_count", "failed_count"}`,
+    where `message` is the refusal as plain text."""
     _require_available()
-    doctype, action, comment = cstr(doctype), cstr(action), cstr(comment)
+    doctype, action, comment = cstr(doctype), cstr(action), _comment(comment)
     priority = _priority(priority)
     docnames = _bulk_names(names)
+    states = _expected_states(expected_states)
     _refuse_if_hidden(doctype)  # a hidden type refuses the whole batch
 
     results = []
     for docname in docnames:
         try:
-            _apply_one(doctype, docname, action, comment, priority)
+            _apply_one(doctype, docname, action, comment, priority, expected_state=states.get(docname, ""))
         except Exception as error:  # one document's refusal must not stop the batch
             frappe.db.rollback()
             results.append({"docname": docname, "ok": False, "message": _error_text(error)})
@@ -552,14 +578,26 @@ def _specs(rows: list, recommend_only: bool) -> list[dict]:
     ]
 
 
-def _apply_one(doctype: str, name: str, action: str, comment: str, priority: str) -> dict:
-    """`apply` for one document; `apply_bulk` runs every document through it."""
+def _apply_one(
+    doctype: str,
+    name: str,
+    action: str,
+    comment: str,
+    priority: Optional[str],
+    expected_state: str = "",
+) -> dict:
+    """`apply` for one document; `apply_bulk` runs every document through it.
+    `comment` is already trimmed; `priority` None leaves the transition's own."""
     _refuse_if_hidden(doctype)
     doc = frappe.get_doc(doctype, name)
     # The read check PM's `get_transitions` makes; a "return to me" recipient's
     # recommendations do not go through `get_transitions`, so it is made here.
+    # It comes before the state check, so the state is never told to someone
+    # who may not read the document.
     doc.check_permission("read")
     workflow = _workflow_of(doc)
+    if expected_state and expected_state != _state_of(doc, workflow):
+        frappe.throw(_("This document changed since you opened it. Review it again."))
     specs, _banner = _actions_for(doc, frappe.session.user, workflow)
     spec = next((spec for spec in specs if spec["action"] == action), None)
 
@@ -583,11 +621,34 @@ def _refusal_text(reason: str) -> str:
     return _("This action is not available for this document")
 
 
-def _priority(value) -> str:
-    priority = cstr(value) or "Medium"
+def _priority(value) -> Optional[str]:
+    """The chosen priority, or None when none was chosen (PM then uses the
+    transition's own)."""
+    priority = cstr(value).strip()
+    if not priority:
+        return None
     if priority not in PRIORITIES:
-        frappe.throw(_("Priority must be one of {0}").format(", ".join(_(p) for p in PRIORITIES)))
+        frappe.throw(_("Priority must be Low, Medium, High or Critical"))
     return priority
+
+
+def _comment(value) -> str:
+    """The comment without surrounding spaces ("" for none)."""
+    return cstr(value).strip()
+
+
+def _expected_states(value) -> dict[str, str]:
+    """`{docname: state}` from a bulk request's JSON object; {} when blank."""
+    if isinstance(value, str):
+        if not value.strip():
+            return {}
+        try:
+            value = frappe.parse_json(value)
+        except ValueError:
+            value = None
+    if not isinstance(value, dict):
+        frappe.throw(_("Send the expected states as an object of document names"))
+    return {cstr(name): cstr(state) for name, state in value.items()}
 
 
 def _bulk_names(names) -> list[str]:

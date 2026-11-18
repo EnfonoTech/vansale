@@ -1393,7 +1393,7 @@ class TestApply(DetailCase):
     def test_an_empty_comment_reaches_pm_as_none(self):
         approvals.apply("Sales Invoice", "SINV-1", "Approve")
 
-        self.pm.apply_workflow.assert_called_once_with(self.doc.as_dict(), "Approve", None, "Medium")
+        self.pm.apply_workflow.assert_called_once_with(self.doc.as_dict(), "Approve", None, None)  # no priority chosen: the transition default
 
     def test_a_recommendation_needs_no_comment_and_says_so(self):
         self.pm.get_open_return_adhoc_action.return_value = "WA-2"
@@ -1405,7 +1405,7 @@ class TestApply(DetailCase):
         result = approvals.apply("Sales Invoice", "SINV-1", "Reject")
 
         self.assertEqual(result, {"ok": True, "new_state": "Pending Finance", "recommended": True})
-        self.pm.apply_workflow.assert_called_once_with(self.doc.as_dict(), "Reject", None, "Medium")
+        self.pm.apply_workflow.assert_called_once_with(self.doc.as_dict(), "Reject", None, None)
 
     def test_a_pm_refusal_is_raised_verbatim_and_nothing_is_committed(self):
         self.pm.apply_workflow.side_effect = frappe.ValidationError("Invalid Workflow Action: Approve")
@@ -1688,6 +1688,140 @@ class TestTheWorkflowFollowsTheDocument(DetailCase):
         self.assertEqual(result["state"], "Pending GM")
         self.assertEqual(result["actions"], [spec("Approve", recommend_only=True)])
         self.pm.get_workflow.assert_called_with("Sales Invoice", docname="SINV-1", doc=self.doc, throw=False)
+
+    def test_the_expected_state_is_compared_with_the_workflows_own_state_field(self):
+        self.assertTrue(approvals.apply("Sales Invoice", "SINV-1", "Approve", expected_state="Pending GM")["ok"])
+
+        self.pm.apply_workflow.reset_mock()
+        # `workflow_state` says "Pending Finance" too, but this workflow keeps its state elsewhere
+        self.doc._fields["workflow_state"] = "Pending Finance"
+        with self.assertRaises(frappe.ValidationError) as caught:
+            approvals.apply("Sales Invoice", "SINV-1", "Approve", expected_state="Pending Finance")
+        self.assertEqual(str(caught.exception), CHANGED)
+        self.pm.apply_workflow.assert_not_called()
+
+
+CHANGED = "This document changed since you opened it. Review it again."
+
+
+class TestExpectedState(DetailCase):
+    """The approver decided on what they saw: `expected_state` is the state the
+    document was in when it was opened (or listed, for a batch). A document
+    that moved since is refused before PM is asked to do anything."""
+
+    def setUp(self):
+        super().setUp()
+        for name in ("SINV-2", "SINV-3"):
+            self.docs[("Sales Invoice", name)] = FakeDoc(
+                "Sales Invoice", name, workflow_state="Pending Finance", is_return=0
+            )
+
+    def test_the_state_it_was_opened_in_goes_ahead(self):
+        result = approvals.apply("Sales Invoice", "SINV-1", "Approve", expected_state="Pending Finance")
+
+        self.assertTrue(result["ok"])
+        self.pm.apply_workflow.assert_called_once()
+
+    def test_a_document_that_moved_since_it_was_opened_is_refused_before_pm(self):
+        with self.assertRaises(frappe.ValidationError) as caught:
+            approvals.apply("Sales Invoice", "SINV-1", "Approve", expected_state="Draft")
+
+        self.assertEqual(str(caught.exception), CHANGED)
+        self.pm.apply_workflow.assert_not_called()
+        self.pm.get_transitions.assert_not_called()
+        self.pm.get_open_return_adhoc_action.assert_not_called()
+
+    def test_no_expected_state_means_no_check(self):
+        self.doc._fields["workflow_state"] = "Something Else"
+        self.pm.get_transitions.return_value = [transition("Approve", state="Something Else")]
+
+        self.assertTrue(approvals.apply("Sales Invoice", "SINV-1", "Approve")["ok"])
+        self.assertTrue(approvals.apply("Sales Invoice", "SINV-1", "Approve", expected_state="")["ok"])
+
+    def test_the_state_is_not_revealed_to_someone_who_cannot_read_the_document(self):
+        self.readable = False
+
+        with self.assertRaises(frappe.PermissionError):
+            approvals.apply("Sales Invoice", "SINV-1", "Approve", expected_state="Draft")
+        self.pm.apply_workflow.assert_not_called()
+
+    def test_in_a_batch_a_moved_document_fails_alone_and_an_unlisted_one_is_not_checked(self):
+        self.docs[("Sales Invoice", "SINV-3")]._fields["workflow_state"] = "Approved"
+        self.pm.get_transitions.return_value = [transition("Approve")]
+        states = frappe.as_json({"SINV-1": "Pending Finance", "SINV-2": "Draft"})
+
+        result = approvals.apply_bulk(
+            "Sales Invoice", '["SINV-1", "SINV-2", "SINV-3"]', "Approve", expected_states=states
+        )
+
+        self.assertEqual(
+            result["results"],
+            [
+                {"docname": "SINV-1", "ok": True, "message": ""},
+                {"docname": "SINV-2", "ok": False, "message": CHANGED},
+                {"docname": "SINV-3", "ok": True, "message": ""},  # not in the map: not checked
+            ],
+        )
+        self.assertEqual(
+            [c.args[0]["name"] for c in self.pm.apply_workflow.call_args_list], ["SINV-1", "SINV-3"]
+        )
+
+    def test_expected_states_that_are_not_an_object_are_refused_before_anything_runs(self):
+        for bad in ('["SINV-1"]', '"Draft"', "not json"):
+            with self.subTest(bad=bad):
+                with self.assertRaises(frappe.ValidationError):
+                    approvals.apply_bulk("Sales Invoice", '["SINV-1"]', "Approve", expected_states=bad)
+        self.pm.apply_workflow.assert_not_called()
+        self.assertEqual([c[0] for c in frappe.local.db.method_calls if c[0] in ("commit", "rollback")], [])
+
+
+class TestPriorityAndComment(DetailCase):
+    """A blank priority is "not chosen": PM then uses the transition's own
+    default. A comment of only spaces is no comment."""
+
+    def setUp(self):
+        super().setUp()
+        self.docs[("Sales Invoice", "SINV-2")] = FakeDoc(
+            "Sales Invoice", "SINV-2", workflow_state="Pending Finance", is_return=0
+        )
+
+    def test_no_priority_reaches_pm_as_none(self):
+        approvals.apply("Sales Invoice", "SINV-1", "Approve")
+        approvals.apply("Sales Invoice", "SINV-1", "Approve", priority="")
+        approvals.apply("Sales Invoice", "SINV-1", "Approve", priority="  ")
+
+        self.assertEqual([c.args[3] for c in self.pm.apply_workflow.call_args_list], [None, None, None])
+
+    def test_a_chosen_priority_reaches_pm(self):
+        for priority in ("Low", "Medium", "High", "Critical"):
+            with self.subTest(priority=priority):
+                self.pm.apply_workflow.reset_mock()
+                approvals.apply("Sales Invoice", "SINV-1", "Approve", priority=priority)
+                self.assertEqual(self.pm.apply_workflow.call_args.args[3], priority)
+
+    def test_in_a_batch_no_priority_reaches_pm_as_none(self):
+        approvals.apply_bulk("Sales Invoice", '["SINV-1", "SINV-2"]', "Approve")
+
+        self.assertEqual([c.args[3] for c in self.pm.apply_workflow.call_args_list], [None, None])
+
+    def test_an_unknown_priority_is_refused_in_a_batch_before_anything_runs(self):
+        with self.assertRaises(frappe.ValidationError):
+            approvals.apply_bulk("Sales Invoice", '["SINV-1"]', "Approve", priority="Urgent")
+        self.pm.apply_workflow.assert_not_called()
+
+    def test_a_comment_of_spaces_reaches_pm_as_none_and_a_comment_is_trimmed(self):
+        approvals.apply("Sales Invoice", "SINV-1", "Approve", comment="   \n ")
+        approvals.apply("Sales Invoice", "SINV-1", "Approve", comment="  fine by me \n")
+
+        self.assertEqual(
+            [c.args[2] for c in self.pm.apply_workflow.call_args_list], [None, "fine by me"]
+        )
+
+    def test_in_a_batch_a_comment_of_spaces_reaches_pm_as_none(self):
+        approvals.apply_bulk("Sales Invoice", '["SINV-1"]', "Approve", comment="   ")
+
+        self.pm.apply_workflow.assert_called_once_with(self.docs[("Sales Invoice", "SINV-1")].as_dict(), "Approve", None, None)
+
 
 if __name__ == "__main__":
     unittest.main()
