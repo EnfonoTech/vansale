@@ -16,12 +16,13 @@
  * Guards:
  *   - Unauthenticated → /login
  *   - Authenticated but stale PIN → /pin (unlock mode)
- *   - Signed in without a van setup → Home is /approvals (no van screen, no van endpoint)
+ *   - Signed in without the van app (not a Van User or Van Manager) → every van
+ *     screen, Home included, is /approvals: no van screen, no van endpoint
  */
 import { createRouter, createWebHashHistory, createWebHistory } from "vue-router";
 import type { RouteRecordRaw } from "vue-router";
 import { useSessionStore } from "@/stores/session";
-import { approvalsOnly } from "@/features/approvals/inbox";
+import { approvalsOnly, routeAllowedWithoutVan } from "@/features/approvals/inbox";
 import { isNative, needsSiteSetup } from "./platform";
 
 const WEB_BASE = import.meta.env.DEV ? "/" : "/vansale/";
@@ -323,10 +324,11 @@ router.beforeEach((to) => {
   if (to.name === "route-today" && session.defaults && !session.routeEnabled) {
     return { name: "dashboard", replace: true };
   }
-  // A user with no van setup has no Home to show: it is a van screen and
-  // reads van endpoints. Their app starts at Approvals. Decided only once the
+  // A user without the van app has no van screen to show: they read van
+  // endpoints. Their app is Approvals and More, and a stale history entry or a
+  // deep link to any other screen lands on Approvals. Decided only once the
   // user's settings are known, so a van user is never sent away by a guess.
-  if (to.name === "dashboard" && approvalsOnly(session)) {
+  if (approvalsOnly(session) && !routeAllowedWithoutVan(to.name)) {
     return { name: "approvals", replace: true };
   }
   return true;
