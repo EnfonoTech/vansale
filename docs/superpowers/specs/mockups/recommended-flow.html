@@ -1,0 +1,170 @@
+<style>
+  .row{display:flex;gap:20px;flex-wrap:wrap;align-items:flex-start;margin-bottom:26px}
+  .cap{max-width:262px;margin:8px 4px 0;font-size:13px;line-height:1.4}
+  .cap b{display:block;font-size:14px;margin-bottom:2px}
+  .phone{width:262px;height:520px;background:#f4f6f9;border-radius:24px;border:6px solid #1c2230;overflow:hidden;position:relative;color:#1b2333;font:12.5px/1.35 -apple-system,Segoe UI,Roboto,sans-serif;display:flex;flex-direction:column}
+  .bar{background:#1c2230;color:#fff;padding:11px 13px 9px;display:flex;justify-content:space-between;align-items:center}
+  .bar b{font-size:15px}.bar .badge{background:#ff6b4a;border-radius:10px;padding:1px 8px;font-size:11.5px;font-weight:700}
+  .tabs{display:flex;background:#fff;border-bottom:1px solid #e3e7ee}
+  .tabs span{flex:1;text-align:center;padding:8px 0;font-size:11px;color:#6b7686;white-space:nowrap}
+  .tabs span.on{color:#1c2230;font-weight:700;border-bottom:3px solid #4f7cff}
+  .chips{display:flex;gap:5px;padding:7px 9px;overflow:hidden;background:#fff}
+  .chip{background:#eef1f6;border-radius:13px;padding:2px 9px;font-size:11px;white-space:nowrap;color:#44506a}.chip.on{background:#4f7cff;color:#fff}
+  .stat{display:flex;gap:10px;padding:6px 11px;font-size:11px;background:#fff;border-top:1px solid #eef1f6;color:#566179}
+  .stat b.r{color:#b3282d}
+  .list{padding:7px 9px;display:flex;flex-direction:column;gap:7px;overflow:hidden;flex:1}
+  .sec{font-size:10.5px;font-weight:800;text-transform:uppercase;letter-spacing:.04em;color:#6b7686;margin:3px 2px 0}
+  .card{background:#fff;border-radius:11px;padding:8px 9px 8px 11px;box-shadow:0 1px 2px rgba(20,30,50,.08);border-left:5px solid #cfd6e2;position:relative}
+  .card.hi{border-left-color:#e5484d}.card.md{border-left-color:#f5a524}.card.lo{border-left-color:#2fa56a}.card.cr{border-left-color:#7a1f24}
+  .card .t{display:flex;justify-content:space-between;gap:6px;font-weight:700}.card .s{color:#566179;font-size:11.5px;margin-top:1px}
+  .card .m{display:flex;gap:5px;margin-top:5px;flex-wrap:wrap}
+  .tag{font-size:10px;background:#eef1f6;border-radius:8px;padding:1px 6px;color:#44506a}.tag.age{background:#fdeceb;color:#b3282d}.tag.ok{background:#e3f6ec;color:#1b7a4c}.tag.warn{background:#fff3d6;color:#8a5a00}
+  .nav{display:flex;background:#fff;border-top:1px solid #e3e7ee}.nav span{flex:1;text-align:center;padding:7px 0 8px;font-size:10px;color:#7b8699}.nav span.on{color:#4f7cff;font-weight:700}
+  .chk{position:absolute;right:8px;top:8px;width:16px;height:16px;border-radius:5px;border:2px solid #b8c1d1;background:#fff}.chk.on{background:#4f7cff;border-color:#4f7cff}
+  .body{padding:10px 11px;overflow:hidden;flex:1;display:flex;flex-direction:column;gap:7px}
+  .big{font-size:21px;font-weight:800}
+  .pill{display:inline-block;background:#fff3d6;color:#8a5a00;border-radius:10px;padding:1px 8px;font-size:10.5px;font-weight:700}
+  .kv{display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px dashed #e3e7ee}.kv span:first-child{color:#6b7686}
+  .box{background:#fff;border-radius:10px;padding:8px 9px;box-shadow:0 1px 2px rgba(20,30,50,.07)}
+  .box h4{margin:0 0 5px;font-size:10.5px;text-transform:uppercase;letter-spacing:.04em;color:#6b7686}
+  .ln{display:flex;justify-content:space-between;font-size:11.5px;padding:2px 0}.ln i{font-style:normal;color:#566179}
+  .chain{display:flex;align-items:center;gap:4px;font-size:10.5px;flex-wrap:wrap}
+  .dot{padding:2px 7px;border-radius:9px;background:#eef1f6;color:#566179}.dot.done{background:#e3f6ec;color:#1b7a4c}.dot.now{background:#4f7cff;color:#fff;font-weight:700}
+  .act{display:flex;gap:7px;padding:9px;background:#fff;border-top:1px solid #e3e7ee}
+  .act i{flex:1;text-align:center;font-style:normal;border-radius:10px;padding:10px 0;font-weight:800;font-size:12px}
+  .act .no{background:#fdeceb;color:#b3282d}.act .fw{background:#eef1f6;color:#44506a}.act .yes{background:#1b7a4c;color:#fff;flex:1.3}
+  .dim{position:absolute;inset:0;background:rgba(10,15,30,.45)}
+  .sheet{position:absolute;left:0;right:0;bottom:0;background:#fff;border-radius:18px 18px 0 0;padding:12px 12px 14px;box-shadow:0 -6px 20px rgba(0,0,0,.25)}
+  .sheet h4{margin:0 0 6px;font-size:14px}
+  .field{border:1px solid #cfd6e2;border-radius:9px;padding:7px 9px;color:#6b7686;min-height:44px;margin:4px 0}
+  .field.req{border-color:#e5484d}
+  .hint{font-size:10.5px;color:#b3282d;margin:2px 0 5px}.hint.g{color:#566179}
+  .seg{display:flex;background:#eef1f6;border-radius:9px;padding:2px;margin:4px 0}.seg span{flex:1;text-align:center;padding:5px 0;font-size:11px;border-radius:7px;color:#566179}.seg span.on{background:#fff;color:#1c2230;font-weight:700;box-shadow:0 1px 2px rgba(0,0,0,.12)}
+  .btn{text-align:center;border-radius:10px;padding:10px 0;font-weight:800;margin-top:6px}.btn.off{background:#e6e9f0;color:#98a1b3}.btn.on{background:#b3282d;color:#fff}.btn.go{background:#1b7a4c;color:#fff}
+  .att{display:flex;justify-content:space-between;align-items:center;border:1px dashed #9aa6bd;border-radius:9px;padding:7px 9px;margin:4px 0;color:#44506a}
+  .usr{display:flex;align-items:center;gap:8px;padding:6px 2px;border-bottom:1px solid #eef1f6}.av{width:26px;height:26px;border-radius:13px;background:#dfe6f7;color:#2b4ba8;font-weight:800;display:flex;align-items:center;justify-content:center;font-size:11px}
+  .tgl{display:flex;justify-content:space-between;align-items:center;padding:6px 0}.sw{width:32px;height:18px;border-radius:9px;background:#4f7cff;position:relative}.sw:after{content:"";position:absolute;right:2px;top:2px;width:14px;height:14px;border-radius:7px;background:#fff}
+  .quote{font-style:italic;color:#44506a;border-left:3px solid #f5a524;padding-left:7px;margin-top:5px}
+</style>
+
+<h2>Recommended: PM approvals on the phone</h2>
+<p class="subtitle">Same rules as the desk inbox, laid out for one hand. Sample data is invented.</p>
+
+<div class="row">
+
+  <div>
+    <div class="phone">
+      <div class="bar"><b>Approvals</b><span class="badge">12</span></div>
+      <div class="tabs"><span class="on">To approve</span><span>My requests</span><span>Sent back 1</span><span>History</span></div>
+      <div class="chips"><span class="chip on">All</span><span class="chip">Accounts 6</span><span class="chip">Purchase 3</span><span class="chip">Sales 2</span><span class="chip">Masters</span></div>
+      <div class="stat"><span><b class="r">2</b> high</span><span><b class="r">1</b> over 30 days</span></div>
+      <div class="list">
+        <div class="sec">Approval pending · 9</div>
+        <div class="card cr"><div class="t"><span>Journal Entry</span><span>749.820</span></div><div class="s">ACC-JV-2026-02580 · Al Noor Trading</div><div class="m"><span class="tag age">34 days</span><span class="tag">Critical</span><span class="tag">Accounts Mgr</span></div></div>
+        <div class="card hi"><div class="t"><span>Customer</span><span>5,000</span></div><div class="s">Torbo Contracting · credit approval</div><div class="m"><span class="tag age">2 days</span><span class="tag">High</span></div></div>
+        <div class="card md"><div class="t"><span>Purchase Invoice</span><span>2,939.700</span></div><div class="s">ACC-PINV-2026-01044 · Hardware Source</div><div class="m"><span class="tag">1 day</span><span class="tag">Medium</span></div></div>
+        <div class="sec">Decision pending · 2</div>
+        <div class="card lo"><div class="t"><span>Sales return</span><span>522.850</span></div><div class="s">SINV-RET-00071 · Damaged</div><div class="m"><span class="tag">5 h</span><span class="tag">Low</span></div></div>
+        <div class="sec">Waiting on others · 2</div>
+        <div class="card" style="opacity:.7"><div class="t"><span>Journal Entry</span><span>310.500</span></div><div class="s">ACC-JV-2026-02593 · with Mariam K.</div></div>
+      </div>
+      <div class="nav"><span class="on">Approvals</span><span>Sales</span><span>Customers</span><span>More</span></div>
+    </div>
+    <div class="cap"><b>1 · Inbox</b>Layout B. "Needs you" uses PM's own sections (Approval, Decision, Acknowledgement pending), urgency first. "Waiting on others" sits below with no buttons, so the total equals the desk. Tabs: To approve, My requests, Sent back, History.</div>
+  </div>
+
+  <div>
+    <div class="phone">
+      <div class="bar"><b>‹ Journal Entry</b><span class="tag" style="background:#fff3d6">High</span></div>
+      <div class="body">
+        <div><span class="pill">Pending Accounts Manager</span></div>
+        <div class="big">749.820 BHD</div>
+        <div style="color:#566179;margin-top:-4px">ACC-JV-2026-02580 · raised by Mohammed</div>
+        <div class="box"><h4>Key facts</h4>
+          <div class="kv"><span>Posting date</span><span>12 Nov 2026</span></div>
+          <div class="kv"><span>Voucher type</span><span>Bank Entry</span></div>
+          <div class="kv"><span>Remarks</span><span>Cheque 102601326</span></div></div>
+        <div class="box"><h4>Lines (4)</h4>
+          <div class="ln"><span>Bank – SFB</span><i>Dr 749.820</i></div>
+          <div class="ln"><span>PDC Receivable</span><i>Cr 749.820</i></div>
+          <div class="ln" style="color:#6b7686">+ 2 more ›</div></div>
+        <div class="box"><h4>Route</h4>
+          <div class="chain"><span class="dot done">Draft</span>›<span class="dot now">Accounts Mgr · you</span>›<span class="dot">Finance Head</span>›<span class="dot">Approved</span></div>
+          <div style="margin-top:5px;font-size:11px;color:#566179">Also can act now: Mariam K.</div></div>
+        <div class="tag">📎 1 attachment</div>
+      </div>
+      <div class="act"><i class="no">Reject</i><i class="fw">Forward</i><i class="yes">Approve</i></div>
+    </div>
+    <div class="cap"><b>2 · Review, then decide</b>Facts first, lines, the real route and who else can act. Buttons come from this document's own allowed transitions, so only valid ones appear. No approve on the list, so nobody approves blind.</div>
+  </div>
+
+  <div>
+    <div class="phone">
+      <div class="bar"><b>‹ Journal Entry</b></div>
+      <div class="body" style="opacity:.4"><div class="big">749.820 BHD</div></div>
+      <div class="dim"></div>
+      <div class="sheet">
+        <h4>Reject · ACC-JV-2026-02580</h4>
+        <div class="field req">Reason for returning…</div>
+        <div class="hint">Required: a returned document needs a reason.</div>
+        <div class="att"><span>Attachment required</span><span style="color:#4f7cff;font-weight:700">Camera · File</span></div>
+        <div class="seg"><span>Low</span><span class="on">Medium</span><span>High</span><span>Critical</span></div>
+        <div class="hint g">Needs a connection. Approvals are never queued offline.</div>
+        <div class="btn off">Confirm reject</div>
+      </div>
+    </div>
+    <div class="cap"><b>3 · Action sheet</b>The sheet asks only what PM requires for that action: a reason when it returns for correction, an attachment when the transition demands one, and a priority. Confirm stays off until satisfied.</div>
+  </div>
+
+</div>
+
+<div class="row">
+
+  <div>
+    <div class="phone">
+      <div class="bar"><b>‹ Forward</b></div>
+      <div class="body">
+        <div style="color:#566179">Send ACC-JV-2026-02580 to another person for input. Your action shows as <b>Forwarded</b>.</div>
+        <div class="field" style="min-height:0">🔍 Search users…</div>
+        <div class="box" style="padding:2px 9px">
+          <div class="usr"><div class="av">MK</div><div><b>Mariam K.</b><br><span style="color:#6b7686;font-size:11px">Finance Head</span></div></div>
+          <div class="usr"><div class="av">SH</div><div><b>Shafeek</b><br><span style="color:#6b7686;font-size:11px">Operations Head</span></div></div>
+          <div class="usr" style="border:0"><div class="av">AP</div><div><b>Arathi P.</b><br><span style="color:#6b7686;font-size:11px">Sales Support</span></div></div></div>
+        <div class="field" style="min-height:34px">Note (optional)</div>
+        <div class="tgl"><span>Return to me after their input</span><div class="sw"></div></div>
+        <div class="btn go">Forward</div>
+      </div>
+    </div>
+    <div class="cap"><b>4 · Forward</b>Ad-hoc approver, optional note, and "return to me after their input". While forwarded, the item sits under Waiting with who holds it and no buttons.</div>
+  </div>
+
+  <div>
+    <div class="phone">
+      <div class="bar"><b>Approvals</b><span class="badge">12</span></div>
+      <div class="tabs"><span>To approve</span><span>My requests</span><span class="on">Sent back 1</span><span>History</span></div>
+      <div class="list">
+        <div class="card md"><div class="t"><span>Sales Order</span><span>8,420.000</span></div><div class="s">SO-00231 · Dammam</div>
+          <div class="quote">“Wrong cost centre, please correct.”</div>
+          <div class="m"><span class="tag warn">Sent back by Mariam K.</span><span class="tag">2 days ago</span></div>
+          <div class="btn go" style="background:#4f7cff;margin-top:7px">Open and correct</div></div>
+      </div>
+      <div class="nav"><span class="on">Approvals</span><span>Sales</span><span>Customers</span><span>More</span></div>
+    </div>
+    <div class="cap"><b>5 · Sent back (for the person who raised it)</b>Shows the approver's reason. Sales documents open the app's own edit form. Other types open the full form, since the PWA has no editor for them.</div>
+  </div>
+
+  <div>
+    <div class="phone">
+      <div class="bar"><b>3 selected</b><span style="font-size:12px">Cancel</span></div>
+      <div class="list" style="padding-top:9px">
+        <div class="card hi"><span class="chk on"></span><div class="t" style="padding-right:22px"><span>Journal Entry</span><span>1,200.000</span></div><div class="s">ACC-JV-2026-02591 · Rent accrual</div></div>
+        <div class="card md"><span class="chk on"></span><div class="t" style="padding-right:22px"><span>Journal Entry</span><span>310.500</span></div><div class="s">ACC-JV-2026-02593 · Fuel</div></div>
+        <div class="card md"><span class="chk on"></span><div class="t" style="padding-right:22px"><span>Journal Entry</span><span>88.000</span></div><div class="s">ACC-JV-2026-02597 · Courier</div></div>
+        <div class="card lo" style="opacity:.55"><span class="chk"></span><div class="t" style="padding-right:22px"><span>Purchase Invoice</span><span>2,939.700</span></div><div class="s">Different action set, can't join</div></div>
+      </div>
+      <div class="act"><i class="no">Reject 3</i><i class="yes">Approve 3</i></div>
+    </div>
+    <div class="cap"><b>6 · Bulk</b>Long-press to select. Only items sharing the same action can be batched. Tapping Approve opens a confirm sheet listing each document, party and amount. Each is applied one by one and each result is shown, so one refusal doesn't hide the rest.</div>
+  </div>
+
+</div>
