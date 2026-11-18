@@ -11,6 +11,7 @@
 import { defineStore } from "pinia";
 import { isOnline } from "@/app/online";
 import type { ConfigDefaults } from "@/api/me";
+import { clearApprovalsCache } from "@/features/approvals/cache";
 
 const LS_KEY = "vansale.session";
 const PIN_WINDOW_MS = 2 * 60 * 60 * 1000; // 2 hours
@@ -81,6 +82,8 @@ export const useSessionStore = defineStore("session", {
     defaultCompany: (s) => s.defaults?.company ?? null,
     currency: (s) => s.defaults?.currency ?? null,
     isVanUser: (s) => Boolean(s.defaults?.is_van_user),
+    /** Approvals (Permission Manager) are on for this site; off on older servers. */
+    approvalsEnabled: (s) => s.defaults?.approvals?.enabled === true,
     requireLocation: (s) => Boolean(s.defaults?.require_location),
     /**
      * Route planning is opt-out per van. Defaults to true while `defaults`
@@ -180,6 +183,8 @@ export const useSessionStore = defineStore("session", {
       persist(this.$state);
     },
     logout() {
+      // The saved approvals inbox is the user's own: it goes with them.
+      clearApprovalsCache();
       this.$patch(initial());
       persist(this.$state);
     },

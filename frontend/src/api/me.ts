@@ -62,6 +62,8 @@ export interface ConfigDefaults {
   };
   /** Selling-flow settings (Vansale Settings / van). Missing on older servers = old behaviour. */
   selling_flow?: SellingFlow;
+  /** Approvals (Permission Manager) are installed on the site. Missing on older servers = off. */
+  approvals?: { enabled: boolean };
 }
 
 export interface SellingFlow {
