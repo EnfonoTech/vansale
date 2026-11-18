@@ -1,12 +1,17 @@
-// Invoice / receipt print format pickers only offer formats for that doctype.
+// Each print format picker only offers formats for its doctype.
+// Vansale Configuration has the same filter (vansale_configuration.js).
+const VANSALE_PRINT_FORMAT_FIELDS = {
+	invoice_print_format: "Sales Invoice",
+	receipt_print_format: "Payment Entry",
+	quotation_print_format: "Quotation",
+	sales_order_print_format: "Sales Order",
+};
+
 frappe.ui.form.on("Vansale Settings", {
 	setup(frm) {
-		frm.set_query("invoice_print_format", () => ({
-			filters: { doc_type: "Sales Invoice", disabled: 0 },
-		}));
-		frm.set_query("receipt_print_format", () => ({
-			filters: { doc_type: "Payment Entry", disabled: 0 },
-		}));
+		for (const [field, doctype] of Object.entries(VANSALE_PRINT_FORMAT_FIELDS)) {
+			frm.set_query(field, () => ({ filters: { doc_type: doctype, disabled: 0 } }));
+		}
 	},
 	// "PDF same as browser print": Chromium + fonts on the server (vansale/pdf_engine.py).
 	refresh(frm) {

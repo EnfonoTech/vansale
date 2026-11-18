@@ -510,7 +510,11 @@ def return_without_invoice_allowed(user: str | None = None) -> bool:
 
 
 def print_formats(user: str | None = None) -> dict:
-    """Print formats the app uses: van → Vansale Settings → the app's own."""
+    """Print formats the app uses: van → Vansale Settings → the app's own.
+
+    Quotation / Sales Order have no app layout: they fall back to the
+    doctype's default print format (Customize Form), else Standard.
+    """
     return {
         "invoice": _van_or_global(
             "invoice_print_format", "invoice_print_format", DEFAULT_INVOICE_PRINT_FORMAT, user
@@ -518,7 +522,21 @@ def print_formats(user: str | None = None) -> dict:
         "receipt": _van_or_global(
             "receipt_print_format", "receipt_print_format", DEFAULT_RECEIPT_PRINT_FORMAT, user
         ),
+        "quotation": _van_or_global(
+            "quotation_print_format", "quotation_print_format", _desk_print_format("Quotation"), user
+        ),
+        "sales_order": _van_or_global(
+            "sales_order_print_format", "sales_order_print_format", _desk_print_format("Sales Order"), user
+        ),
     }
+
+
+def _desk_print_format(doctype: str) -> str:
+    """The doctype's default print format as desk prints it, else Standard."""
+    fmt = frappe.get_meta(doctype).default_print_format
+    if fmt and not frappe.db.get_value("Print Format", fmt, "disabled"):
+        return fmt
+    return "Standard"
 
 
 def print_behaviour(user: str | None = None) -> dict:
