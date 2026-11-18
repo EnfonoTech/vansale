@@ -180,7 +180,8 @@ def config_defaults() -> dict:
         "language": user_doc.language or "en",
         "is_van_user": "Van User" in roles,
         "is_van_manager": "Van Manager" in roles,
-        "is_system_manager": "System Manager" in roles,
+        # Administrator's own role rows are not its full list of roles.
+        "is_system_manager": user == "Administrator" or "System Manager" in roles,
         "roles": roles,
         "company": company,
         "branch": branch,
