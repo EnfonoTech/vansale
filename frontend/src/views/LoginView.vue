@@ -76,6 +76,9 @@ async function onSubmit() {
     session.setRequirePin(needsPin);
     if (!needsPin) {
       session.markPinVerified();
+      // The PIN screen loads the settings; without it, load them here, or
+      // the first screens run on none (no warehouse, no delivery person…).
+      await session.refreshDefaults();
       await router.replace({ name: "dashboard" });
       return;
     }

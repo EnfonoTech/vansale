@@ -19,11 +19,26 @@ from vansale.api.doc_defaults import apply_van_defaults
 from vansale.api.invoice import _get_default_warehouse, _user_company
 from vansale.api.me import update_stock_enabled
 from vansale.api.outbox import claim
+from vansale import steelforce
 
 _LIST_FIELDS = [
     "name", "customer", "customer_name", "grand_total", "status", "transaction_date",
     "delivery_date", "per_delivered", "per_billed", "docstatus", "modified",
 ]
+
+
+def _set_payment_type(doc, payment_type: Optional[str]) -> None:
+    """Cash / credit on the order, on sites that keep it there (Steel Force:
+    `custom_payment_mode`, which its credit-overdue and cash-limit checks read).
+    A credit order gets the same credit-limit rule as a credit invoice."""
+    from vansale.api.precheck import check_credit_allowed
+
+    pay_type = (payment_type or "").lower()
+    if not pay_type:
+        return
+    if pay_type in ("credit", "cheque"):
+        check_credit_allowed(doc.customer, doc.company)
+    steelforce.set_payment_mode(doc, pay_type)
 
 
 def _fill(doc, items, delivery_date, remarks, discount_amount, warehouse) -> None:
@@ -60,6 +75,7 @@ def save(
     discount_amount: Optional[float] = None,
     submit: int = 0,
     posting_ts: Optional[str] = None,
+    payment_type: Optional[str] = None,  # "cash" / "credit" (sites with a payment mode on orders)
 ) -> dict:
     if not client_id:
         frappe.throw(_("client_id is required"))
@@ -84,6 +100,7 @@ def save(
     if template:
         doc.taxes_and_charges = template
     _fill(doc, items, delivery_date, remarks, discount_amount, warehouse or _get_default_warehouse(company))
+    _set_payment_type(doc, payment_type)
     doc.insert()
     if cint(submit):
         doc.submit()
@@ -104,11 +121,13 @@ def update_draft(
     remarks: Optional[str] = None,
     discount_amount: Optional[float] = None,
     submit: int = 0,
+    payment_type: Optional[str] = None,
 ) -> dict:
     if not items:
         frappe.throw(_("At least one item is required"))
     doc = selling.own_draft("Sales Order", name, "edit")
     _fill(doc, items, delivery_date, remarks, discount_amount, warehouse or doc.set_warehouse)
+    _set_payment_type(doc, payment_type)
     doc.flags.ignore_version = True
     doc.save()
     if cint(submit):
@@ -173,6 +192,7 @@ def detail(name: str) -> dict:
         "per_billed": flt(doc.per_billed),
         "remarks": doc.terms,
         "warehouse": doc.set_warehouse,
+        "payment_type": steelforce.payment_type_of(doc),
         **selling.totals(doc),
         "items": selling.line_rows(doc),
         "taxes": selling.tax_rows(doc),

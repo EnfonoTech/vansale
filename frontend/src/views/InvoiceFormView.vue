@@ -38,6 +38,12 @@ import { vDecimals } from "@/components/decimals";
 import { revealOnFocus } from "@/components/reveal";
 import { inputValue } from "@/components/liveInput";
 import { confirmSubmit, withCurrency } from "@/stores/confirm";
+import { precheckBeforeSubmit } from "@/api/precheck";
+import { drivers as listDrivers, type DriverRow } from "@/api/steelforce";
+import CreditPanel from "@/components/CreditPanel.vue";
+import LineInsight from "@/components/LineInsight.vue";
+import { useLineInsight } from "@/features/van/lineInsight";
+import { creditRefusal, useCreditStatus, type PayType } from "@/features/van/credit";
 
 const router = useRouter();
 const route = useRoute();
@@ -55,7 +61,15 @@ const isEditMode = computed(() => Boolean(editName.value));
 interface Line extends InvoiceItem {
   uoms?: ItemUom[];        // per-line UOM choices
   amount: number;          // computed
+  min_rate?: number;       // lowest rate the site accepts for this line's UOM
 }
+
+/** The line's rate after its line discount — what the minimum is compared with. */
+function effectiveRate(l: Line): number {
+  const disc = session.lineDiscount ? Number(l.discount_percentage) || 0 : 0;
+  return (Number(l.rate) || 0) * (1 - disc / 100);
+}
+const belowMin = (l: Line) => Boolean(l.min_rate) && effectiveRate(l) + 0.0001 < (l.min_rate ?? 0);
 
 const customers = ref<CustomerRow[]>([]);
 const items = ref<ItemRow[]>([]);
@@ -65,12 +79,22 @@ const warehouse = computed(() => session.defaultWarehouse ?? "");
 const lines = ref<Line[]>([]);
 const itemSearch = ref("");
 const remarks = ref("");
+// Last price to this customer and short stock, under each line.
+const insight = useLineInsight({ customer, lines, warehouse: computed(() => warehouse.value || undefined) });
 
 // New invoices start on the "Default payment on invoice" setting; a reopened draft keeps its own.
-const paymentType = ref<"cash" | "credit">(session.defaultPaymentType);
+const paymentType = ref<"cash" | "credit" | "cheque">(session.defaultPaymentType);
 const modeOfPayment = ref<string>("Cash");
 // Modes with an account for this company (server-filtered), not a fixed list.
 const mops = ref<ModeOfPayment[]>([]);
+// Post-dated cheque sale (Steel Force): the branch's cheque modes, number and date.
+const chequeMops = ref<ModeOfPayment[]>([]);
+const chequeMode = ref("");
+const chequeNo = ref("");
+const chequeDate = ref(new Date().toISOString().slice(0, 10));
+// Delivery person on a cash sale ("Ask for the delivery person" setting).
+const driverList = ref<DriverRow[]>([]);
+const driver = ref("");
 
 /**
  * Split cash payment ("Split payment" setting): several modes on one sale,
@@ -79,16 +103,46 @@ const mops = ref<ModeOfPayment[]>([]);
  */
 interface PayRow { mode: string; amount: number | null; reference: string }
 const payRows = ref<PayRow[]>([]);
-// "Cash sale collection" setting: collected on the spot, left for the driver /
-// office ("Collect later"), or the salesman's choice per sale.
-const collectLaterChoice = ref(false);
-const laterChoosable = computed(() => session.cashCollection === "Salesman chooses");
-const collectLater = computed(
-  () =>
-    paymentType.value === "cash" &&
-    (session.cashCollection === "Collect later" || (laterChoosable.value && collectLaterChoice.value)),
+// A cash sale is paid on the spot. Only one handed to a delivery person asks
+// "now or on delivery" (on delivery by default, as sf_trading's desk form).
+const driverCollects = ref(true);
+const pickedDriver = computed(() => driverList.value.find((d) => d.name === driver.value));
+const driverName = computed(() => pickedDriver.value?.full_name || driver.value);
+const collectLater = computed(() => paymentType.value === "cash" && Boolean(driver.value) && driverCollects.value);
+function onDriverPicked() {
+  driverCollects.value = true;
+}
+// Watched, not read once on mount: the settings can arrive after the form
+// opens (first start, or right after login).
+watch(
+  () => session.askDriver,
+  (on) => {
+    if (on && !driverList.value.length) void listDrivers().then((d) => (driverList.value = d)).catch(() => {});
+  },
+  { immediate: true },
 );
 const useSplit = computed(() => session.splitPayment && paymentType.value === "cash" && !collectLater.value);
+
+// The customer's credit (limit / used / overdue), shown in Payment. Credit or
+// Cheque the customer can't have is refused on tap, with the reason.
+const { status: credit, loading: creditLoading } = useCreditStatus(customer);
+// An invoice made from an order: the order was already checked against the limit.
+const fromOrder = ref(false);
+const refusalFor = (t: PayType) => creditRefusal(credit.value, t);
+function pickPayment(t: PayType) {
+  const why = refusalFor(t);
+  if (why && paymentType.value !== t) {
+    toasts.warn(why);
+    return;
+  }
+  paymentType.value = t;
+}
+// Cheque dated after today: post-dated, held until it can be banked.
+const chequeDaysAhead = computed(() => {
+  if (!chequeDate.value) return 0;
+  const today = new Date(new Date().toISOString().slice(0, 10));
+  return Math.round((new Date(chequeDate.value).getTime() - today.getTime()) / 86_400_000);
+});
 const needsReference = (mode: string) => Boolean(mops.value.find((m) => m.name === mode)?.needs_reference);
 
 function addPayRow() {
@@ -243,6 +297,18 @@ const singleCredit = computed(() =>
 );
 const netOfTax = computed(() => totals.value.netOfTax);
 
+/**
+ * What ERPNext's credit-limit check counts for this sale. It runs at submit,
+ * before a Payment Entry is made, so a cash sale posted by Payment Entry counts
+ * whole; a POS cash sale counts only what is left unpaid.
+ */
+const unpaidPart = computed(() => {
+  if (fromOrder.value) return 0;
+  if (paymentType.value !== "cash" || collectLater.value) return grandTotal.value;
+  if (session.$state.defaults?.cash_sale_posting === "Payment Entry") return grandTotal.value;
+  return useSplit.value ? Math.max(splitCredit.value, 0) : singleCredit.value;
+});
+
 const selectedCustomer = computed(() =>
   customers.value.find((c) => c.name === customer.value),
 );
@@ -262,6 +328,7 @@ watch(customer, async (newCustomer) => {
   for (const l of lines.value) {
     try {
       const p = await priceFor(l.item_code, newCustomer, l.uom);
+      l.min_rate = p.min_rate ?? undefined;
       if (p.price_list_rate) {
         l.price_list_rate = roundRate(p.price_list_rate);
         l.rate = roundRate(p.price_list_rate);
@@ -275,7 +342,12 @@ watch(customer, async (newCustomer) => {
 
 async function loadModesOfPayment() {
   try {
-    mops.value = await modesOfPayment();
+    const all = await modesOfPayment();
+    mops.value = all.filter((m) => !m.pdc);
+    chequeMops.value = all.filter((m) => m.pdc);
+    if (chequeMops.value.length && !chequeMops.value.some((m) => m.name === chequeMode.value)) {
+      chequeMode.value = chequeMops.value[0].name;
+    }
   } catch {
     mops.value = [];
   }
@@ -290,6 +362,11 @@ async function loadAll() {
   void loadTaxInfo();
   void loadModesOfPayment();
   customers.value = await listCustomers(undefined, 200);
+  // Opened for a customer outside the first page (e.g. from the customer
+  // screen): fetch it, or the picker shows empty although one is chosen.
+  if (customer.value && !customers.value.some((c) => c.name === customer.value)) {
+    await onCustomerSearch(customer.value);
+  }
   // `onlyInStock` — a van can only sell what it carries, and an item with
   // no incoming stock has no valuation rate, which ERPNext rejects at
   // submit time (surfacing as an unfixable sync error days later).
@@ -309,14 +386,21 @@ async function prefillFromDraft(name: string) {
     }
     keepDraftRates = customer.value !== doc.customer;
     customer.value = doc.customer;
+    fromOrder.value = Boolean(doc.sales_order);
     remarks.value = doc.remarks || "";
     discountAmount.value = doc.discount_amount || null;
     // Keep the draft's own payment choice: the form defaults to Cash, and
     // saving with that default turned an unpaid credit draft into a paid one.
     paymentType.value = doc.payment_type ?? (doc.is_pos ? "cash" : "credit");
     if (doc.mode_of_payment) modeOfPayment.value = doc.mode_of_payment;
-    // A cash draft with no payment stored was saved as "collect later".
-    collectLaterChoice.value = paymentType.value === "cash" && !doc.is_pos && !doc.payments?.length;
+    if (paymentType.value === "cheque") {
+      chequeMode.value = doc.mode_of_payment || chequeMode.value;
+      chequeNo.value = doc.payments?.[0]?.reference_no || "";
+      chequeDate.value = doc.payments?.[0]?.reference_date || chequeDate.value;
+    }
+    // A cash draft with a delivery person and no payment stored is left for them to collect.
+    driver.value = paymentType.value === "cash" ? doc.driver || "" : "";
+    driverCollects.value = !doc.is_pos && !doc.payments?.length;
     // A single partial payment on a draft: show its amount.
     if (doc.payments?.length === 1 && doc.payments[0].amount != null
         && Math.abs(Number(doc.payments[0].amount) - Number(doc.grand_total)) > 0.005) {
@@ -350,10 +434,25 @@ async function prefillFromDraft(name: string) {
       amount: it.amount,
     }));
     void loadDraftUoms();
+    void loadDraftMinRates();
   } catch (e) {
     toasts.error(e instanceof Error ? e.message : String(e));
     void router.replace({ name: "invoices" });
   }
+}
+
+/** Minimum rates for an edited draft's lines (a draft line doesn't carry them). */
+async function loadDraftMinRates() {
+  await Promise.all(
+    lines.value.map(async (l) => {
+      try {
+        const p = await priceFor(l.item_code, customer.value || undefined, l.uom);
+        l.min_rate = p.min_rate ?? undefined;
+      } catch {
+        /* offline: the server still checks on save */
+      }
+    }),
+  );
 }
 
 /** The item UOMs of an edited draft's lines (a draft line only knows its
@@ -383,7 +482,8 @@ async function loadDraftUoms() {
 }
 
 async function searchItems() {
-  items.value = await listItems(itemSearch.value || undefined, warehouse.value || undefined, 80, true);
+  // Same rule as the first load: an order taker searches the whole catalog.
+  items.value = await listItems(itemSearch.value || undefined, warehouse.value || undefined, 80, session.updateStock);
 }
 
 /** Round to the site's currency precision (floats give 248.39999999999998). */
@@ -398,6 +498,13 @@ function roundRate(n: number): number {
   return Math.round((Number(n) || 0) * f) / f;
 }
 const rateText = (n: number) => (Number(n) || 0).toFixed(session.ratePrecision);
+
+/** A past price tapped under the line: it becomes the line's rate (as sold, so no line discount on top). */
+function usePrice(l: Line, rate: number) {
+  l.rate = roundRate(rate);
+  l.discount_percentage = 0;
+  recalc(l);
+}
 
 function recalc(l: Line) {
   const qty = Number(l.qty) || 0;
@@ -421,6 +528,7 @@ async function pickItem(it: ItemRow) {
 }
 
 async function addLine(item: ItemRow) {
+  insight.noteStock(item);
   // Always add a new row (same-item multi-row per PDF 1a).
   let uoms = uomCache[uomKey(item.item_code)];
   // No price from the price list → 0, as in ERPNext; the driver types it.
@@ -462,6 +570,7 @@ async function addLine(item: ItemRow) {
     warehouse: warehouse.value || undefined,
     uoms,
     amount: 0,
+    min_rate: firstUom?.min_rate,
   };
   recalc(line);
   lines.value.push(line);
@@ -474,11 +583,13 @@ async function onUomChange(l: Line) {
     l.conversion_factor = chosen.conversion_factor;
     l.price_list_rate = roundRate(chosen.price_list_rate);
     l.rate = roundRate(chosen.price_list_rate);
+    l.min_rate = chosen.min_rate;
   } else {
     try {
       const p = await priceFor(l.item_code, customer.value || undefined, l.uom);
       l.price_list_rate = roundRate(p.price_list_rate);
       l.rate = roundRate(p.price_list_rate);
+      l.min_rate = p.min_rate ?? undefined;
     } catch {
       /* keep existing rate */
     }
@@ -491,10 +602,20 @@ function removeLine(idx: number) {
 }
 
 async function doSave(submit: 0 | 1) {
+  if (busy.value || savingDraft.value) return;
   if (!customer.value) { toasts.warn("Pick a customer"); return; }
   if (lines.value.length === 0) { toasts.warn("Add at least one item"); return; }
   const zeroQty = lines.value.find((l) => !(Number(l.qty) > 0));
   if (zeroQty) { toasts.warn(`Enter a quantity for ${zeroQty.item_name || zeroQty.item_code}`); return; }
+  if (paymentType.value === "cheque" && (!chequeNo.value.trim() || !chequeDate.value)) {
+    toasts.warn("Enter the cheque number and date");
+    return;
+  }
+  const low = lines.value.find(belowMin);
+  if (low) {
+    toasts.warn(`${low.item_name || low.item_code}: the lowest rate allowed is ${rateText(low.min_rate ?? 0)}`);
+    return;
+  }
   if (useSplit.value) {
     if (!payRows.value.length) { toasts.warn("Add a payment, or choose Credit"); return; }
     if (splitCredit.value < -0.005) { toasts.warn("Payments are more than the invoice total"); return; }
@@ -502,13 +623,35 @@ async function doSave(submit: 0 | 1) {
     if (singleAmount.value <= 0) { toasts.warn("Enter the amount paid, or choose Credit"); return; }
     if (singleAmount.value > grandTotal.value + 0.005) { toasts.warn("Amount is more than the invoice total"); return; }
   }
+  if (paymentType.value === "cash" && pickedDriver.value?.blocked) {
+    toasts.warn(`${pickedDriver.value.full_name} can't take a cash sale: ${pickedDriver.value.blocked}`);
+    return;
+  }
   const flag = submit === 1;
+  // Lock the buttons from the first tap: the pre-check and the confirm take a
+  // moment, and a second tap meanwhile submitted a second invoice.
+  if (flag) busy.value = true; else savingDraft.value = true;
   if (flag) {
+    const go = await precheckBeforeSubmit(
+      "Sales Invoice",
+      customer.value,
+      paymentType.value,
+      lines.value.map((l) => ({
+        item_code: l.item_code,
+        item_name: l.item_name,
+        rate: effectiveRate(l),
+        conversion_factor: l.conversion_factor,
+      })),
+      { amount: unpaidPart.value, fromOrder: fromOrder.value },
+    );
+    if (!go) { busy.value = false; return; }
     const paid = useSplit.value
       ? splitPaid.value
       : paymentType.value === "cash" && !collectLater.value ? singleAmount.value ?? grandTotal.value : 0;
-    const pay = collectLater.value
-      ? "Cash · collected later"
+    const pay = paymentType.value === "cheque"
+      ? `Cheque ${chequeNo.value} · ${chequeDate.value}`
+      : collectLater.value
+      ? `Cash · ${driverName.value} collects on delivery`
       : paid <= 0.005
       ? "Credit"
       : paid >= grandTotal.value - 0.005 ? "Paid in full" : `Paid ${money(paid)} · rest on credit`;
@@ -517,9 +660,8 @@ async function doSave(submit: 0 | 1) {
       `${lines.value.length} item${lines.value.length === 1 ? "" : "s"} · ${withCurrency(money(grandTotal.value))}`,
       pay,
     ]);
-    if (!ok) return;
+    if (!ok) { busy.value = false; return; }
   }
-  if (flag) busy.value = true; else savingDraft.value = true;
   try {
     // The invoice discount goes to ERPNext as its Additional Discount
     // (discount_amount + apply_discount_on from Vansale Settings), so item
@@ -563,7 +705,13 @@ async function doSave(submit: 0 | 1) {
       collect_later: collectLater.value ? (1 as const) : (0 as const),
       submit,
       payment_type: paymentType.value,
-      mode_of_payment: paymentType.value === "cash" && !collectLater.value ? modeOfPayment.value : undefined,
+      mode_of_payment:
+        paymentType.value === "cheque"
+          ? chequeMode.value
+          : paymentType.value === "cash" && !collectLater.value ? modeOfPayment.value : undefined,
+      cheque_no: paymentType.value === "cheque" ? chequeNo.value.trim() : undefined,
+      cheque_date: paymentType.value === "cheque" ? chequeDate.value : undefined,
+      driver: session.askDriver && paymentType.value === "cash" ? driver.value : undefined,
       payments: useSplit.value
         ? payRows.value.map((r) => ({
             mode_of_payment: r.mode,
@@ -595,6 +743,9 @@ async function doSave(submit: 0 | 1) {
           mode_of_payment: payload.mode_of_payment,
           payments: payload.payments,
           collect_later: payload.collect_later,
+          cheque_no: payload.cheque_no,
+          cheque_date: payload.cheque_date,
+          driver: payload.driver,
           discount_amount: payload.discount_amount,
           apply_discount_on: payload.apply_discount_on,
         })
@@ -646,11 +797,13 @@ onMounted(loadAll);
           <Icon name="plus" :size="14" /> New
         </button>
       </div>
+      <!-- A draft keeps its customer (the server doesn't change it on edit). -->
       <SearchSelect
         v-model="customer"
         :options="customerOptions"
         placeholder="Search customer by name or code"
         remote
+        :disabled="isEditMode"
         @search="onCustomerSearch"
       />
       <div v-if="selectedCustomer" class="selected-hint">
@@ -672,7 +825,7 @@ onMounted(loadAll);
           type="button"
           class="seg-btn"
           :data-active="paymentType === 'cash'"
-          @click="paymentType = 'cash'"
+          @click="pickPayment('cash')"
         >
           <Icon name="payment" :size="16" /> Cash
         </button>
@@ -680,21 +833,77 @@ onMounted(loadAll);
           type="button"
           class="seg-btn"
           :data-active="paymentType === 'credit'"
-          @click="paymentType = 'credit'"
+          :data-blocked="Boolean(refusalFor('credit'))"
+          @click="pickPayment('credit')"
         >
-          <Icon name="clock" :size="16" /> Credit
+          <Icon :name="refusalFor('credit') ? 'alert' : 'clock'" :size="16" /> Credit
+        </button>
+        <button
+          v-if="chequeMops.length || paymentType === 'cheque'"
+          type="button"
+          class="seg-btn"
+          :data-active="paymentType === 'cheque'"
+          :data-blocked="Boolean(refusalFor('cheque'))"
+          @click="pickPayment('cheque')"
+        >
+          <Icon :name="refusalFor('cheque') ? 'alert' : 'receipt'" :size="16" /> Cheque
         </button>
       </div>
-      <div v-if="paymentType === 'cash' && laterChoosable" class="seg seg-small">
-        <button type="button" class="seg-btn" :data-active="!collectLaterChoice" @click="collectLaterChoice = false">
-          Collected now
+      <CreditPanel
+        v-if="customer"
+        :status="credit"
+        :loading="creditLoading"
+        :payment="paymentType"
+        :adds="unpaidPart"
+      />
+      <div v-if="paymentType === 'cheque'" class="cheque-grid">
+        <label class="field">
+          <span class="tiny">Cheque mode</span>
+          <select v-model="chequeMode">
+            <option v-for="m in chequeMops" :key="m.name" :value="m.name">{{ m.name }}</option>
+            <option v-if="!chequeMops.length && chequeMode" :value="chequeMode">{{ chequeMode }}</option>
+          </select>
+        </label>
+        <label class="field">
+          <span class="tiny">Cheque no.</span>
+          <input type="text" v-model="chequeNo" inputmode="numeric" />
+        </label>
+        <label class="field">
+          <span class="tiny">Cheque date</span>
+          <input type="date" v-model="chequeDate" />
+        </label>
+      </div>
+      <p v-if="paymentType === 'cheque' && chequeDaysAhead > 0" class="muted small later-note">
+        <span class="pill" data-tone="info">Post-dated</span>
+        Can be banked in {{ chequeDaysAhead }} day{{ chequeDaysAhead === 1 ? "" : "s" }}; until then it counts as credit.
+      </p>
+      <!-- Only when the branch has delivery persons: an empty picker is just noise. -->
+      <label v-if="session.askDriver && paymentType === 'cash' && driverList.length" class="field">
+        <span class="tiny">Delivery person</span>
+        <select v-model="driver" @change="onDriverPicked">
+          <option value="">No delivery person</option>
+          <option v-for="d in driverList" :key="d.name" :value="d.name" :disabled="Boolean(d.blocked) && d.name !== driver">
+            {{ d.full_name }}{{ d.blocked ? ` — ${d.blocked}` : "" }}
+          </option>
+        </select>
+      </label>
+      <p v-if="pickedDriver && (pickedDriver.holding ?? 0) > 0" class="muted xsmall driver-cash">
+        {{ pickedDriver.full_name }} holds <SarSymbol :code="session.currency" />{{ money(pickedDriver.holding ?? 0) }}
+        not yet handed in<template v-if="pickedDriver.cash_limit"> (limit {{ money(pickedDriver.cash_limit) }})</template>.
+      </p>
+      <p v-if="pickedDriver?.blocked" class="small bad-note">
+        {{ pickedDriver.full_name }} can't take a cash sale: {{ pickedDriver.blocked }}. Collect from them first, or pick another.
+      </p>
+      <div v-if="paymentType === 'cash' && driver" class="seg seg-small">
+        <button type="button" class="seg-btn" :data-active="driverCollects" @click="driverCollects = true">
+          Collect on delivery
         </button>
-        <button type="button" class="seg-btn" :data-active="collectLaterChoice" @click="collectLaterChoice = true">
-          Collect later
+        <button type="button" class="seg-btn" :data-active="!driverCollects" @click="driverCollects = false">
+          Paid now
         </button>
       </div>
       <p v-if="collectLater" class="muted small later-note">
-        Cash sale, not collected now — it stays unpaid until the driver or office collects it.
+        Not paid now — {{ driverName }} collects the cash on delivery. The invoice stays unpaid until it is handed in.
       </p>
       <div v-if="useSplit" class="pay-rows">
         <div v-for="(r, i) in payRows" :key="i" class="pay-row">
@@ -782,7 +991,7 @@ onMounted(loadAll);
             </label>
             <label>
               <span class="tiny">Rate</span>
-              <input type="number" min="0" step="any" inputmode="decimal"
+              <input type="number" min="0" step="any" inputmode="decimal" :class="{ 'below-min': belowMin(l) }"
                      v-model.number="l.rate" v-decimals="session.ratePrecision" @input="recalc(l)" />
             </label>
             <label v-if="session.lineDiscount">
@@ -791,9 +1000,15 @@ onMounted(loadAll);
                      v-model.number="l.discount_percentage" @input="recalc(l)" />
             </label>
           </div>
+          <LineInsight :item-code="l.item_code" :customer="customer" :uom="l.uom"
+                       :conversion-factor="l.conversion_factor" :last="insight.lastSale(l.item_code)"
+                       :short="insight.shortage(l)" @use="(r: number) => usePrice(l, r)" />
           <div class="line-foot">
             <span v-if="l.price_list_rate && l.price_list_rate !== l.rate" class="muted xsmall">
               List: <SarSymbol :code="session.currency" />{{ rateText(l.price_list_rate || 0) }}
+            </span>
+            <span v-if="l.min_rate" class="xsmall" :class="belowMin(l) ? 'min-low' : 'muted'">
+              Min: <SarSymbol :code="session.currency" />{{ rateText(l.min_rate) }}
             </span>
             <strong class="tabular"><SarSymbol :code="session.currency" />{{ money(l.amount) }}</strong>
           </div>
@@ -816,7 +1031,7 @@ onMounted(loadAll);
               <div class="muted xsmall">{{ it.item_code }}</div>
             </div>
             <div class="right-col">
-              <span v-if="typeof it.stock_qty === 'number'" class="pill" data-tone="primary">
+              <span v-if="typeof it.stock_qty === 'number' && it.is_stock_item !== 0" class="pill" data-tone="primary">
                 {{ stockLabel(it.stock_qty, it.stock_uom, it.sales_uom, it.sales_cf) }}
               </span>
             </div>
@@ -901,7 +1116,7 @@ onMounted(loadAll);
   border-radius: 999px; width: fit-content;
 }
 
-.seg { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; }
+.seg { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 0.5rem; }
 .pay-rows { display: flex; flex-direction: column; gap: 0.5rem; }
 .mode-amount { display: grid; grid-template-columns: 1fr 8rem; gap: 0.5rem; }
 .stack-sm { display: flex; flex-direction: column; gap: 0.4rem; }
@@ -917,8 +1132,16 @@ onMounted(loadAll);
   transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
 }
 .seg-btn[data-active="true"] { background: var(--primary); color: var(--on-primary, white); }
+/* Not allowed for this customer: still tappable (it says why), but looks off. */
+.seg-btn[data-blocked="true"]:not([data-active="true"]) { color: var(--text-faint); }
+.seg-btn[data-blocked="true"][data-active="true"] { background: var(--danger); }
 .seg-small .seg-btn { min-height: 2.25rem; font-size: var(--text-sm); }
-.later-note { margin: 0; }
+.below-min { border-color: var(--danger); color: var(--danger); }
+.cheque-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0.5rem; }
+@media (max-width: 420px) { .cheque-grid { grid-template-columns: 1fr 1fr; } }
+.min-low { color: var(--danger); font-weight: 600; }
+.later-note, .driver-cash { margin: 0; }
+.bad-note { margin: 0; color: var(--danger); }
 
 .section-head { display: flex; justify-content: space-between; align-items: center; }
 .tabular { font-variant-numeric: tabular-nums; }

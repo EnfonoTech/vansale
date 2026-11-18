@@ -312,6 +312,12 @@ def cr_number_field() -> str | None:
     return None
 
 
+def steelforce_rules_active() -> bool:
+    from vansale import steelforce
+
+    return steelforce.is_active()
+
+
 def customer_form_config() -> dict:
     """Optional customer fields this site has, for the app's customer form."""
     meta = frappe.get_meta("Customer")
@@ -319,6 +325,10 @@ def customer_form_config() -> dict:
     return {
         "name_2": {"field": name_2, "label": _(meta.get_label(name_2))} if name_2 else None,
         "cr_number": bool(cr_number_field()),
+        # Steel Force (sf_trading): a VAT-registered customer needs its CR number and a
+        # document on file before it can be billed; every customer needs a phone.
+        "vat_needs_cr_and_document": steelforce_rules_active(),
+        "mobile_required": steelforce_rules_active(),
         # ZATCA "additional number" only where the site's Address has a field for it.
         "additional_number": any(
             frappe.get_meta("Address").has_field(f) for f in ("custom_additional_number", "additional_number")
@@ -436,18 +446,6 @@ def update_stock_enabled(user: str | None = None) -> bool:
     )
 
 
-CASH_COLLECTION_OPTIONS = ("Collect now", "Collect later", "Salesman chooses")
-
-
-def cash_collection(user: str | None = None) -> str:
-    """Whether a cash sale is collected on the spot ("Collect now": POS
-    payment / Payment Entry as before), left unpaid for the driver or office
-    to collect ("Collect later"), or chosen per sale ("Salesman chooses").
-    Van → Vansale Settings."""
-    value = _van_or_global("cash_collection_mode", "cash_collection", "Collect now", user)
-    return value if value in CASH_COLLECTION_OPTIONS else "Collect now"
-
-
 def quotation_next_step() -> str:
     """What a submitted quotation becomes in the app: "Sales Order",
     "Sales Invoice" or "Both" (Vansale Settings, default Sales Order)."""
@@ -461,10 +459,13 @@ def selling_flow(user: str | None = None) -> dict:
 
     return {
         "update_stock": update_stock_enabled(user),
-        "cash_collection": cash_collection(user),
         "quotation_next_step": quotation_next_step(),
         "return_reasons": steelforce.return_reason_options(),
         "draft_sale_print": steelforce.draft_sale_printable(),
+        # Delivery person on cash sales (Steel Force drivers), when asked for.
+        "ask_driver": bool(global_flags().get("ask_driver")) and steelforce.has_driver_field(),
+        # Cash / credit chosen on sales orders (sites that keep it on the order).
+        "order_payment_type": steelforce.has_order_payment_mode(),
     }
 
 

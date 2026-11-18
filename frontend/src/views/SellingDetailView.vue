@@ -7,10 +7,11 @@
 import { computed, onMounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import {
-  KIND, docDetail, deleteDoc, submitDoc, markQuotationLost, quotationToOrder, quotationToInvoice, orderToInvoice,
+  KIND, docDetail, deleteDoc, submitDoc, markQuotationLost, quotationLostReasons, quotationToOrder, quotationToInvoice, orderToInvoice,
   type SellingDetail, type SellingKind,
 } from "@/api/selling";
 import { openPrint } from "@/api/print";
+import { cancellationOptions, requestCancellation, type CancellationOptions } from "@/api/steelforce";
 import { ApiError } from "@/app/frappe";
 import { useSessionStore } from "@/stores/session";
 import { useToastStore } from "@/stores/toasts";
@@ -35,6 +36,7 @@ async function load() {
   err.value = "";
   try {
     doc.value = await docDetail(props.kind, props.name);
+    void loadCancellation();
   } catch (e) {
     err.value = e instanceof Error ? e.message : String(e);
   } finally {
@@ -43,6 +45,34 @@ async function load() {
 }
 onMounted(load);
 watch(() => [props.kind, props.name], load);
+
+// Request cancellation of a submitted quotation / order (sites that route it to the office).
+const cancelOptions = ref<CancellationOptions | null>(null);
+const cancelOpen = ref(false);
+const cancelReason = ref("");
+const cancelDetails = ref("");
+async function loadCancellation() {
+  cancelOptions.value = null;
+  if (doc.value?.docstatus !== 1) return;
+  try {
+    cancelOptions.value = await cancellationOptions(KIND[props.kind].doctype as "Quotation" | "Sales Order", props.name);
+  } catch {
+    cancelOptions.value = null;
+  }
+}
+const sendCancellation = () => run(async () => {
+  if (!doc.value) return;
+  if (!cancelReason.value) { toasts.warn("Pick a reason"); return; }
+  await requestCancellation(
+    KIND[props.kind].doctype as "Quotation" | "Sales Order",
+    doc.value.name,
+    cancelReason.value,
+    cancelDetails.value.trim() || undefined,
+  );
+  toasts.success("Cancellation requested — the office will decide");
+  cancelOpen.value = false;
+  await load();
+});
 
 const fmt = (n: number | null | undefined) =>
   new Intl.NumberFormat(undefined, {
@@ -63,6 +93,10 @@ function tone(status: string): string {
 
 const isDraft = computed(() => doc.value?.docstatus === 0);
 const isOpen = computed(() => doc.value?.docstatus === 1 && !["Lost", "Expired", "Ordered", "Closed", "Completed", "Cancelled"].includes(doc.value.status));
+// Past its Valid Till: ERPNext makes no order from it (unless Selling Settings
+// allows), and the app makes no invoice either; it can still be marked lost.
+const isExpired = computed(() => props.kind === "quotation" && doc.value?.docstatus === 1 && doc.value.status === "Expired");
+const showQuoteActions = computed(() => props.kind === "quotation" && (isOpen.value || isExpired.value));
 const isLeadQuote = computed(() => props.kind === "quotation" && doc.value?.quotation_to === "Lead");
 const dateLabel = computed(() => k.value.dateLabel);
 const dateValue = computed(() => (props.kind === "quotation" ? doc.value?.valid_till : doc.value?.delivery_date));
@@ -109,14 +143,29 @@ const remove = () => run(async () => {
   void router.replace({ name: k.value.list });
 });
 
+// Mark lost as the desk does: the site's Lost Reasons (at least one when it
+// keeps a list) and a detailed reason.
+const lostOpen = ref(false);
+const lostOptions = ref<string[]>([]);
+const lostPicked = ref<string[]>([]);
+const lostDetail = ref("");
+const openLost = () => run(async () => {
+  lostOptions.value = await quotationLostReasons();
+  lostPicked.value = [];
+  lostDetail.value = "";
+  lostOpen.value = true;
+});
+function toggleLostReason(r: string) {
+  const i = lostPicked.value.indexOf(r);
+  if (i >= 0) lostPicked.value.splice(i, 1);
+  else lostPicked.value.push(r);
+}
+const lostReady = computed(() => (lostOptions.value.length ? lostPicked.value.length > 0 : lostDetail.value.trim().length > 0));
 const lost = () => run(async () => {
-  if (!doc.value) return;
-  const ok = await confirm.ask({
-    title: `Mark ${doc.value.name} as lost?`, message: "The customer turned this quotation down.",
-    confirmText: "Mark lost", danger: true,
-  });
-  if (!ok) return;
-  await markQuotationLost(doc.value.name);
+  if (!doc.value || !lostReady.value) return;
+  await markQuotationLost(doc.value.name, lostPicked.value, lostDetail.value.trim() || undefined);
+  toasts.success(`${doc.value.name} marked lost`);
+  lostOpen.value = false;
   await load();
 });
 
@@ -187,6 +236,9 @@ const open = (name: string, route: string) => router.push({ name: route, params:
             <span class="muted small">{{ doc.transaction_date }} · {{ doc.party_name }}<template v-if="isLeadQuote"> (lead)</template></span>
           </div>
           <span class="pill" :data-tone="tone(doc.status)">{{ doc.status }}</span>
+          <span v-if="kind === 'order' && doc.payment_type" class="pill" data-tone="info">
+            {{ doc.payment_type === "cash" ? "Cash" : doc.payment_type === "cheque" ? "Cheque" : "Credit" }}
+          </span>
         </div>
         <div class="hero-total">
           <div>
@@ -211,19 +263,62 @@ const open = (name: string, route: string) => router.push({ name: route, params:
             <button class="ghost" :disabled="busy" @click="print"><Icon name="receipt" :size="16" /> Print</button>
             <button class="ghost danger-ghost" :disabled="busy" @click="remove"><Icon name="trash" :size="16" /> Delete</button>
           </template>
-          <template v-else-if="isOpen && kind === 'quotation'">
-            <button v-if="canOrder" class="primary" :disabled="busy" @click="toOrder">
+          <template v-else-if="showQuoteActions">
+            <button v-if="canOrder && (!isExpired || doc.order_after_expiry)" class="primary" :disabled="busy" @click="toOrder">
               <Icon name="bag" :size="16" /> Make order
             </button>
-            <button v-if="canInvoice" :class="canOrder ? 'ghost' : 'primary'" :disabled="busy" @click="quoteToInvoice">
+            <button v-if="canInvoice && !isExpired" :class="canOrder ? 'ghost' : 'primary'" :disabled="busy" @click="quoteToInvoice">
               <Icon name="invoice" :size="16" /> Make invoice
             </button>
-            <button class="ghost danger-ghost" :disabled="busy" @click="lost"><Icon name="x" :size="16" /> Lost</button>
+            <button v-if="!lostOpen" class="ghost danger-ghost" :disabled="busy" @click="openLost"><Icon name="x" :size="16" /> Lost</button>
           </template>
           <template v-else-if="isOpen && kind === 'order' && (doc.per_billed ?? 0) < 100">
             <button class="primary" :disabled="busy" @click="toInvoice"><Icon name="invoice" :size="16" /> Create invoice</button>
           </template>
           <button v-if="!isDraft" class="ghost" :disabled="busy" @click="print"><Icon name="receipt" :size="16" /> Print</button>
+          <button v-if="cancelOptions?.can_request && !cancelOpen" class="ghost danger-ghost" :disabled="busy"
+                  @click="cancelOpen = true">
+            <Icon name="x" :size="16" /> Request cancellation
+          </button>
+        </div>
+        <p v-if="isExpired" class="muted small expired-note">
+          <Icon name="clock" :size="14" />
+          Valid till {{ doc.valid_till }} has passed<template v-if="canOrder && doc.order_after_expiry"> — it can still become an order</template><template v-else> — make a new quotation for the customer</template>.
+        </p>
+        <p v-if="doc.status === 'Lost' && (doc.lost_reasons?.length || doc.lost_detail)" class="muted small">
+          Lost: {{ [...(doc.lost_reasons ?? []), doc.lost_detail].filter(Boolean).join(" · ") }}
+        </p>
+        <div v-if="lostOpen" class="stack-sm cancel-form">
+          <span class="tiny">Why was it lost?</span>
+          <div v-if="lostOptions.length" class="chips">
+            <button v-for="r in lostOptions" :key="r" type="button" class="chip"
+                    :data-active="lostPicked.includes(r)" @click="toggleLostReason(r)">{{ r }}</button>
+          </div>
+          <label class="field">
+            <span class="tiny">Details{{ lostOptions.length ? " (optional)" : "" }}</span>
+            <textarea v-model="lostDetail" rows="2" />
+          </label>
+          <div class="row">
+            <button class="danger" :disabled="busy || !lostReady" @click="lost">Mark lost</button>
+            <button class="ghost" :disabled="busy" @click="lostOpen = false">Back</button>
+          </div>
+        </div>
+        <div v-if="cancelOpen" class="stack-sm cancel-form">
+          <label class="field">
+            <span class="tiny">Reason</span>
+            <select v-model="cancelReason">
+              <option value="" disabled>Pick a reason</option>
+              <option v-for="r in cancelOptions?.reasons ?? []" :key="r" :value="r">{{ r }}</option>
+            </select>
+          </label>
+          <label class="field">
+            <span class="tiny">Details</span>
+            <textarea v-model="cancelDetails" rows="2" />
+          </label>
+          <div class="row">
+            <button class="danger" :disabled="busy || !cancelReason" @click="sendCancellation">Send request</button>
+            <button class="ghost" :disabled="busy" @click="cancelOpen = false">Back</button>
+          </div>
         </div>
       </section>
 
@@ -287,6 +382,14 @@ const open = (name: string, route: string) => router.push({ name: route, params:
 .actions { display: flex; gap: 0.5rem; flex-wrap: wrap; }
 .actions button { flex: 1 1 7rem; min-height: 2.75rem; justify-content: center; }
 .danger-ghost { color: var(--danger); }
+.expired-note { display: flex; align-items: center; gap: 0.35rem; margin: 0; }
+.tiny { font-size: 0.65rem; color: var(--text-faint); text-transform: uppercase; letter-spacing: 0.06em; font-weight: 600; }
+.chips { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+.chip {
+  all: unset; cursor: pointer; padding: 0.35rem 0.7rem; border-radius: 999px;
+  font-size: var(--text-sm); background: var(--surface-muted); border: 1px solid var(--border);
+}
+.chip[data-active="true"] { background: var(--danger-soft); border-color: var(--danger); color: var(--danger); font-weight: 600; }
 .danger-ghost:hover { background: var(--danger-soft); }
 .link-row { display: flex; justify-content: space-between; align-items: center; min-height: 2.5rem; }
 .section-h { margin: 0 0 0.1rem; font-size: var(--text-sm); color: var(--text-muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; }

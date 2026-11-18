@@ -117,8 +117,9 @@ export const useSessionStore = defineStore("session", {
     returnWithoutInvoice: (s) => Boolean(s.defaults?.return_without_invoice),
     /** Invoice moves stock (van sale). On unless the server says otherwise. */
     updateStock: (s) => s.defaults?.selling_flow?.update_stock !== false,
-    cashCollection: (s) => s.defaults?.selling_flow?.cash_collection ?? "Collect now",
     quotationNextStep: (s) => s.defaults?.selling_flow?.quotation_next_step ?? "Sales Order",
+    askDriver: (s) => s.defaults?.selling_flow?.ask_driver === true,
+    orderPaymentType: (s) => s.defaults?.selling_flow?.order_payment_type === true,
     /** Draft sales may be printed; on unless the server says the site refuses it. */
     draftSalePrint: (s) => s.defaults?.selling_flow?.draft_sale_print !== false,
     /** Server's return reasons; null = use the app's built-in list. */

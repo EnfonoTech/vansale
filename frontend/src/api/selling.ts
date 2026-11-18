@@ -80,6 +80,8 @@ export interface SellingDetail {
   valid_till?: string | null;
   delivery_date?: string | null;
   warehouse?: string | null;
+  /** Order: "cash" / "credit" where the site keeps it on the order. */
+  payment_type?: "cash" | "credit" | "cheque" | null;
   status: string;
   docstatus: number;
   per_delivered?: number;
@@ -91,6 +93,11 @@ export interface SellingDetail {
   grand_total: number;
   items: SellingDetailLine[];
   taxes: Array<{ description: string; rate: number; tax_amount: number; total: number }>;
+  /** Quotation: an expired one may still become an order (Selling Settings). */
+  order_after_expiry?: boolean;
+  /** Quotation marked lost: its reasons and the detailed reason. */
+  lost_reasons?: string[];
+  lost_detail?: string | null;
   /** Quotation → its orders; Order → its invoices. */
   orders?: string[];
   invoices?: string[];
@@ -107,6 +114,8 @@ export interface SellingPayload {
   discount_amount?: number;
   warehouse?: string;
   submit?: 0 | 1;
+  /** Order: cash / credit (sites that keep it on the order). */
+  payment_type?: "cash" | "credit";
 }
 
 export interface SellingSaved {
@@ -146,7 +155,7 @@ function body(kind: SellingKind, p: SellingPayload): Record<string, unknown> {
   };
   return kind === "quotation"
     ? { ...common, party: p.party, quotation_to: p.quotation_to ?? "Customer", valid_till: p.date }
-    : { ...common, customer: p.party, delivery_date: p.date, warehouse: p.warehouse };
+    : { ...common, customer: p.party, delivery_date: p.date, warehouse: p.warehouse, payment_type: p.payment_type };
 }
 
 export async function saveDoc(kind: SellingKind, p: SellingPayload): Promise<SellingSaved> {
@@ -173,8 +182,13 @@ export async function deleteDoc(kind: SellingKind, name: string): Promise<void> 
   await apiCall("POST", "frappe.client.delete", { doctype: KIND[kind].doctype, name });
 }
 
-export async function markQuotationLost(name: string, reason?: string): Promise<SellingSaved> {
-  return apiCall<SellingSaved>("POST", "vansale.api.quotation.mark_lost", { name, reason });
+/** As the desk's "Set as Lost": the site's Lost Reasons (at least one when it keeps a list) and a detail. */
+export async function markQuotationLost(name: string, reasons: string[], detail?: string): Promise<SellingSaved> {
+  return apiCall<SellingSaved>("POST", "vansale.api.quotation.mark_lost", { name, reasons, detail });
+}
+
+export function quotationLostReasons(): Promise<string[]> {
+  return apiCall<string[]>("GET", "vansale.api.quotation.lost_reasons");
 }
 
 /** Quotation → Sales Order. A lead's quotation converts the lead into a customer first. */

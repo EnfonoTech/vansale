@@ -134,17 +134,55 @@ def submit_draft(name: str) -> dict:
     return _result(doc)
 
 
+@frappe.whitelist(methods=["GET"])
+def lost_reasons() -> list[str]:
+    """The site's Quotation Lost Reasons (the desk's "Set as Lost" list)."""
+    return frappe.get_all("Quotation Lost Reason", pluck="name", order_by="name asc")
+
+
 @frappe.whitelist(methods=["POST"])
-def mark_lost(name: str, reason: Optional[str] = None) -> dict:
-    """The customer turned the quote down — close it so it stops showing as open."""
+def mark_lost(
+    name: str,
+    reason: Optional[str] = None,
+    reasons: Optional[list[str]] = None,
+    detail: Optional[str] = None,
+) -> dict:
+    """The customer turned the quote down. As the desk's "Set as Lost": at
+    least one Lost Reason (when the site keeps a list), plus a detailed reason."""
     doc = readable_doc("Quotation", name)
     if cint(doc.docstatus) != 1:
         frappe.throw(_("Only a submitted quotation can be marked lost"))
-    lost = (reason or "").strip()
-    reasons = [{"lost_reason": lost}] if lost and frappe.db.exists("Quotation Lost Reason", lost) else []
-    doc.declare_enquiry_lost(reasons, [], lost or None)
+    if isinstance(reasons, str):
+        reasons = frappe.parse_json(reasons)
+    picked = [r for r in (reasons or []) if r]
+    detail = (detail or "").strip()
+    known = set(lost_reasons())
+    # Older app builds sent one free-text `reason`.
+    if not picked and reason:
+        if reason in known:
+            picked = [reason]
+        else:
+            detail = detail or reason.strip()
+    unknown = [r for r in picked if r not in known]
+    if unknown:
+        frappe.throw(_("Unknown lost reason: {0}").format(", ".join(unknown)))
+    if known and not picked:
+        frappe.throw(_("Pick at least one lost reason"))
+    doc.declare_enquiry_lost([{"lost_reason": r} for r in picked], [], detail or None)
     frappe.db.commit()
     return _result(doc)
+
+
+def _shown_status(status: str, docstatus, valid_till) -> str:
+    """ERPNext marks an open quotation Expired the night after its Valid Till
+    (`set_expired_status`); show it so from the day it passes."""
+    if cint(docstatus) == 1 and status in ("Open", "Replied") and valid_till and getdate(valid_till) < getdate(nowdate()):
+        return "Expired"
+    return status
+
+
+def _order_after_expiry() -> bool:
+    return bool(cint(frappe.db.get_single_value("Selling Settings", "allow_sales_order_creation_for_expired_quotation")))
 
 
 @frappe.whitelist(methods=["GET"])
@@ -169,6 +207,7 @@ def list_mine(
     )
     for r in rows:
         r["modified"] = selling.naive_site_to_utc_iso(r.get("modified"))
+        r["status"] = _shown_status(r.get("status"), r.get("docstatus"), r.get("valid_till"))
     return rows
 
 
@@ -190,7 +229,11 @@ def detail(name: str) -> dict:
         "company": doc.company,
         "transaction_date": str(doc.transaction_date) if doc.transaction_date else None,
         "valid_till": str(doc.valid_till) if doc.valid_till else None,
-        "status": doc.status,
+        "status": _shown_status(doc.status, doc.docstatus, doc.valid_till),
+        # An expired quotation can still become an order where Selling Settings allows it.
+        "order_after_expiry": _order_after_expiry(),
+        "lost_reasons": [r.lost_reason for r in (doc.get("lost_reasons") or [])],
+        "lost_detail": doc.get("order_lost_reason"),
         "docstatus": cint(doc.docstatus),
         "remarks": doc.terms,
         **selling.totals(doc),
@@ -203,7 +246,13 @@ def detail(name: str) -> dict:
 
 
 @frappe.whitelist(methods=["POST"])
-def make_order(client_id: str, name: str, delivery_date: Optional[str] = None, submit: int = 0) -> dict:
+def make_order(
+    client_id: str,
+    name: str,
+    delivery_date: Optional[str] = None,
+    submit: int = 0,
+    payment_type: Optional[str] = None,
+) -> dict:
     """Sales Order from a submitted quotation (ERPNext `make_sales_order`).
 
     A lead's quotation converts the lead into a Customer first, in the same
@@ -242,6 +291,11 @@ def make_order(client_id: str, name: str, delivery_date: Optional[str] = None, s
         row.delivery_date = delivery
     apply_van_defaults(order)
     selling.tag_sales_person(order)
+    from vansale.api.me import invoice_options
+    from vansale.api.sales_order import _set_payment_type
+
+    # The salesman's choice, else the "Default payment on invoice" setting.
+    _set_payment_type(order, payment_type or invoice_options()["default_payment"])
     order.insert()
     if cint(submit):
         order.submit()

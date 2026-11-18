@@ -21,6 +21,7 @@ from vansale.api.outbox import claim
 from vansale.api.payment import check_mode_allowed
 from vansale.api.me import cash_sale_settings, current_user_sales_person, update_stock_enabled
 from vansale.api.doc_defaults import apply_van_defaults
+from vansale.api.precheck import check_credit_allowed
 from vansale import steelforce
 
 
@@ -223,7 +224,10 @@ def save(
     discount_amount: Optional[float] = None,  # invoice-level additional discount
     apply_discount_on: Optional[str] = None,  # "Grand Total" | "Net Total"
     payments: Optional[list[dict[str, Any]]] = None,  # split cash: [{mode_of_payment, amount, reference_no}]
-    collect_later: int = 0,  # cash sale left unpaid (setting "Cash sale collection")
+    collect_later: int = 0,  # cash sale left for the delivery person to collect
+    cheque_no: Optional[str] = None,  # payment_type "cheque" (post-dated cheque, Steel Force)
+    cheque_date: Optional[str] = None,
+    driver: Optional[str] = None,  # delivery person on a cash sale (Steel Force)
 ) -> dict:
     if not client_id:
         frappe.throw(_("client_id is required"))
@@ -263,13 +267,20 @@ def save(
 
     # Cash / credit. Cash is posted per the "Cash sale posting" setting:
     # POS Invoice → is_pos + payments row; Payment Entry → normal invoice and a
-    # Payment Entry against it on submit. "Collect later" posts neither: the
-    # invoice stays unpaid for the driver / office to collect.
+    # Payment Entry against it on submit. Left for the delivery person
+    # (collect_later) posts neither: the invoice stays unpaid until they collect.
     pay_type = (payment_type or "").lower()
+    if pay_type in ("credit", "cheque"):
+        check_credit_allowed(customer, company)
     steelforce.set_payment_mode(doc, pay_type)
-    later = pay_type == "cash" and _collect_later(collect_later)
-    pe_mode = pay_type == "cash" and not later and _cash_via_payment_entry()
-    rows = _payment_rows(mode_of_payment, payments) if pay_type == "cash" and not later else []
+    steelforce.set_driver(doc, driver, pay_type)
+    later = pay_type == "cash" and _collect_later(collect_later, doc)
+    pe_mode = (pay_type == "cash" and not later and _cash_via_payment_entry()) or pay_type == "cheque"
+    rows = (
+        _cheque_rows(mode_of_payment, cheque_no, cheque_date) if pay_type == "cheque"
+        else _payment_rows(mode_of_payment, payments) if pay_type == "cash" and not later
+        else []
+    )
     if pay_type == "cash" and not later and not pe_mode:
         doc.is_pos = 1
         # payments rows filled after insert so grand_total is known.
@@ -310,6 +321,8 @@ def save(
     if submit:
         doc.submit()
         payment_entries = _cash_payment_entry(doc)
+        if payment_entries:
+            doc.reload()  # paid status / outstanding after the collection
 
     _record_outbox(client_id, doc.name, posting_ts, {
         "customer": customer,
@@ -337,17 +350,11 @@ def _cash_via_payment_entry() -> bool:
     return cash_sale_settings()["posting"] == "Payment Entry"
 
 
-def _collect_later(requested) -> bool:
-    """A cash sale left unpaid: always ("Collect later"), never ("Collect
-    now", the default) or as the salesman chose on the sale ("Salesman chooses")."""
-    from vansale.api.me import cash_collection
-
-    mode = cash_collection()
-    if mode == "Collect later":
-        return True
-    if mode == "Salesman chooses":
-        return bool(cint(requested))
-    return False
+def _collect_later(requested, doc) -> bool:
+    """A cash sale is paid on the spot. Only one handed to a delivery person
+    may be left unpaid for them to collect on delivery (as sf_trading's desk
+    form does), and only when the salesman says so."""
+    return bool(cint(requested)) and steelforce.driver_of(doc) is not None
 
 
 def _payment_rows(mode_of_payment: Optional[str], payments: Optional[list[dict[str, Any]]]) -> list[dict]:
@@ -378,6 +385,25 @@ def _payment_rows(mode_of_payment: Optional[str], payments: Optional[list[dict[s
     for row in rows:
         check_mode_allowed(row["mode_of_payment"])
     return rows
+
+
+def _cheque_rows(mode_of_payment: Optional[str], cheque_no: Optional[str], cheque_date: Optional[str]) -> list[dict]:
+    """A post-dated cheque for the whole invoice: one of the branch's PDC modes,
+    its number and date (sf_trading's PDC fields come from these)."""
+    if not steelforce.cheque_modes():
+        frappe.throw(_("Cheque sales are not set up for your branch"))
+    mode = (mode_of_payment or "").strip() or steelforce.cheque_modes()[0]
+    if mode not in steelforce.cheque_modes():
+        frappe.throw(_("{0} is not a cheque mode of your branch").format(mode))
+    if not (cheque_no or "").strip() or not cheque_date:
+        frappe.throw(_("Enter the cheque number and date"))
+    check_mode_allowed(mode)
+    return [{
+        "mode_of_payment": mode,
+        "amount": None,
+        "reference_no": cheque_no.strip(),
+        "reference_date": str(getdate(cheque_date)),
+    }]
 
 
 def _invoice_total(doc) -> float:
@@ -420,8 +446,10 @@ def _set_cash_mode(doc, rows: list[dict]) -> None:
     if doc.meta.has_field("custom_vansale_payment_mode"):
         doc.custom_vansale_payment_mode = rows[0]["mode_of_payment"]
     if doc.meta.has_field("custom_vansale_payments"):
-        split = len(rows) > 1 or rows[0]["amount"] is not None
-        doc.custom_vansale_payments = frappe.as_json(rows) if split else None
+        # The full rows are kept when the plain mode isn't enough to collect:
+        # several modes, a part amount, or a cheque's number and date.
+        detailed = len(rows) > 1 or rows[0]["amount"] is not None or bool(rows[0].get("reference_date"))
+        doc.custom_vansale_payments = frappe.as_json(rows) if detailed else None
 
 
 def _stored_rows(inv) -> list[dict]:
@@ -440,10 +468,14 @@ def _cash_payment_entry(inv) -> list[str]:
     setting. Runs in the invoice's transaction, so a failure rolls the sale
     back too.
     """
+    from vansale.api.me import cash_sale_settings
     from vansale.api.payment import build_payment_entry, submit_if_configured
 
     names: list[str] = []
     remaining = flt(inv.outstanding_amount)
+    handled = steelforce.collect_invoice(inv, _stored_rows(inv), cash_sale_settings()["payment_entry_status"])
+    if handled is not None:
+        return handled
     for row in _stored_rows(inv):
         amount = min(flt(row["amount"]) if row.get("amount") is not None else remaining, remaining)
         if amount <= 0:
@@ -573,6 +605,9 @@ def update_draft(
     warehouse: Optional[str] = None,
     payments: Optional[list[dict[str, Any]]] = None,
     collect_later: int = 0,
+    cheque_no: Optional[str] = None,
+    cheque_date: Optional[str] = None,
+    driver: Optional[str] = None,
 ) -> dict:
     """In-place update a draft Sales Invoice.
 
@@ -609,11 +644,18 @@ def update_draft(
     # so the POS flow activates on the next save (payments row filled
     # after save, same as `save()`).
     pay_type = (payment_type or "").lower()
+    if pay_type in ("credit", "cheque"):
+        check_credit_allowed(doc.customer, doc.company)
     steelforce.set_payment_mode(doc, pay_type)
+    steelforce.set_driver(doc, driver, pay_type)
     apply_van_defaults(doc)
-    later = pay_type == "cash" and _collect_later(collect_later)
-    pe_mode = pay_type == "cash" and not later and _cash_via_payment_entry()
-    rows = _payment_rows(mode_of_payment, payments) if pay_type == "cash" and not later else []
+    later = pay_type == "cash" and _collect_later(collect_later, doc)
+    pe_mode = (pay_type == "cash" and not later and _cash_via_payment_entry()) or pay_type == "cheque"
+    rows = (
+        _cheque_rows(mode_of_payment, cheque_no, cheque_date) if pay_type == "cheque"
+        else _payment_rows(mode_of_payment, payments) if pay_type == "cash" and not later
+        else []
+    )
     if pe_mode:
         _set_cash_mode(doc, rows)
     elif pay_type == "cash" and not later:
@@ -621,7 +663,7 @@ def update_draft(
     elif pay_type == "credit" or later:
         doc.is_pos = 0
         doc.set("payments", [])
-    if pay_type != "cash" or later:
+    if pay_type not in ("cash", "cheque") or later:
         for field in ("custom_vansale_payment_mode", "custom_vansale_payments"):
             if doc.meta.has_field(field):
                 doc.set(field, None)
@@ -656,6 +698,8 @@ def update_draft(
     if submit:
         doc.submit()
         payment_entries = _cash_payment_entry(doc)
+        if payment_entries:
+            doc.reload()  # paid status / outstanding after the collection
 
     frappe.db.commit()
     return {
@@ -719,6 +763,8 @@ def submit_draft(name: str, mode_of_payment: Optional[str] = None) -> dict:
 
     doc.submit()
     payment_entries = _cash_payment_entry(doc)
+    if payment_entries:
+        doc.reload()  # paid status / outstanding after the collection
     frappe.db.commit()
     return {
         "payment_entry": payment_entries[0] if payment_entries else None,
@@ -921,6 +967,11 @@ def detail(name: str) -> dict:
         "due_date": str(doc.due_date) if doc.due_date else None,
         "is_return": int(doc.is_return or 0),
         "is_pos": int(doc.is_pos or 0),
+        # Delivery person on a cash sale (Steel Force).
+        "driver": steelforce.driver_of(doc),
+        "driver_name": steelforce.driver_name(steelforce.driver_of(doc)),
+        # Made from an order: the order already counts against the credit limit.
+        "sales_order": next((i.sales_order for i in doc.items if i.get("sales_order")), None),
         "payment_type": steelforce.payment_type_of(doc)
         or ("cash" if (doc.is_pos or doc.get("custom_vansale_payment_mode")) else "credit"),
         "payments": (

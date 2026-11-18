@@ -86,7 +86,8 @@ def global_flags() -> dict:
         # Selling flow. Defaults are the behaviour before these settings existed.
         "update_stock_on_invoice": True,
         "quotation_next_step": "Sales Order",
-        "cash_collection": "Collect now",
+        "credit_needs_limit": False,
+        "ask_driver": False,
     }
     try:
         row = frappe.db.get_singles_dict("Vansale Settings") or {}
@@ -108,7 +109,6 @@ def global_flags() -> dict:
             "invoice_print_format",
             "receipt_print_format",
             "quotation_next_step",
-            "cash_collection",
         ):
             if row.get(key):
                 flags[key] = row[key]
@@ -125,6 +125,8 @@ def global_flags() -> dict:
             "confirm_before_submit",
             "pdf_like_browser_print",
             "update_stock_on_invoice",
+            "credit_needs_limit",
+            "ask_driver",
         ):
             if key in row:
                 flags[key] = bool(int(row.get(key) or 0))

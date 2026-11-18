@@ -305,6 +305,75 @@ def _outstanding(customer: str) -> float:
     return _outstanding_by_customer([customer]).get(customer, 0.0)
 
 
+def _credit_status(customer: str, company: Optional[str] = None) -> dict:
+    """The customer's credit as ERPNext's own credit-limit check sees it, for
+    the sale screens and the customer screen.
+
+    credit_limit    the limit for the company (customer, else its group, else
+                    the company's default); 0 = no limit
+    used            what the check counts: unpaid invoices + unbilled orders
+                    and delivery notes (whole company, every van)
+    available       limit − used, None without a limit
+    overdue         unpaid invoices past their due date: count, amount, oldest due date
+    credit_allowed  False when the "Credit sale only for customers with a credit
+                    limit" setting refuses this customer; `credit_problem` says why
+    + site extras (Steel Force: cash_exempt, blocking_overdue, approval, branch)
+    """
+    from erpnext.selling.doctype.customer.customer import get_credit_limit, get_customer_outstanding
+
+    from vansale.api.invoice import _user_company
+    from vansale.api.precheck import credit_limit_problem
+
+    company = company or _user_company()
+    precision = frappe.get_precision("Sales Invoice", "outstanding_amount") or 2
+    limit = flt(get_credit_limit(customer, company), precision)
+    used = flt(get_customer_outstanding(customer, company), precision)
+    count, amount, oldest = frappe.db.sql(
+        """SELECT COUNT(*), COALESCE(SUM(outstanding_amount), 0), MIN(due_date)
+           FROM `tabSales Invoice`
+           WHERE customer = %s AND company = %s AND docstatus = 1
+             AND outstanding_amount > 0 AND due_date < CURDATE()""",
+        (customer, company),
+    )[0]
+    problem = credit_limit_problem(customer, company)
+    out = {
+        "customer": customer,
+        "credit_limit": limit,
+        "used": used,
+        "available": flt(limit - used, precision) if limit > 0 else None,
+        "overdue": (
+            {"count": int(count), "amount": flt(amount, precision), "oldest_due": str(oldest)}
+            if count else None
+        ),
+        "credit_allowed": problem is None,
+        "credit_problem": problem,
+        "cash_exempt": False,
+        "blocking_overdue": None,
+        "approval": None,
+        "branch": None,
+    }
+    out.update(steelforce.credit_extras(customer, company))
+    return out
+
+
+def _credit_status_or_none(customer: str) -> Optional[dict]:
+    """For the customer screen: a credit lookup that fails must not hide the customer."""
+    try:
+        return _credit_status(customer)
+    except Exception:
+        frappe.log_error(title="vansale: customer credit status")
+        return None
+
+
+@frappe.whitelist(methods=["GET"])
+def credit_status(customer: str) -> dict:
+    """Credit limit, used, available and overdue for a customer being sold to."""
+    if not customer:
+        frappe.throw(_("Customer required"))
+    check_read("Customer", customer)
+    return _credit_status(customer)
+
+
 def outstanding_breakdown(customer: str) -> dict:
     """The customer's whole balance by warehouse (van), plus what no invoice
     carries (advances, unallocated payments, journal entries), so the lines
@@ -555,6 +624,8 @@ def detail(name: str) -> dict:
         # shown beside the balance, not taken off it.
         "pending": pending,
         "modified": naive_site_to_utc_iso(doc.modified),
+        # Credit limit / used / overdue (+ Steel Force approval, credit days).
+        "credit": _credit_status_or_none(doc.name),
     }
 
 
@@ -580,6 +651,7 @@ def create(
     posting_ts: str | None = None,
     cr_number: str | None = None,
     customer_name_2: str | None = None,
+    attachment: dict | None = None,  # {"filename", "data": base64 / data URL}: CR / VAT certificate photo
 ) -> dict:
     """Create a Customer + optional primary Address.
 
@@ -726,6 +798,8 @@ def create(
 
     # Outbox row in the same transaction as the Customer (claimed above), so
     # a retry can never create a second customer and a rollback drops both.
+    if attachment:
+        _attach_document(doc.name, attachment)
     if client_id:
         _record_customer_outbox(
             client_id,
@@ -746,6 +820,36 @@ def create(
         "customer_type": doc.customer_type,
         "address": address_name,
     }
+
+
+_MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024
+
+
+def _attach_document(customer: str, attachment: dict) -> None:
+    """A photo of the customer's CR / VAT certificate, attached to the Customer
+    (private). Some sites refuse to bill a VAT-registered customer without one."""
+    import base64
+
+    filename = (attachment.get("filename") or "document.jpg").strip()[:140]
+    data = attachment.get("data") or ""
+    if "," in data and data.startswith("data:"):
+        data = data.split(",", 1)[1]
+    try:
+        content = base64.b64decode(data, validate=True)
+    except Exception:
+        frappe.throw(_("The attached document could not be read"))
+    if not content:
+        return
+    if len(content) > _MAX_ATTACHMENT_BYTES:
+        frappe.throw(_("The attached document is too large (8 MB at most)"))
+    frappe.get_doc({
+        "doctype": "File",
+        "file_name": filename,
+        "attached_to_doctype": "Customer",
+        "attached_to_name": customer,
+        "is_private": 1,
+        "content": content,
+    }).insert()
 
 
 # Statement labels: English with the Arabic underneath (KSA statements).

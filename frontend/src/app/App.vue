@@ -10,12 +10,28 @@ import { useRouteVisitStore } from "@/stores/routeVisit";
 import { useOnline } from "@/app/online";
 import { useSessionStore } from "@/stores/session";
 import { warmCaches } from "@/offline/warm";
+import { useSyncStore } from "@/stores/sync";
 
 const route = useRoute();
 const router = useRouter();
 const visit = useRouteVisitStore();
 const online = useOnline();
 const session = useSessionStore();
+const sync = useSyncStore();
+
+/**
+ * Send what was saved offline. Nothing did this on its own: the badge that
+ * synced on reconnect was never placed on a screen, so queued sales waited
+ * until the salesman opened the sync screen and tapped Retry. Safe to call
+ * often — one drain at a time, each entry waits out its own backoff, and the
+ * server ignores a sale it already has (client_id).
+ */
+function syncPending() {
+  if (!session.isAuthenticated) return;
+  void sync.refresh().then(() => {
+    if (sync.pending > 0) void sync.requestDrain();
+  });
+}
 
 // Offline→online transition: opportunistically warm the item + customer
 // caches so the next screen the driver opens has fresh data. The warm
@@ -25,6 +41,7 @@ const session = useSessionStore();
 watch(online, (isNow, wasNow) => {
   if (isNow && !wasNow && session.isAuthenticated) {
     void session.refreshDefaults();
+    syncPending();
     void warmCaches({
       warehouse: session.defaultWarehouse ?? undefined,
       force: true,
@@ -43,12 +60,16 @@ watch(online, (isNow, wasNow) => {
  */
 onMounted(() => {
   if (session.isAuthenticated) void session.refreshDefaults();
+  syncPending();
 
   void (async () => {
     try {
       const { App: CapApp } = await import("@capacitor/app");
       await CapApp.addListener("appStateChange", ({ isActive }) => {
-        if (isActive && session.isAuthenticated) void session.refreshDefaults();
+        if (isActive && session.isAuthenticated) {
+          void session.refreshDefaults();
+          syncPending();
+        }
       });
     } catch {
       /* web build — @capacitor/app not bundled */
@@ -59,6 +80,7 @@ onMounted(() => {
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "visible" && session.isAuthenticated) {
       void session.refreshDefaults();
+      syncPending();
     }
   });
 });

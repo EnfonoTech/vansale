@@ -55,6 +55,10 @@ export interface ConfigDefaults {
     name_2: { field: string; label: string } | null;
     cr_number: boolean;
     additional_number: boolean;
+    /** A VAT number needs the CR number and a document photo (Steel Force). */
+    vat_needs_cr_and_document?: boolean;
+    /** Mobile number mandatory (the site bills only customers with a phone). */
+    mobile_required?: boolean;
   };
   /** Selling-flow settings (Vansale Settings / van). Missing on older servers = old behaviour. */
   selling_flow?: SellingFlow;
@@ -63,14 +67,16 @@ export interface ConfigDefaults {
 export interface SellingFlow {
   /** Invoice moves stock out of the salesman's warehouse (van sale); off = order taker. */
   update_stock: boolean;
-  /** Cash sale collected on the spot, left for later, or chosen per sale. */
-  cash_collection: "Collect now" | "Collect later" | "Salesman chooses";
   /** What a submitted quotation becomes in the app. */
   quotation_next_step: "Sales Order" | "Sales Invoice" | "Both";
   /** Return reasons the server accepts (the site's own list where it has one). */
   return_reasons: string[];
   /** A draft sale may be printed (some sites refuse it until submitted). */
   draft_sale_print?: boolean;
+  /** Ask for the delivery person (driver) on cash sales. */
+  ask_driver?: boolean;
+  /** Sales Orders carry Cash / Credit on this site (chosen on the order form). */
+  order_payment_type?: boolean;
 }
 
 export function configDefaults() {

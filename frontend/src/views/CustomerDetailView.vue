@@ -10,6 +10,7 @@ import { useRouteVisitStore } from "@/stores/routeVisit";
 import { useToastStore } from "@/stores/toasts";
 import Icon from "@/components/Icon.vue";
 import SarSymbol from "@/components/SarSymbol.vue";
+import CreditPanel from "@/components/CreditPanel.vue";
 
 const route = useRoute();
 const router = useRouter();
@@ -19,6 +20,8 @@ const toasts = useToastStore();
 
 const customer = ref<CustomerDetail | null>(null);
 const breakdown = computed(() => customer.value?.outstanding_breakdown ?? null);
+// Credit limit / used / overdue (+ Steel Force approval and credit days).
+const credit = computed(() => customer.value?.credit ?? null);
 const invoices = ref<Array<Record<string, unknown>>>([]);
 const loading = ref(false);
 const err = ref("");
@@ -201,6 +204,9 @@ async function onEndVisit() {
           <span>Customer's total balance</span>
           <strong class="tabular"><SarSymbol :code="session.currency" />{{ fmt(breakdown.total) }}</strong>
         </div>
+      </section>
+      <section v-if="credit" class="card">
+        <CreditPanel :status="credit" />
       </section>
       <p v-if="(customer.pending ?? 0) > 0" class="muted xsmall pending-note">
         <SarSymbol :code="session.currency" />{{ fmt(customer.pending ?? 0) }} collected, awaiting office approval

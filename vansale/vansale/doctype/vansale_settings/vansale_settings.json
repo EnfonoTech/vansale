@@ -22,7 +22,8 @@
   "update_stock_on_invoice",
   "quotation_next_step",
   "column_break_selling_flow",
-  "cash_collection",
+  "credit_needs_limit",
+  "ask_driver",
   "section_break_cash_sale",
   "cash_sale_posting",
   "cash_payment_entry_status",
@@ -326,22 +327,27 @@
    "fieldtype": "Column Break"
   },
   {
-   "fieldname": "cash_collection",
-   "fieldtype": "Select",
-   "label": "Cash sale collection",
-   "options": "Collect now\nCollect later\nSalesman chooses",
-   "default": "Collect now"
-  },
-  {
    "fieldname": "cr_number_field",
    "fieldtype": "Data",
    "label": "CR number field"
+  },
+  {
+   "fieldname": "credit_needs_limit",
+   "fieldtype": "Check",
+   "label": "Credit sale only for customers with a credit limit",
+   "default": "0"
+  },
+  {
+   "fieldname": "ask_driver",
+   "fieldtype": "Check",
+   "label": "Ask for the delivery person on cash sales",
+   "default": "0"
   }
  ],
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-11-10 12:00:00.000000",
+ "modified": "2026-11-17 12:00:00.000000",
  "modified_by": "Administrator",
  "module": "Vansale",
  "name": "Vansale Settings",

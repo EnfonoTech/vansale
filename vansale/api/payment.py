@@ -79,7 +79,14 @@ def build_payment_entry(
     Shared by the payment screen (`save`) and cash sales posted as a
     Payment Entry (`invoice.save`).
     """
-    paid_from, paid_to = _resolve_accounts(company, mode_of_payment)
+    from erpnext.accounts.party import get_party_account
+
+    receivable, paid_to = _resolve_accounts(company, mode_of_payment)
+    # The customer's own receivable (Customer → Customer Group → Company), as
+    # ERPNext's invoice uses: the company default was refused for a customer
+    # with an account of its own ("SI is associated with X, but Party Account
+    # is Debtors"), and an advance went to the wrong account.
+    paid_from = get_party_account("Customer", customer, company) or receivable
     # Account currencies — required by ERPNext's Payment Entry validation;
     # skipping this made validate() trip on str vs Dict attribute access.
     paid_from_currency = frappe.db.get_value("Account", paid_from, "account_currency") or "SAR"
@@ -98,7 +105,7 @@ def build_payment_entry(
     doc.paid_from_account_currency = paid_from_currency
     doc.paid_to_account_currency = paid_to_currency
     # NOTE: do NOT call doc.setup_party_account_field() — it's gone in
-    # ERPNext v15. For Receive, party_account == paid_from (Debtors).
+    # ERPNext v15. For Receive, party_account == paid_from (the receivable).
     doc.party_account = paid_from
     doc.party_account_currency = paid_from_currency
     doc.source_exchange_rate = 1
@@ -559,6 +566,15 @@ def modes_of_payment() -> list[dict]:
     allowed = van_allowed_modes()
     if allowed is not None:
         rows = [r for r in rows if r["name"] in allowed]
+    # Steel Force: only the branch's modes (sf_trading's Branch Configuration).
+    from vansale import steelforce
+
+    branch_modes = steelforce.branch_payment_modes(company)
+    if branch_modes is not None:
+        cheque = set(steelforce.cheque_modes())
+        rows = [r for r in rows if r["name"] in branch_modes or r["name"] in cheque]
+        for row in rows:
+            row["pdc"] = row["name"] in cheque
     for row in rows:
         row["needs_reference"] = _needs_reference(company, row["name"])
     return rows

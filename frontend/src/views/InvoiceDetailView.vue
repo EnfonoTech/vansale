@@ -14,6 +14,7 @@ import SarSymbol from "@/components/SarSymbol.vue";
 import { vDecimals } from "@/components/decimals";
 import { confirmSubmit, withCurrency } from "@/stores/confirm";
 import { customerLine } from "@/app/customerName";
+import { precheckBeforeSubmit } from "@/api/precheck";
 
 const route = useRoute();
 const router = useRouter();
@@ -215,12 +216,27 @@ function editDraft() {
  */
 async function submitInvoice() {
   if (!inv.value || busy.value) return;
+  // Locked from the first tap: the pre-check and the confirm take a moment.
+  busy.value = true;
+  const go = await precheckBeforeSubmit(
+    "Sales Invoice",
+    inv.value.customer,
+    inv.value.payment_type,
+    (inv.value.items ?? []).map((i) => ({
+      item_code: i.item_code,
+      item_name: i.item_name,
+      rate: i.rate,
+      conversion_factor: i.conversion_factor,
+    })),
+    // What the credit-limit check will count: the draft's unpaid part.
+    { amount: inv.value.outstanding_amount ?? inv.value.grand_total, fromOrder: Boolean(inv.value.sales_order) },
+  );
+  if (!go) { busy.value = false; return; }
   const ok = await confirmSubmit(`Submit ${inv.value.name}?`, [
     customerLine(inv.value.customer_title, inv.value.customer_name, inv.value.customer),
     `${withCurrency(fmt(inv.value.grand_total))}`,
   ]);
-  if (!ok) return;
-  busy.value = true;
+  if (!ok) { busy.value = false; return; }
   try {
     await submitDraft(inv.value.name);
     toasts.success(`Submitted ${inv.value.name}`);
@@ -297,6 +313,10 @@ async function deleteInvoice() {
             <strong :class="inv.outstanding_amount > 0 ? 'warn' : ''"><SarSymbol :code="session.currency" />{{ fmt(inv.outstanding_amount) }}</strong>
           </div>
         </div>
+        <p v-if="inv.driver" class="muted small driver-line">
+          <Icon name="truck" :size="14" /> Delivery person: {{ inv.driver_name || inv.driver }}<template
+            v-if="!inv.is_return && inv.outstanding_amount > 0"> — collects on delivery</template>
+        </p>
         <div class="row actions">
           <!-- Draft stage: submit or delete. Print is also allowed
                (useful to preview the invoice before committing stock). -->
@@ -468,6 +488,7 @@ async function deleteInvoice() {
 }
 .hero-total .big { display: block; font-size: var(--text-2xl); font-variant-numeric: tabular-nums; }
 .hero-sub { text-align: right; }
+.driver-line { display: flex; align-items: center; gap: 0.35rem; margin: 0; }
 .warn { color: var(--warning); }
 .refund-head { display: flex; justify-content: space-between; align-items: baseline; gap: 0.5rem; }
 .refund-grid { display: grid; grid-template-columns: 1fr 8rem; gap: 0.5rem; }

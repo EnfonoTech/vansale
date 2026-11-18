@@ -30,6 +30,12 @@ import { vDecimals } from "@/components/decimals";
 import { revealOnFocus } from "@/components/reveal";
 import { inputValue } from "@/components/liveInput";
 import { confirmSubmit, withCurrency } from "@/stores/confirm";
+import { precheckBeforeSubmit } from "@/api/precheck";
+import CreditPanel from "@/components/CreditPanel.vue";
+import LineInsight from "@/components/LineInsight.vue";
+import { useLineInsight } from "@/features/van/lineInsight";
+import { stockLabel } from "@/features/van/stock";
+import { creditRefusal, useCreditStatus } from "@/features/van/credit";
 
 const props = defineProps<{ kind: SellingKind; name?: string }>();
 const router = useRouter();
@@ -61,7 +67,14 @@ async function onLeadSearch(term: string) {
 }
 const canPickLead = computed(() => props.kind === "quotation" && !isEdit.value);
 
-interface Line extends SellingLine { uoms?: ItemUom[]; discount_percentage: number; amount: number }
+interface Line extends SellingLine { uoms?: ItemUom[]; discount_percentage: number; amount: number; min_rate?: number }
+
+/** Rate after the line discount — what a site's minimum price is compared with. */
+function effectiveRate(l: Line): number {
+  const disc = session.lineDiscount ? Number(l.discount_percentage) || 0 : 0;
+  return (Number(l.rate) || 0) * (1 - disc / 100);
+}
+const belowMin = (l: Line) => Boolean(l.min_rate) && effectiveRate(l) + 0.0001 < (l.min_rate ?? 0);
 
 const customers = ref<CustomerRow[]>([]);
 const items = ref<ItemRow[]>([]);
@@ -79,7 +92,27 @@ const addDays = (n: number) => {
 };
 // Quotes stay valid a month by default, orders are delivered within a week.
 const date = ref(addDays(props.kind === "quotation" ? 30 : 7));
+// Cash / credit on an order, where the site keeps it there (Steel Force's credit checks read it).
+const showPayment = computed(() => props.kind === "order" && session.orderPaymentType);
+const paymentType = ref<"cash" | "credit">(session.defaultPaymentType === "credit" ? "credit" : "cash");
+// An order counts against the customer's credit limit: show it, and refuse
+// Credit on tap (with the reason) when the customer can't have it.
+const { status: credit, loading: creditLoading } = useCreditStatus(
+  customer,
+  computed(() => props.kind === "order" && quotationTo.value === "Customer"),
+);
+const creditRefused = computed(() => creditRefusal(credit.value, "credit"));
+function pickPayment(t: "cash" | "credit") {
+  if (t === "credit" && creditRefused.value && paymentType.value !== "credit") {
+    toasts.warn(creditRefused.value);
+    return;
+  }
+  paymentType.value = t;
+}
 const warehouse = computed(() => session.defaultWarehouse ?? "");
+// Last price to this customer and short stock, under each line (a lead has no sales yet).
+const insightCustomer = computed(() => (quotationTo.value === "Customer" ? customer.value : ""));
+const insight = useLineInsight({ customer: insightCustomer, lines, warehouse: computed(() => warehouse.value || undefined) });
 
 const party = computed(() => (quotationTo.value === "Lead" ? leadId.value : customer.value));
 
@@ -99,6 +132,13 @@ const roundRate = (n: number) => {
   return Math.round((Number(n) || 0) * f) / f;
 };
 const money = (n: number) => (Number(n) || 0).toFixed(session.currencyPrecision);
+
+/** A past price tapped under the line: it becomes the line's rate (as sold, so no line discount on top). */
+function usePrice(l: Line, rate: number) {
+  l.rate = roundRate(rate);
+  l.discount_percentage = 0;
+  recalc(l);
+}
 
 function recalc(l: Line) {
   const disc = session.lineDiscount ? Number(l.discount_percentage) || 0 : 0;
@@ -153,10 +193,12 @@ watch(customer, async (c) => {
 });
 
 async function searchItems() {
-  items.value = await listItems(itemSearch.value || undefined, undefined, 80, false);
+  // The whole catalog, with the stock in the salesman's warehouse shown.
+  items.value = await listItems(itemSearch.value || undefined, warehouse.value || undefined, 80, false);
 }
 
 async function addLine(item: ItemRow) {
+  insight.noteStock(item);
   let uoms = uomCache[uomKey(item.item_code)];
   let listRate = 0;
   if (!uoms) {
@@ -182,6 +224,7 @@ async function addLine(item: ItemRow) {
     discount_percentage: 0,
     uoms,
     amount: 0,
+    min_rate: first?.min_rate,
   };
   recalc(line);
   lines.value.push(line);
@@ -193,6 +236,7 @@ async function onUomChange(l: Line) {
   l.conversion_factor = chosen.conversion_factor;
   l.price_list_rate = roundRate(chosen.price_list_rate);
   l.rate = roundRate(chosen.price_list_rate);
+  l.min_rate = chosen.min_rate;
   recalc(l);
 }
 
@@ -206,11 +250,16 @@ async function prefill(name: string) {
     }
     if (props.kind === "quotation") {
       quotationTo.value = d.quotation_to ?? "Customer";
-      if (quotationTo.value === "Lead") leadLabel.value = d.party_name;
+      // The lead itself too, or saving the draft stopped at "Pick a lead".
+      if (quotationTo.value === "Lead") {
+        leadId.value = d.party ?? "";
+        leadLabel.value = d.party_name;
+      }
     }
     keepRates = Boolean(d.customer) && customer.value !== d.customer;
     customer.value = d.customer ?? "";
     date.value = (props.kind === "quotation" ? d.valid_till : d.delivery_date) ?? date.value;
+    if (d.payment_type === "cash" || d.payment_type === "credit") paymentType.value = d.payment_type;
     remarks.value = d.remarks ?? "";
     discountAmount.value = d.discount_amount || null;
     lines.value = d.items.map<Line>((it) => ({
@@ -234,7 +283,12 @@ async function prefill(name: string) {
 async function loadAll() {
   void loadTax();
   const jobs: Promise<unknown>[] = [
-    listCustomers(undefined, 200).then((r) => { customers.value = r; }).catch(() => {}),
+    listCustomers(undefined, 200).then(async (r) => {
+      customers.value = r;
+      // Opened for a customer outside the first page (e.g. from the customer
+      // screen): fetch it, or the picker shows empty although one is chosen.
+      if (customer.value && !r.some((c) => c.name === customer.value)) await onCustomerSearch(customer.value);
+    }).catch(() => {}),
     searchItems().catch(() => {}),
   ];
   if (canPickLead.value) {
@@ -248,24 +302,43 @@ async function loadAll() {
 }
 
 async function doSave(submit: 0 | 1) {
+  if (busy.value) return;
   if (!party.value) { toasts.warn(quotationTo.value === "Lead" ? "Pick a lead" : "Pick a customer"); return; }
   if (!lines.value.length) { toasts.warn("Add at least one item"); return; }
   const bad = lines.value.find((l) => !(Number(l.qty) > 0));
   if (bad) { toasts.warn(`Enter a quantity for ${bad.item_name || bad.item_code}`); return; }
+  const low = lines.value.find(belowMin);
+  if (low) {
+    toasts.warn(`${low.item_name || low.item_code}: the lowest rate allowed is ${(low.min_rate ?? 0).toFixed(session.ratePrecision)}`);
+    return;
+  }
+  // Lock the buttons from the first tap: the pre-check and the confirm take a
+  // moment, and a second tap meanwhile submitted a second document.
+  busy.value = true;
+  if (submit && quotationTo.value === "Customer") {
+    const go = await precheckBeforeSubmit(
+      props.kind === "order" ? "Sales Order" : "Quotation",
+      customer.value,
+      showPayment.value ? paymentType.value : undefined,
+      lines.value.map((l) => ({ item_code: l.item_code, item_name: l.item_name, rate: effectiveRate(l), conversion_factor: l.conversion_factor })),
+      { amount: props.kind === "order" ? totals.value.grand : 0 },
+    );
+    if (!go) { busy.value = false; return; }
+  }
   if (submit) {
     const ok = await confirmSubmit(`Submit ${k.value.title.toLowerCase()}?`, [
       quotationTo.value === "Lead" ? leadOptions.value.find((o) => o.value === leadId.value)?.label ?? leadLabel.value : customerOptions.value.find((o) => o.value === customer.value)?.label,
       `${lines.value.length} item${lines.value.length === 1 ? "" : "s"} · ${withCurrency(money(totals.value.grand))}`,
     ]);
-    if (!ok) return;
+    if (!ok) { busy.value = false; return; }
   }
-  busy.value = true;
   try {
     const payload = {
       party: party.value,
       quotation_to: quotationTo.value,
       date: date.value || undefined,
       warehouse: props.kind === "order" ? warehouse.value || undefined : undefined,
+      payment_type: showPayment.value ? paymentType.value : undefined,
       remarks: remarks.value,
       discount_amount: Math.max(0, Number(discountAmount.value) || 0),
       submit,
@@ -331,11 +404,27 @@ onMounted(loadAll);
         </template>
       </template>
       <SearchSelect v-else v-model="customer" :options="customerOptions" placeholder="Search customer by name or code"
-                    remote :disabled="isEdit && kind === 'order'" @search="onCustomerSearch" />
+                    remote :disabled="isEdit" @search="onCustomerSearch" />
       <label class="field">
         <span class="tiny">{{ k.dateLabel }}</span>
         <input type="date" v-model="date" />
       </label>
+      <div v-if="showPayment" class="seg">
+        <button type="button" class="seg-btn" :data-active="paymentType === 'cash'" @click="pickPayment('cash')">
+          <Icon name="payment" :size="16" /> Cash
+        </button>
+        <button type="button" class="seg-btn" :data-active="paymentType === 'credit'"
+                :data-blocked="Boolean(creditRefused)" @click="pickPayment('credit')">
+          <Icon :name="creditRefused ? 'alert' : 'clock'" :size="16" /> Credit
+        </button>
+      </div>
+      <CreditPanel
+        v-if="kind === 'order' && quotationTo === 'Customer' && customer"
+        :status="credit"
+        :loading="creditLoading"
+        :payment="showPayment ? paymentType : undefined"
+        :adds="totals.grand"
+      />
     </section>
 
     <section class="card stack">
@@ -367,15 +456,21 @@ onMounted(loadAll);
             </label>
             <label><span class="tiny">Rate</span>
               <input type="number" min="0" step="any" inputmode="decimal" v-model.number="l.rate"
-                     v-decimals="session.ratePrecision" @input="recalc(l)" />
+                     :class="{ 'below-min': belowMin(l) }" v-decimals="session.ratePrecision" @input="recalc(l)" />
             </label>
             <label v-if="session.lineDiscount"><span class="tiny">Disc %</span>
               <input type="number" min="0" max="100" step="any" inputmode="decimal"
                      v-model.number="l.discount_percentage" @input="recalc(l)" />
             </label>
           </div>
+          <LineInsight :item-code="l.item_code" :customer="insightCustomer" :uom="l.uom"
+                       :conversion-factor="l.conversion_factor" :last="insight.lastSale(l.item_code)"
+                       :short="insight.shortage(l)" @use="(r: number) => usePrice(l, r)" />
           <div class="line-foot">
-            <span />
+            <span v-if="l.min_rate" class="xsmall" :class="belowMin(l) ? 'min-low' : 'muted'">
+              Min: <SarSymbol :code="session.currency" />{{ (l.min_rate ?? 0).toFixed(session.ratePrecision) }}
+            </span>
+            <span v-else />
             <strong class="tabular"><SarSymbol :code="session.currency" />{{ money(l.amount) }}</strong>
           </div>
         </li>
@@ -396,6 +491,9 @@ onMounted(loadAll);
               <strong class="truncate">{{ it.item_name }}</strong>
               <div class="muted xsmall">{{ it.item_code }}</div>
             </div>
+            <span v-if="typeof it.stock_qty === 'number' && it.is_stock_item !== 0" class="pill" data-tone="primary">
+              {{ stockLabel(it.stock_qty, it.stock_uom, it.sales_uom, it.sales_cf) }}
+            </span>
           </button>
         </li>
       </ul>
@@ -435,6 +533,8 @@ onMounted(loadAll);
 </template>
 
 <style scoped>
+.below-min { border-color: var(--danger); color: var(--danger); }
+.min-low { color: var(--danger); font-weight: 600; }
 .field { display: flex; flex-direction: column; gap: 0.3rem; }
 .label { font-size: var(--text-sm); color: var(--text-muted); font-weight: 500; }
 .seg { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; }
@@ -444,6 +544,8 @@ onMounted(loadAll);
   display: inline-flex; justify-content: center; align-items: center; gap: 0.35rem;
 }
 .seg-btn[data-active="true"] { background: var(--primary); color: var(--on-primary, white); }
+.seg-btn[data-blocked="true"]:not([data-active="true"]) { color: var(--text-faint); }
+.seg-btn[data-blocked="true"][data-active="true"] { background: var(--danger); }
 .row-head { display: flex; justify-content: space-between; align-items: center; }
 .link-btn { all: unset; cursor: pointer; color: var(--primary); font-size: var(--text-xs); font-weight: 600; display: inline-flex; align-items: center; gap: 0.25rem; }
 .selected-hint { font-size: var(--text-sm); color: var(--primary); display: inline-flex; align-items: center; gap: 0.3rem; }

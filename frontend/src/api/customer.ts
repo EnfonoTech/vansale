@@ -63,6 +63,76 @@ export interface CustomerDetail extends CustomerRow {
     total: number;
     scope: "van" | "all";
   };
+  /** Credit limit / used / overdue (+ site rules); null if the lookup failed. */
+  credit?: CreditStatus | null;
+}
+
+/** A customer's credit, as ERPNext's credit-limit check counts it (whole company). */
+export interface CreditStatus {
+  customer: string;
+  /** 0 = no limit. */
+  credit_limit: number;
+  /** Unpaid invoices + unbilled orders / delivery notes. */
+  used: number;
+  /** limit − used; null without a limit. */
+  available: number | null;
+  /** Unpaid invoices past their due date. */
+  overdue: { count: number; amount: number; oldest_due: string } | null;
+  /** False when the "credit only with a credit limit" setting refuses this customer. */
+  credit_allowed: boolean;
+  credit_problem: string | null;
+  /** Steel Force: a cash sale never counts against the limit. */
+  cash_exempt: boolean;
+  /** Steel Force: credit invoice past the customer's credit days — no new credit sale until paid. */
+  blocking_overdue: { name: string; posting_date: string; outstanding_amount: number } | null;
+  /** Steel Force master approval; `covered` = the approval holds this customer. */
+  approval: { covered: boolean; status: string; approved: boolean; missing: string[] } | null;
+  /** Steel Force: the customer's own credit sub-limit at the van's branch. */
+  branch: { name: string; limit: number; used: number; available: number } | null;
+  /** Set by the app: the saved copy shown offline. */
+  fromCache?: boolean;
+}
+
+const CREDIT_CACHE_KEY = "vansale.creditStatus";
+
+function cachedCredit(): Record<string, CreditStatus> {
+  try {
+    return JSON.parse(localStorage.getItem(CREDIT_CACHE_KEY) || "{}") as Record<string, CreditStatus>;
+  } catch {
+    return {};
+  }
+}
+
+/** Remember the last answer per customer, so an offline sale still shows it. */
+export function rememberCredit(status: CreditStatus): void {
+  try {
+    const all = cachedCredit();
+    all[status.customer] = { ...status, fromCache: undefined };
+    const keys = Object.keys(all);
+    // Keep the file small: the last 200 customers looked at.
+    for (const k of keys.slice(0, Math.max(0, keys.length - 200))) delete all[k];
+    localStorage.setItem(CREDIT_CACHE_KEY, JSON.stringify(all));
+  } catch {
+    /* storage full / blocked */
+  }
+}
+
+/** Credit status for a customer being sold to: live when online, else the last saved copy. */
+export async function creditStatus(customer: string): Promise<CreditStatus | null> {
+  if (isOnline()) {
+    try {
+      const live = await apiCall<CreditStatus>(
+        "GET",
+        `vansale.api.customer.credit_status?customer=${encodeURIComponent(customer)}`,
+      );
+      rememberCredit(live);
+      return live;
+    } catch (e) {
+      if (!(e instanceof NetworkError)) throw e;
+    }
+  }
+  const saved = cachedCredit()[customer];
+  return saved ? { ...saved, fromCache: true } : null;
 }
 
 /**
@@ -249,6 +319,8 @@ export interface CustomerCreatePayload {
   cr_number?: string;
   /** Second name, saved to the site's second-name field. */
   customer_name_2?: string;
+  /** Photo of the CR / VAT certificate, attached to the customer. */
+  attachment?: { filename: string; data: string };
 }
 
 export interface CustomerCreateResult {

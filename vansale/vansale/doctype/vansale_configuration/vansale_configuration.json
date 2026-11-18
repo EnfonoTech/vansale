@@ -38,8 +38,6 @@
   "default_territory",
   "section_break_selling_flow",
   "update_stock_mode",
-  "column_break_selling_flow",
-  "cash_collection_mode",
   "section_break_payments",
   "cash_sale_posting_mode",
   "cash_payment_entry_status_mode",
@@ -357,22 +355,11 @@
    "label": "Invoice updates stock",
    "options": "Follow Global\nEnabled\nDisabled",
    "default": "Follow Global"
-  },
-  {
-   "fieldname": "column_break_selling_flow",
-   "fieldtype": "Column Break"
-  },
-  {
-   "fieldname": "cash_collection_mode",
-   "fieldtype": "Select",
-   "label": "Cash sale collection",
-   "options": "Follow Global\nCollect now\nCollect later\nSalesman chooses",
-   "default": "Follow Global"
   }
  ],
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-10-09 13:10:00.000000",
+ "modified": "2026-11-17 12:00:00.000000",
  "modified_by": "Administrator",
  "module": "Vansale",
  "name": "Vansale Configuration",

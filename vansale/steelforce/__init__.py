@@ -43,12 +43,11 @@ def set_payment_mode(doc, pay_type: Optional[str]) -> None:
 
 
 def payment_type_of(doc) -> Optional[str]:
-    """"cash" / "credit" from `custom_payment_mode`, or None when the site has no
-    such field (the caller then derives it the standard way). A cheque is a
-    credit sale to sf_trading (post-dated), so the app shows it as credit."""
+    """"cash" / "credit" / "cheque" from `custom_payment_mode`, or None when the
+    site has no such field (the caller then derives it the standard way)."""
     if not doc.meta.has_field(_PAYMENT_MODE_FIELD) or not doc.get(_PAYMENT_MODE_FIELD):
         return None
-    return "cash" if doc.get(_PAYMENT_MODE_FIELD) == "Cash" else "credit"
+    return {"Cash": "cash", "Cheque": "cheque"}.get(doc.get(_PAYMENT_MODE_FIELD), "credit")
 
 
 # ─── New customers ────────────────────────────────────────────────────────────
@@ -172,6 +171,47 @@ def invoices_for_quotation(quotation_name: str) -> list[str]:
     )
 
 
+def sale_history_conditions() -> Optional[tuple[list, dict, Optional[str]]]:
+    """Which past sales a salesman sees, as the desk's Last Selling Rate /
+    Customer Last Selling Rate dialogs: the document's cost centre (the
+    branch) only, within sf_trading's permitted companies / cost centres
+    (aliases si / sii). Returns (where, params, cost centre), or None where
+    sf_trading isn't installed."""
+    if not is_active():
+        return None
+    try:
+        from sf_trading.api.last_selling_rate import _permission_conditions
+    except ImportError:
+        return None
+    where, params = _permission_conditions()
+    where = list(where)
+    params = {k: tuple(v) if isinstance(v, list) else v for k, v in params.items()}
+    from vansale.api.invoice import _user_default
+    from vansale.api.me import van_default
+
+    cost_center = van_default("Cost Center") or _user_default("Cost Center")
+    if cost_center:
+        where.append("(sii.cost_center = %(branch_cost_center)s OR si.cost_center = %(branch_cost_center)s)")
+        params["branch_cost_center"] = cost_center
+    return where, params, cost_center
+
+
+def warehouse_stock(item_code: str, company: str, own: Optional[str]) -> Optional[list[dict]]:
+    """Stock per warehouse as sf_trading's Stock Availability shows it, or None
+    where it isn't installed."""
+    if not is_active():
+        return None
+    try:
+        from sf_trading.api.warehouse_stock import get_item_warehouse_stock
+    except ImportError:
+        return None
+    rows = get_item_warehouse_stock(item_code, company=company, target_warehouse=own) or []
+    return [
+        {"warehouse": r["warehouse"], "warehouse_name": r.get("warehouse_name") or r["warehouse"], "qty": frappe.utils.flt(r.get("stock_qty"))}
+        for r in rows
+    ]
+
+
 def draft_sale_printable() -> bool:
     """sf_trading refuses to print a draft Sales Invoice (a draft return still
     prints), so the app hides Print on draft sales there."""
@@ -184,3 +224,267 @@ def draft_sale_printable() -> bool:
     return "sf_trading.draft_print.block_draft_sale_print" not in str(
         frappe.get_hooks("doc_events").get("Sales Invoice", {}).get("before_print", "")
     )
+
+
+# ─── Minimum selling price ────────────────────────────────────────────────────
+
+def min_rate(item_code: str, uom_cf: float, price_list: Optional[str], warehouse: Optional[str] = None,
+             branch: Optional[str] = None) -> Optional[float]:
+    """sf_trading's minimum rate for one unit of `uom_cf` stock units (offer price,
+    else the list price and cost + Item Group margin, whichever is higher), in
+    company currency. None on sites without the rule, or when the price list is
+    in another currency (the app then leaves the check to the server)."""
+    if not is_active():
+        return None
+    try:
+        from sf_trading.api.selling_price_validation import get_min_selling_price
+    except ImportError:
+        return None
+    if price_list:
+        from vansale.api.invoice import _user_company
+
+        pl_currency = frappe.db.get_value("Price List", price_list, "currency")
+        company = _user_company()
+        if pl_currency and company and pl_currency != frappe.get_cached_value("Company", company, "default_currency"):
+            return None
+    result = get_min_selling_price(
+        item_code, warehouse=warehouse, price_list=price_list, uom_cf=uom_cf or 1.0, branch=branch
+    ) or {}
+    value = float(result.get("min_price") or 0)
+    return value or None
+
+
+# ─── Customer status and pre-check ────────────────────────────────────────────
+
+def credit_extras(customer: str, company: str) -> dict:
+    """Steel Force additions to the customer's credit status
+    (`vansale.api.customer.credit_status`); {} elsewhere:
+
+    cash_exempt       a Cash sale never counts against the credit limit here
+    blocking_overdue  the oldest credit invoice past the customer's credit days:
+                      sf_trading refuses any new Credit sale or order until it is paid
+    approval          master approval of the customer (an unapproved, covered
+                      customer cannot be sold to at all, cash included)
+    branch            the customer's own credit sub-limit at the van's branch, if set
+    """
+    if not is_active() or not customer:
+        return {}
+    from vansale.api.me import van_default
+
+    out: dict = {"cash_exempt": True, "blocking_overdue": None, "approval": None, "branch": None}
+
+    try:
+        from sf_trading.api.sales_invoice_override import _get_overdue_invoice
+
+        overdue = _get_overdue_invoice(customer, company)
+    except ImportError:
+        overdue = None
+    if overdue:
+        out["blocking_overdue"] = {
+            "name": overdue.get("name"),
+            "posting_date": str(overdue.get("posting_date")),
+            "outstanding_amount": float(overdue.get("outstanding_amount") or 0),
+        }
+
+    try:
+        from sf_trading.master_approval import get_approval_state
+
+        approval = get_approval_state("Customer", customer) or {}
+    except Exception:
+        approval = {}
+    if approval.get("enabled"):
+        out["approval"] = {
+            "covered": bool(approval.get("covered")),
+            "status": approval.get("status") or "",
+            "approved": bool(approval.get("approved")),
+            "missing": approval.get("missing") or [],
+        }
+
+    branch = van_default("Branch")
+    try:
+        from sf_trading.credit_limit import branch_credit_exposure, branch_sub_limit
+    except ImportError:
+        branch_sub_limit = None
+    if branch and branch_sub_limit:
+        limit = float(branch_sub_limit(customer, branch) or 0)
+        if limit:
+            used = float(branch_credit_exposure(customer, branch) or 0)
+            out["branch"] = {"name": branch, "limit": limit, "used": used, "available": limit - used}
+    return out
+
+
+_SF_PAYMENT_MODE = {"cash": "Cash", "credit": "Credit", "cheque": "Cheque"}
+
+
+def precheck(
+    doctype: str, customer: str, payment_type: Optional[str], lines: list[dict], amount: float = 0
+) -> dict:
+    """sf_trading's own refusals for a sale that is about to be submitted,
+    run without saving anything: customer gates (contact, credit documents,
+    approval), an overdue credit invoice for a credit sale, and rates below
+    the minimum. {"problems": [...], "warnings": [...]}."""
+    out: dict = {"problems": [], "warnings": []}
+    if not is_active() or not customer:
+        return out
+    from vansale.api.invoice import _user_company
+    from vansale.api.me import van_default
+
+    company = _user_company()
+    mode = _SF_PAYMENT_MODE.get((payment_type or "").lower())
+    if doctype in ("Sales Invoice", "Sales Order"):
+        from sf_trading.party_alert import get_party_alert
+
+        header = {"doctype": doctype, "customer": customer, "company": company, "__islocal": 1}
+        if mode:
+            header["custom_payment_mode"] = mode
+        alert = get_party_alert(doctype, frappe.as_json(header)) or {}
+        out["problems"].extend(_plain(p) for p in alert.get("problems") or [])
+        out["warnings"].extend(_plain(h) for h in alert.get("hints") or [])
+
+    # Credit and cheque count against the limits (sf_trading.credit_limit).
+    extras = credit_extras(customer, company) if mode in ("Credit", "Cheque") else {}
+    sub = extras.get("branch")
+    if sub and amount and doctype in ("Sales Invoice", "Sales Order") and sub["used"] + amount > sub["limit"]:
+        out["problems"].append(
+            frappe._("Over the branch credit limit at {0}: {1} used of {2}, this sale adds {3}.").format(
+                sub["name"], round(sub["used"], 2), round(sub["limit"], 2), round(amount, 2)
+            )
+        )
+    # sf_trading refuses only a Credit sale / order over an overdue invoice (not a cheque).
+    if mode == "Credit" and doctype in ("Sales Invoice", "Sales Order"):
+        overdue = extras.get("blocking_overdue")
+        if overdue:
+            out["problems"].append(
+                frappe._("Credit sale refused: invoice {0} of {1} is overdue ({2} outstanding).").format(
+                    overdue["name"], overdue["posting_date"], overdue["outstanding_amount"]
+                )
+            )
+
+    warehouse = van_default("Warehouse")
+    branch = van_default("Branch")
+    price_list = lines[0].get("price_list") if lines else None
+    from vansale.api.me import current_user_van_price_list
+
+    price_list = price_list or current_user_van_price_list() or frappe.db.get_single_value(
+        "Selling Settings", "selling_price_list"
+    )
+    for line in lines or []:
+        floor = min_rate(line.get("item_code"), float(line.get("conversion_factor") or 1), price_list, warehouse, branch)
+        rate = float(line.get("rate") or 0)
+        if floor and rate + 0.0001 < floor:
+            out["problems"].append(
+                frappe._("{0}: rate {1} is below the minimum {2}.").format(
+                    line.get("item_name") or line.get("item_code"), rate, round(floor, 2)
+                )
+            )
+    return out
+
+
+def _plain(text) -> str:
+    """Server messages carry HTML (bold, line breaks); the app shows text."""
+    import re
+
+    return re.sub(r"<[^>]+>", "", str(text or "")).strip()
+
+
+# ─── Payment modes ────────────────────────────────────────────────────────────
+
+def branch_payment_modes(company: str, is_return: int = 0, is_pdc: int = 0) -> Optional[list[str]]:
+    """The modes sf_trading allows on the salesman's branch (cash/bank, or the
+    post-dated cheque modes), or None on sites without that rule."""
+    if not is_active():
+        return None
+    try:
+        from sf_trading.api.sales_invoice_payment import get_payment_modes_with_account
+    except ImportError:
+        return None
+    from vansale.api.me import van_default
+
+    return get_payment_modes_with_account(company, is_return=is_return, is_pdc=is_pdc, branch=van_default("Branch"))
+
+
+
+# ─── Collection on submit (cash collected now, cheques) ───────────────────────
+
+def cheque_modes() -> list[str]:
+    """The branch's post-dated cheque modes (Branch Configuration "For PDC");
+    [] where there are none or no sf_trading."""
+    from vansale.api.invoice import _user_company
+
+    return branch_payment_modes(_user_company(), is_pdc=1) or []
+
+
+def collect_invoice(inv, rows: list[dict], entry_status: str) -> Optional[list[str]]:
+    """Payment Entries for a submitted sale the way the Steel Force desk makes
+    them: sf_trading's `create_pos_payments_for_invoice` (one entry per mode,
+    cheque number / date for PDC, its write-off and branch rules). Used when the
+    entries are to be submitted at once (sf_trading always submits); returns
+    None to leave the standard path (draft entries, other sites)."""
+    if not rows or not is_active():
+        return None
+    is_cheque = inv.get(_PAYMENT_MODE_FIELD) == "Cheque"
+    if entry_status != "Submit" and not is_cheque:
+        return None
+    try:
+        from sf_trading.api.sales_invoice_payment import create_pos_payments_for_invoice
+    except ImportError:
+        return None
+    remaining = float(inv.outstanding_amount or 0)
+    payments = []
+    for row in rows:
+        amount = min(float(row["amount"]) if row.get("amount") is not None else remaining, remaining)
+        if amount <= 0:
+            continue
+        payments.append({"mode_of_payment": row["mode_of_payment"], "amount": amount})
+        remaining -= amount
+    if not payments:
+        return []
+    first = rows[0]
+    names = create_pos_payments_for_invoice(
+        inv.name,
+        payments,
+        cheque_date=first.get("reference_date") if is_cheque else None,
+        cheque_no=first.get("reference_no") if is_cheque else None,
+        posting_date=str(inv.posting_date),
+    )
+    return list(names or [])
+
+
+
+# ─── Driver (delivery person) ─────────────────────────────────────────────────
+
+_DRIVER_FIELD = "custom_driver"
+
+
+def has_driver_field() -> bool:
+    return is_active() and frappe.get_meta("Sales Invoice").has_field(_DRIVER_FIELD)
+
+
+def driver_of(doc) -> Optional[str]:
+    """The delivery person on this document, or None."""
+    if not doc.meta.has_field(_DRIVER_FIELD):
+        return None
+    return doc.get(_DRIVER_FIELD) or None
+
+
+def driver_name(driver: Optional[str]) -> Optional[str]:
+    if not driver:
+        return None
+    return frappe.db.get_value("Driver", driver, "full_name") or driver
+
+
+def set_driver(doc, driver: Optional[str], pay_type: Optional[str]) -> None:
+    """The delivery person on a cash sale (sf_trading checks the driver's
+    overdue collections and cash limit, and clears it on non-cash sales)."""
+    if not doc.meta.has_field(_DRIVER_FIELD):
+        return
+    if (pay_type or "").lower() != "cash":
+        doc.set(_DRIVER_FIELD, None)
+    elif driver is not None:
+        doc.set(_DRIVER_FIELD, driver or None)
+
+
+
+def has_order_payment_mode() -> bool:
+    """Sales Orders carry a Cash / Credit payment mode on this site (sf_trading)."""
+    return frappe.get_meta("Sales Order").has_field(_PAYMENT_MODE_FIELD)

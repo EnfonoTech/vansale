@@ -48,6 +48,8 @@ export interface ModeOfPayment {
   type: string | null;
   /** Account is a Bank account → ERPNext requires a reference number. */
   needs_reference?: boolean;
+  /** A post-dated cheque mode of the branch (Steel Force); used for Cheque sales only. */
+  pdc?: boolean;
 }
 
 const MOP_CACHE_KEY = "vansale.modesOfPayment";

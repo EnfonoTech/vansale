@@ -25,20 +25,27 @@ export interface InvoicePayload {
   remarks?: string;
   update_stock?: 0 | 1;
   submit?: 0 | 1;
-  payment_type?: "cash" | "credit";
+  payment_type?: "cash" | "credit" | "cheque";
   mode_of_payment?: string;
   /** Split cash payment (setting): a row without amount takes what's left. */
   payments?: PaymentRow[];
   discount_amount?: number;
   apply_discount_on?: "Grand Total" | "Net Total";
-  /** Cash sale left unpaid for the driver / office ("Cash sale collection" setting). */
+  /** Cash sale left for the delivery person to collect (needs `driver`). */
   collect_later?: 0 | 1;
+  /** payment_type "cheque": the post-dated cheque's number and date. */
+  cheque_no?: string;
+  cheque_date?: string;
+  /** Delivery person on a cash sale (sites that ask for it). */
+  driver?: string;
 }
 
 export interface PaymentRow {
   mode_of_payment: string;
   amount?: number | null;
   reference_no?: string | null;
+  /** Cheque date (post-dated cheque sale). */
+  reference_date?: string | null;
 }
 
 export interface SavedInvoice {
@@ -142,8 +149,13 @@ export interface InvoiceDetail {
   is_return: number;
   /** 1 = cash (POS) invoice. Absent on servers older than this field. */
   is_pos?: number;
+  /** The order this invoice was made from (it already counts against the credit limit). */
+  sales_order?: string | null;
+  /** Delivery person on a cash sale (Steel Force). */
+  driver?: string | null;
+  driver_name?: string | null;
   /** Cash or credit, whichever way the cash sale is posted (POS or Payment Entry). */
-  payment_type?: "cash" | "credit";
+  payment_type?: "cash" | "credit" | "cheque";
   mode_of_payment?: string | null;
   payments?: PaymentRow[];
   grand_total: number;
@@ -208,11 +220,14 @@ export interface UpdateDraftPayload {
   discount_amount?: number;
   apply_discount_on?: "Grand Total" | "Net Total";
   submit?: 0 | 1;
-  payment_type?: "cash" | "credit";
+  payment_type?: "cash" | "credit" | "cheque";
   mode_of_payment?: string;
   payments?: PaymentRow[];
   warehouse?: string;
   collect_later?: 0 | 1;
+  cheque_no?: string;
+  cheque_date?: string;
+  driver?: string;
 }
 
 /**

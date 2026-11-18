@@ -34,6 +34,16 @@ const taxId = ref("");
 // Shown only when the site has the field (session.customerForm).
 const customerName2 = ref("");
 const crNumber = ref("");
+// Photo of the CR / VAT certificate (data URL), attached to the customer.
+const documentFile = ref<{ filename: string; data: string } | null>(null);
+function onDocumentPicked(ev: Event) {
+  const file = (ev.target as HTMLInputElement).files?.[0];
+  if (!file) { documentFile.value = null; return; }
+  if (file.size > 8 * 1024 * 1024) { toasts.warn("The document is too large (8 MB at most)"); return; }
+  const reader = new FileReader();
+  reader.onload = () => { documentFile.value = { filename: file.name, data: String(reader.result) }; };
+  reader.readAsDataURL(file);
+}
 
 const addressLine1 = ref("");
 const addressLine2 = ref("");
@@ -65,6 +75,16 @@ const isB2B = computed(() => customerType.value === "b2b");
 const problems = computed(() => {
   const list: string[] = [];
   if (!customerName.value.trim()) list.push("Customer name is required");
+  const rules = session.customerForm;
+  if (rules?.mobile_required) {
+    const digits = mobileNo.value.replace(/\D/g, "");
+    if (!digits) list.push("Mobile number is required");
+    else if (digits.length < 10) list.push("Mobile number needs at least 10 digits");
+  }
+  if (rules?.vat_needs_cr_and_document && taxId.value.trim()) {
+    if (!crNumber.value.trim()) list.push("CR number is required with a VAT number");
+    if (!documentFile.value) list.push("Add a photo of the CR / VAT certificate");
+  }
   const vatError = ksaVatError(taxId.value, country.value);
   if (vatError) list.push(vatError);
   if (isKsa(country.value)) {
@@ -109,6 +129,7 @@ async function submit() {
       district: district.value || undefined,
       cr_number: crNumber.value || undefined,
       customer_name_2: customerName2.value || undefined,
+      attachment: documentFile.value ?? undefined,
     });
     toasts.success(`Customer ${res.customer_name} created`);
     if (redirectTo === "invoice") {
@@ -170,6 +191,11 @@ async function submit() {
       <label v-if="session.customerForm?.cr_number" class="field">
         <span class="tiny">CR number</span>
         <input type="text" v-model="crNumber" inputmode="numeric" />
+      </label>
+      <label v-if="session.customerForm?.vat_needs_cr_and_document && taxId.trim()" class="field">
+        <span class="tiny">Photo of the CR / VAT certificate</span>
+        <input type="file" accept="image/*,application/pdf" capture="environment" @change="onDocumentPicked" />
+        <span v-if="documentFile" class="muted xsmall">{{ documentFile.filename }}</span>
       </label>
     </section>
 
