@@ -4,6 +4,7 @@ import {
   bulkTotals,
   dateRangeReversed,
   mergeResults,
+  bulkStateAfterFailure,
   mergeTransactions,
   retryNames,
   rowStates,
@@ -120,42 +121,78 @@ describe("bulk results", () => {
 });
 
 describe("sentBackTarget", () => {
-  const base = { docname: "DOC-1", transaction: "", doc_url: "/app/doc-1" };
+  const base = { docname: "DOC-1", transaction_filter: "", doc_url: "/app/doc-1" };
 
   it.each([
     ["Quotation", "quotation-edit"],
     ["Sales Order", "order-edit"],
     ["Sales Invoice", "invoice-edit"],
   ])("%s opens the app's own edit screen", (doctype, name) => {
-    expect(sentBackTarget({ ...base, doctype, transaction: doctype })).toEqual({
+    expect(sentBackTarget({ ...base, doctype, transaction_filter: doctype }, true)).toEqual({
       kind: "route",
       location: { name, params: { name: "DOC-1" } },
     });
   });
 
   it("every other type opens the desk form", () => {
-    expect(sentBackTarget({ ...base, doctype: "Journal Entry", transaction: "Journal Entry" })).toEqual({
+    expect(sentBackTarget({ ...base, doctype: "Journal Entry", transaction_filter: "Journal Entry" }, true)).toEqual({
       kind: "desk",
       url: "/app/doc-1",
     });
   });
 
   it("a Sales Invoice that is a return has no editor in the app: desk form", () => {
-    expect(sentBackTarget({ ...base, doctype: "Sales Invoice", transaction: "Sales Return" })).toEqual({
+    expect(sentBackTarget({ ...base, doctype: "Sales Invoice", transaction_filter: "Sales Invoice::1" }, true)).toEqual({
       kind: "desk",
       url: "/app/doc-1",
     });
   });
 
-  it("an empty transaction label does not make a Sales Invoice a return", () => {
-    expect(sentBackTarget({ ...base, doctype: "Sales Invoice", transaction: "" }).kind).toBe("route");
+  it("an ordinary Sales Invoice is not a return, marked ::0 or bare", () => {
+    for (const transaction_filter of ["Sales Invoice::0", "Sales Invoice", ""]) {
+      expect(sentBackTarget({ ...base, doctype: "Sales Invoice", transaction_filter }, true).kind).toBe("route");
+    }
+  });
+
+  it("the reader's language does not make an invoice a return: only the filter value says so", () => {
+    // `transaction` is the translated label ("فاتورة مبيعات"); it is not even an input here.
+    const arabicUser = { ...base, doctype: "Sales Invoice", transaction: "فاتورة مبيعات", transaction_filter: "Sales Invoice::0" };
+    expect(sentBackTarget(arabicUser, true)).toEqual({
+      kind: "route",
+      location: { name: "invoice-edit", params: { name: "DOC-1" } },
+    });
+    const arabicReturn = { ...arabicUser, transaction: "مرتجع مبيعات", transaction_filter: "Sales Invoice::1" };
+    expect(sentBackTarget(arabicReturn, true).kind).toBe("desk");
+  });
+
+  it("a user without the van app always gets the desk form, since the edit screens are van screens", () => {
+    for (const doctype of ["Quotation", "Sales Order", "Sales Invoice"]) {
+      expect(sentBackTarget({ ...base, doctype, transaction_filter: doctype }, false)).toEqual({
+        kind: "desk",
+        url: "/app/doc-1",
+      });
+    }
+  });
+
+  it("without the van app and without a usable desk address there is nothing to open", () => {
+    expect(sentBackTarget({ ...base, doctype: "Quotation", doc_url: "" }, false)).toEqual({ kind: "desk", url: "" });
   });
 
   it("a desk address that is not a path or an http(s) address is dropped", () => {
-    expect(sentBackTarget({ ...base, doctype: "Journal Entry", doc_url: "javascript:alert(1)" })).toEqual({
+    expect(sentBackTarget({ ...base, doctype: "Journal Entry", doc_url: "javascript:alert(1)" }, true)).toEqual({
       kind: "desk",
       url: "",
     });
+  });
+});
+
+describe("bulkStateAfterFailure", () => {
+  it("after a send with no answer the result is unknown: nothing is sent again", () => {
+    expect(bulkStateAfterFailure(true)).toBe("unknown");
+  });
+
+  it("before anything left the phone, asking again is safe", () => {
+    expect(bulkStateAfterFailure(false)).toBe("retry");
   });
 });
 

@@ -2,8 +2,9 @@
 /**
  * Sent back: the documents an approver returned to the user for correction,
  * with the reason, who sent it back and how long ago. "Open and correct" goes
- * to the app's own edit screen for a Quotation, Sales Order or Sales Invoice,
- * and to the desk form for every other type. Loads its own data on mount;
+ * to the app's own edit screen for a Quotation, Sales Order or Sales Invoice
+ * (when the user has the van app), and to the desk form for every other type,
+ * for a return, and for a user without the van app. Loads its own data on mount;
  * needs no van setup.
  */
 import { onMounted, watch } from "vue";
@@ -12,6 +13,7 @@ import { useI18n } from "vue-i18n";
 import { useOnline } from "@/app/online";
 import { absoluteUrl } from "@/app/platform";
 import { useApprovalsStore } from "@/stores/approvals";
+import { useSessionStore } from "@/stores/session";
 import { ageKey, sentBackTarget } from "@/features/approvals/lists";
 import type { SentBackRow } from "@/api/approvals";
 import ApprovalListState from "./ApprovalListState.vue";
@@ -20,6 +22,7 @@ import Icon from "./Icon.vue";
 const { t, locale } = useI18n();
 const router = useRouter();
 const store = useApprovalsStore();
+const session = useSessionStore();
 const online = useOnline();
 
 function reload(): Promise<void> {
@@ -39,13 +42,18 @@ function ago(days: number): string {
   return key === "today" ? age : t("approvalsLists.ago", { age });
 }
 
+/** The edit screens belong to the van app: a user without it is sent to the desk form. */
+function targetOf(row: SentBackRow) {
+  return sentBackTarget(row, session.hasVanShell);
+}
+
 function canOpen(row: SentBackRow): boolean {
-  const target = sentBackTarget(row);
+  const target = targetOf(row);
   return target.kind === "route" || !!target.url;
 }
 
 function openAndCorrect(row: SentBackRow) {
-  const target = sentBackTarget(row);
+  const target = targetOf(row);
   if (target.kind === "route") {
     void router.push(target.location);
   } else if (target.url) {

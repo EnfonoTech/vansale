@@ -88,6 +88,22 @@ export function mergeResults(previous: BulkRow[], latest: BulkRow[]): BulkRow[] 
   return merged;
 }
 
+/** What the sheet may do after a request failed: ask again, or only close and look. */
+export type BulkFailureState = "retry" | "unknown";
+
+/**
+ * A failed request is not a refusal. The server decides and commits the
+ * documents one by one while the phone waits, so once the request has gone out
+ * and no answer came back (the connection dropped, the wait ran out) some or all
+ * of the batch may already be decided, and asking again could decide a
+ * document twice (for a user who holds two steps in a row). So after a send
+ * the result is unknown and nothing may be sent again until the inbox has been
+ * reloaded; only before anything left the phone is asking again safe.
+ */
+export function bulkStateAfterFailure(sent: boolean): BulkFailureState {
+  return sent ? "unknown" : "retry";
+}
+
 // ─── Sent back ──────────────────────────────────────────────────────────────
 
 export type SentBackTarget =
@@ -109,20 +125,36 @@ export function safeDeskUrl(url: string): string {
 }
 
 /**
- * Where "Open and correct" goes. Quotation, Sales Order and Sales Invoice open
- * the app's own edit screen; everything else opens the desk form. A return
- * (a Sales Invoice that Permission Manager labels "Sales Return") has no
- * editor in the app, so it opens the desk form too.
+ * The mark Permission Manager puts on the filter value of a document that is
+ * a return: `"Sales Invoice::1"` (and `::0` when it is not). It is the one
+ * thing on a row that does not depend on the user's language: the label
+ * (`transaction`) is translated, so "Sales Invoice" is not what an Arabic
+ * user's ordinary invoice says.
  */
-export function sentBackTarget(row: {
-  doctype: string;
-  docname: string;
-  transaction: string;
-  doc_url: string;
-}): SentBackTarget {
+const RETURN_MARK = "::1";
+
+/**
+ * Where "Open and correct" goes. Quotation, Sales Order and Sales Invoice open
+ * the app's own edit screen; everything else opens the desk form. Two cases
+ * go to the desk form too: a return (a Sales Invoice that Permission Manager
+ * marks as one in `transaction_filter`), which has no editor in the app, and
+ * any document when the user has no van app, because the edit screens are van
+ * screens and the router would send that user back to Approvals without a word.
+ */
+export function sentBackTarget(
+  row: {
+    doctype: string;
+    docname: string;
+    transaction_filter: string;
+    doc_url: string;
+  },
+  hasVanShell: boolean,
+): SentBackTarget {
   const route = EDIT_ROUTE[row.doctype];
-  const isReturn = row.doctype === "Sales Invoice" && !!row.transaction && row.transaction !== row.doctype;
-  if (route && !isReturn) return { kind: "route", location: { name: route, params: { name: row.docname } } };
+  const isReturn = row.doctype === "Sales Invoice" && (row.transaction_filter || "").endsWith(RETURN_MARK);
+  if (route && !isReturn && hasVanShell) {
+    return { kind: "route", location: { name: route, params: { name: row.docname } } };
+  }
   return { kind: "desk", url: safeDeskUrl(row.doc_url) };
 }
 
