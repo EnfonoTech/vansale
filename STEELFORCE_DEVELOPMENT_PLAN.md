@@ -40,7 +40,7 @@ sf_trading on branch `new`, 0.1.159). Runs **next to `sf_trading`** (Steel Force
 |---|---|---|
 | 1 | Do salesmen carry stock? | Normally **no** → *order taker*: the invoice moves no stock; delivery is from the branch. A setting allows van sales too |
 | 2 | Quotation → Invoice or → Sales Order? | **Setting** "Quotation becomes": Sales Order / Sales Invoice / Both |
-| 3 | Who collects cash? | Unclear → **setting** "Cash sale collection": Collect now / Collect later / Salesman chooses |
+| 3 | Who collects cash? | **A cash sale is paid on the spot.** Only a sale handed to a delivery person asks "collect on delivery / paid now" (on delivery by default), as sf_trading's desk form. The earlier "Cash sale collection" setting was removed (17 Nov) |
 | 4 | Credit customers from the field? | **Both may come** → cash customers now; "Request credit" later, behind a setting |
 | 5 | Back-dated entries? | Normally none → no work now; noted under risks |
 | 6 | Approvals in the app? | **Not our development** → keep the app ready for it |
@@ -51,9 +51,10 @@ sf_trading on branch `new`, 0.1.159). Runs **next to `sf_trading`** (Steel Force
 |---|---|---|---|
 | Invoice updates stock (sale from the van) | Vansale Settings + van "Invoice updates stock" | on / off | **off** (order taker) |
 | Quotation becomes | Vansale Settings | Sales Order / Sales Invoice / Both | **Sales Invoice** or Both |
-| Cash sale collection | Vansale Settings + van | Collect now / Collect later / Salesman chooses | your call (3) |
 | CR number field | Vansale Settings → Customer | blank = `custom_cr_number` | `custom_commercial_registration_number` |
 | Cash sale posting (existing) | Vansale Settings + van | POS Invoice / Payment Entry | **Payment Entry** (Steel Force doesn't use POS invoices) |
+| Credit sale only for customers with a credit limit | Vansale Settings | off / on | **on** |
+| Ask for the delivery person on cash sales | Vansale Settings | off / on | your call |
 | Default customer group / territory (existing) | van | — | Commercial / Saudi Arabia (leaf values) |
 
 ## How Steel Force sells (dev site + sf_trading `new` 0.1.159)
@@ -119,21 +120,116 @@ sf_trading on branch `new`, 0.1.159). Runs **next to `sf_trading`** (Steel Force
 
 Every check passed. Frontend type-check and unit tests pass.
 
-## Phase 2 — next (`develop_2`)
+## Phase 2 — done 17 Nov 2026 (uncommitted on `develop_2`)
 
-| Tag | Item | Design |
+| Tag | Change |
+|---|---|
+| [SF] | **Minimum price in the app:** each line shows sf_trading's minimum for its UOM (`get_min_selling_price`, branch-aware). A lower rate shows red, and the app won't save it (invoice, quotation, order) |
+| [STD]+[SF] | **Pre-check before submit** (`vansale.api.precheck.check`), online only. Lists every problem in one dialog before *Submit*: sf_trading's customer gates (phone, credit documents, approval), an overdue credit invoice, rates below the minimum, and the credit-limit setting. Runs on new invoices, drafts submitted from the detail screen, and orders |
+| [STD] | Setting **Credit sale only for customers with a credit limit** (ERPNext treats no limit as unlimited; the Steel Force desk blocks it in JS only). Checked in the pre-check and again on save |
+| [SF] | **Cheque (PDC) sales:** payment type *Cheque*, shown where the branch has cheque modes, with number and date. The invoice is booked as Cheque and the cheque is collected through sf_trading's own function (PDC fields) |
+| [SF] | **Collection the desk way:** a cash sale collected now (posting = Payment Entry, status Submit) goes through sf_trading's `create_pos_payments_for_invoice`. The response now returns the paid status |
+| [SF] | **Payment modes = the branch's** (sf_trading's Branch Configuration); cheque modes are listed apart |
+| [SF] | **Delivery person** on cash sales (setting *Ask for the delivery person on cash sales*); the list is the drivers serving the branch. sf_trading's driver rules apply (tested: a driver with an overdue collection is refused) |
+| [SF] | **Request cancellation** on a submitted quotation / order, with sf_trading's reasons. Shown only when sf_trading allows it: the request workflow is active and the salesman holds a requester role (Sales User / Counter Sale / Branch Head) |
+| [STD]+[SF] | **Customer form:** optional photo of the CR / VAT certificate, attached to the customer. On Steel Force: mobile required (≥ 10 digits), and a VAT number needs the CR number and the photo |
+| [STD]+[SF] | **Credit panel** (replaces the Phase 2 "customer status" card), on the customer screen and inside *Payment* on the invoice and order forms. It uses `vansale.api.customer.credit_status` and is cached per customer for offline use. It shows: limit, used (ERPNext's own figure: unpaid invoices + open orders), available, a bar, overdue invoices, and what this sale does ("after this sale: X available" / "X over the limit, will be refused"). On Steel Force it also shows: cash doesn't use the limit, the credit-days overdue that blocks credit, the approval state and what it misses, and the branch sub-limit |
+| [STD]+[SF] | **Credit / Cheque refused on tap** (with the reason as a toast) when the customer can't have it: no credit limit under the setting, or (Credit only) sf_trading's overdue rule. The buttons look greyed with a warning icon |
+| [STD]+[SF] | **Pre-check: credit limit.** ERPNext's limit check is run ahead with the sale's unpaid part (an invoice made from an order is skipped, as ERPNext does; the order-level bypass is respected; a Credit Controller gets a warning, not a stop). Also on Steel Force: the branch sub-limit. Fix: the overdue rule now applies only to Credit, not Cheque, matching sf_trading |
+| [STD]+[SF] | **Cash = paid now; the delivery person decides "later".** The "Cash sale collection" setting (Vansale Settings + van) is gone. A cash sale without a delivery person must be paid. Picking one shows *Collect on delivery* (default) / *Paid now*; on delivery leaves the invoice unpaid with the driver on it (server checks it: no driver → no "later"). The picker shows only when the branch has drivers; each driver shows the cash they still hold, and one sf_trading would refuse (overdue collection / at the cash limit) is greyed with the reason and stopped before save. The invoice screen shows the delivery person. **Post-dated cheque** note with the days until it can be banked |
+| [STD]+[SF] | **Last price and stock on every line** (invoice, quotation, order), as the desk's Last Selling Rate / Stock Availability: "Last to this customer: 53.000 / PCS · 18 Nov"; a red "Only 22 PCS in stock" when the lines of an item need more than the salesman's warehouse holds (several lines of one item add up; service items never warn); *History & stock* opens the item's last sales to this customer, its sales to other customers in the last 12 months, and its stock in every warehouse (own first). Tap the last price, or any price in the history, to use it as the line's rate (converted to the line's unit; line discount reset). Prices come from submitted sales (no returns) of the user's company within their permitted companies / cost centres; on Steel Force, as the desk's Last Selling Rate dialogs, the salesman's branch cost centre only (the panel says which). The warehouse list is sf_trading's Stock Availability there. Order and quotation catalogs now show stock too. Hints only: online, and the server still decides (`vansale.api.item.last_sales` / `stock_levels` / `insight`) (18 Nov) |
+| [STD] | **Quotation as in the desk:** *Lost* asks why — the site's Quotation Lost Reasons (at least one when the site keeps a list, as the desk's "Set as Lost") plus details, shown on the quotation afterwards. A quotation past its Valid Till shows **Expired** at once (ERPNext flips it overnight), with a note; *Make order* only where Selling Settings allows orders from expired quotations, no *Make invoice*, *Lost* still possible (18 Nov) |
+| [STD] | **Site root (/) no longer opens the van app for desk users.** The "Van Users land on the app" home-page rule matched Administrator too (it holds every role), so `/` showed the van app's login. Now `/` sends Administrator / System Managers to the desk (`/app`) and van users to `/vansale`; guests get the normal ERPNext login (18 Nov) |
+| [STD] | **Fixes found in the frontend review (17 Nov):** queued offline sales now sync by themselves on start, on reconnect and on resume (nothing did; the sync badge that did it was never placed on a screen). Settings now load right after a login without PIN (they stayed empty until the next resume). Collections now use the customer's own receivable account (a customer with its own account was refused: "SI is associated with torbo - SF, but Party Account is Debtors - SF"). Submit is locked from the first tap (a double tap made two documents). Order-taker catalog search reaches the whole catalog. A draft's customer is locked on edit (the server never changed it). A lead's draft quotation can be saved again |
+| [SF] | **Cash / Credit on sales orders** (shown where the site keeps it on the order): sent as `custom_payment_mode`, so sf_trading's overdue-credit check runs on a credit order and the cash limits only on a cash one. Carried into the invoice made from the order. An order made from a quotation starts on the "Default payment" setting. A credit order gets the credit-limit rule and the pre-check too |
+
+**Tested** on steelforce.local over HTTP as the salesman:
+- min price per UOM;
+- pre-check, for a low rate and for credit without a limit;
+- the credit-limit setting on save;
+- cash collected through sf_trading;
+- cheque sale (Payment Entry with cheque no / date, invoice paid);
+- missing cheque number refused;
+- branch modes;
+- drivers list, and the driver rule refusing an overdue driver;
+- customer with document photo;
+- delivery person: no driver → paid now; driver + on delivery → submitted Unpaid with the driver; driver +
+  paid now → Paid by Payment Entry with the driver; overdue driver greyed and refused; credit clears the driver;
+- an offline sale queued, then synced by itself once back online; a collection from torbo (own account);
+- credit panel and pre-check credit limit (TEASTA, limit 800, used 514.75: 460 on credit is refused with
+  "174.75 over", 57.50 shows "227.75 available after"; cash shows "doesn't use the limit"; Field Shop with
+  no limit: Credit / Cheque refused on tap, "Cash only").
+
+The Phase 1 flows were run again and all pass. Frontend type-check and the 86 unit tests pass.
+
+**Not tested live:** *Request cancellation*. The dev site has no active cancellation workflow, and the test salesman has no requester role, so the button stays hidden, as designed.
+
+## Frontend review (17 Nov 2026) — open items
+
+From a read-through of the whole frontend. The three marked *fixed* were confirmed live and fixed in Phase 2;
+the rest are from code reading, not yet reproduced. [SF] = matters for Steel Force; others are [STD].
+
+**Money, returns, route, stock**
+
+| # | Item | Tag |
 |---|---|---|
-| [SF] | **Minimum price** in the app | Catalog and line editor show the floor price from sf_trading `get_min_selling_price` (branch-aware). The app refuses a lower rate before save |
-| [SF] | **Pre-check before submit** | One endpoint that runs sf_trading's own checks: `party_alert.get_party_alert`, `get_customer_selling_context` / `check_customer_credit_overdue`, `master_approval.get_approval_state`, min prices. The invoice / order screen lists every problem before *Submit* |
-| [SF] | **Credit only for credit customers** | The desk blocks a credit sale to a customer without a credit limit in JS only, so the app must enforce it too. Setting to allow / block |
-| [SF] | **Cheque (PDC)** | Payment type Cheque → cheque no + date → sf_trading PDC fields; only where the branch has PDC modes |
-| [SF] | **Collection the sf_trading way** | Cash collected now → sf_trading's `create_pos_payments_for_invoice` (one entry per mode, PDC, loyalty write-off), so entries match the desk |
-| [SF] | **Payment modes** | List = the branch's modes (`get_payment_modes_with_account`) |
-| [SF] | **Driver** | Optional "Delivery person" on cash invoices (drivers serving the branch); setting to show it |
-| [SF] | **Cancellation request** | On a submitted order / quotation → `order_cancellation.request_cancellation` with a reason |
-| [SF] | **Customer form rules** | B2C = name + mobile; B2B = + VAT, CR, document photo; Saudi formats checked before sending; title-cased ID read back |
-| [SF] | **Request credit** (setting "Allow credit request") | Limit, payment terms, email, 2nd phone, documents from the camera, Branch Access = salesman's branch → saved for **Customer Approval** (approval itself = other developer). Until approved: cash only, badge "Credit pending" |
-| [SF] | Customer status in the app | Cash only · credit pending · credit approved (limit, used, overdue) · change waiting for approval |
+| 1 | Returns are always submitted (`invoice.py` return_against). With sf_trading's return approval on, the submit is refused and nothing is saved. The return window (`sales_return.window_state`) is not checked in the picker | [SF] |
+| 2 | A collection with no invoice (Advance, or a customer with nothing open) makes a Payment Entry with no reference; sf_trading's voucher gate refuses it. No way to collect against a Sales Order | [SF] |
+| 3 | Refund on a partly paid invoice: invoice 100, 70 paid, return 50 → the screen refunds 50 cash while the invoice still shows 30 due (should clear the 30, refund 20) | [STD] |
+| 4 | Refund silently dropped when the payment-mode list is empty: the confirm says "Refund in full", the return is kept as credit | [STD] |
+| 5 | Route "Today's summary" is always 0 (no visit ever sends its invoice / payment); the visit card's Invoice / Payment buttons open blank forms without the customer | [STD] |
+| 6 | Van stock reads the User Permission warehouse, sales use the van's; list cut at 500 items; "Out" count always 0 | [STD] |
+| 7 | Branch payment modes are filtered in the list only (not on save); cheque (PDC) modes appear on collection and refund; refunds should use the branch's return modes. No cheque date on collections | [SF] |
+| 8 | Nothing shows the cash delivery persons still hold (sf_trading's "Delivery Person Payment Pending") | [SF] |
+| 9 | Overpaying picked invoices silently becomes an advance; the confirm says "For N invoices" | [STD] |
+| — | *Fixed:* collections used the company Debtors account, refused for a customer with its own receivable | [STD] |
+
+**App shell and offline**
+
+| # | Item | Tag |
+|---|---|---|
+| 10 | Logout can leave queued sales that then post under the next user (pending count is 0 after a cold start; PIN screen's "Sign in with password" skips the guard) | [STD] |
+| 11 | A 502 / 503 / 504 (bench restart, deploy) is treated as a validation error: an online save shows an error instead of queuing | [STD] |
+| 12 | An expired web session leaves the app stuck (every call 403, silently) | [STD] |
+| 13 | *Retry* doesn't skip the backoff (up to 30 min of nothing) | [STD] |
+| 14 | "already exists" is treated as success, so a sale refused for a duplicate name is deleted from the queue unposted | [STD] |
+| 15 | Web PWA: the service worker caches nothing; an offline cold start or a not-yet-opened screen fails (seen: after an offline save the invoice list could not open). The APK is not affected | [STD] |
+| 16 | Sync errors: Steel Force messages show as a generic "Error"; Arabic messages break the classification; Dismiss has no confirmation; fixing means editing JSON | [STD]+[SF] |
+| — | *Fixed:* the queue never synced by itself (the badge that did it was never placed on a screen) | [STD] |
+| — | *Fixed:* settings stayed empty after a login without PIN | [STD] |
+
+**Selling screens (invoice, quotation, order, customer, lead)**
+
+| # | Item | Tag |
+|---|---|---|
+| 17 | Minimum price ignores the additional discount: sf_trading compares the rate after the document discount, so any additional discount passes the app and is refused by the server (even on a draft save) | [SF] |
+| 18 | Branch pricing ignored: the app's price lookup skips Branch Configuration price lists and branch-limited Item Prices (no branch price lists on dev; check production) | [SF] |
+| 19 | Editing a draft made in the desk (or with a Pricing Rule) applies its line discount twice: under-bills, or a false "below minimum" on Steel Force | [STD] |
+| 20 | Delete on a draft invoice always fails (Van User has no delete on Sales Invoice); each "Make invoice" on an order makes another draft with no duplicate check | [STD] |
+| 21 | Editing a lead that has a quotation always fails (the form sends status "Quotation", the server refuses it) | [STD] |
+| 22 | Customer create isn't idempotent (no client_id): with a large CR photo a timeout + retry makes "Name - 1" or a duplicate-VAT error. Quotation / order saves and conversions also make a new client_id per retry | [STD] |
+| 23 | Contact / Address can be wiped: Save works while the record is still loading or failed to load, and blanks mean "remove" on the server | [STD] |
+| 24 | B2B: the app decides by customer type, sf_trading by "has a VAT number" — a B2C customer with VAT and a short address is refused late | [SF] |
+| 25 | Rounding: a discounted rate isn't rounded to rate precision before the amount, so the preview can differ from ERPNext by halalas, and a "rest" split payment can be refused | [STD] |
+| 26 | Steel Force orders also allow Cheque and a delivery person; the app offers Cash / Credit only. Quotation → order gets the default payment type with no choice | [SF] |
+| 27 | Credit / Cheque sales queue offline on a possibly stale credit status; a customer awaiting approval can still be picked and sold to (the panel says "no sale until approved", the buttons stay on) | [SF] |
+| 28 | Van User may delete other salesmen's draft quotations / orders (no owner restriction) | [STD] |
+| 29 | Queued invoices don't appear in the invoice list; tapping "New customer" mid-sale loses the cart | [STD] |
+| — | *Fixed:* a double tap on Submit made two invoices / orders (buttons locked only after the pre-check and confirm) | [STD] |
+| — | *Fixed:* order-taker mode: after the first search only items stocked in the branch could be found | [STD] |
+| — | *Fixed:* changing the customer on a draft invoice / quotation was silently ignored — the customer is now locked on edit | [STD] |
+| — | *Fixed:* a lead's draft quotation could not be saved ("Pick a lead") | [STD] |
+
+**Ideas, by value to the salesman:** visit-centred flow (visit card opens the sale / collection for that
+customer and the day summary is real) · end-of-day cash sheet matching sf_trading's Accounting Clearance ·
+plain-language sync screen with a "waiting for office" state · cheque (PDC) collections through sf_trading ·
+delivery-person pending list · autosave the half-filled invoice (Android back and the PIN screen drop it).
+
+## Not needed for now (your decision, 17 Nov)
+
+- **Request credit from the app.** In sf_trading, a credit limit on an existing customer sends it back for
+  approval, and until it is approved every sale to that customer is refused, cash included. If it's wanted later,
+  the safe form is a request to the office (a task with the details and photos) that doesn't touch the customer.
 
 ## Approvals — ready for the other developer
 
@@ -170,12 +266,21 @@ We don't build approval screens. We make sure:
    - cost center and selling price list;
    - default customer group (leaf) and territory;
    - *Invoice updates stock* (Disabled for order takers) and *Cash sale collection*.
+   - *Cash sale posting* = Payment Entry.
 3. **Van mode only:** add the van warehouse to the branch's Branch Configuration.
 4. Items need an Item Default for the company; sf_trading hides other items from branch users.
+5. Cancellation requests: the salesman needs a requester role (Sales User / Counter Sale / Branch Head) and the
+   cancellation workflow must be active.
 
 ## Test site state (steelforce.local)
 
 - Test van **DMM1**: user `van.dmm1@steelforce.local` / `VanTest#2026`, branch Dammam, warehouse *Van DMM1 - SF*,
   *Invoice updates stock* = Disabled.
-- Global settings: Quotation becomes = Both; Cash sale collection = Salesman chooses; CR number field =
-  `custom_commercial_registration_number`.
+- Van DMM1: Cash sale posting = Payment Entry.
+- Global settings:
+  - Quotation becomes = Both
+  - Cash sale collection = Salesman chooses
+  - CR number field = `custom_commercial_registration_number`
+  - Credit only with a limit = on
+  - Ask for delivery person = on
+- Item Prices (Standard Selling): TEST 60, TETST3 25.
