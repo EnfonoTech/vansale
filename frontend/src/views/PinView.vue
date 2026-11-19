@@ -4,6 +4,7 @@ import { useRoute, useRouter } from "vue-router";
 import { changePin, loginWithPin, setupPin } from "@/api/auth";
 import { configDefaults } from "@/api/me";
 import { useApprovalsStore } from "@/stores/approvals";
+import { usePushStore } from "@/stores/push";
 import { useSessionStore } from "@/stores/session";
 import { ApiError, NetworkError } from "@/app/frappe";
 import { isOnline } from "@/app/online";
@@ -16,6 +17,7 @@ const router = useRouter();
 const route = useRoute();
 const session = useSessionStore();
 const approvals = useApprovalsStore();
+const push = usePushStore();
 const toasts = useToastStore();
 
 if (!session.email) {
@@ -179,6 +181,9 @@ function signInAgain() {
   forgetPin();
   // The approvals held in memory (and the poll) are the previous user's: they go with them.
   approvals.reset();
+  // Nor may this device keep receiving their approvals; best effort, so the sign-in screen never waits for it.
+  void push.detach();
+  push.reset();
   session.logout();
   void router.replace({ name: "login" });
 }

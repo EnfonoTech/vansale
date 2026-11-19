@@ -64,9 +64,12 @@ async function onChangeSite() {
   });
   if (!ok) return;
   try {
+    // Stop this device receiving the user's approvals; quick, and it never throws.
+    await push.detach();
     await logout();
   } finally {
     approvals.reset();
+    push.reset();
     session.logout();
     await clearSiteUrl();
     await router.replace({ name: "setup" });
