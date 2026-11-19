@@ -6,7 +6,7 @@ at /sw.js (POS Awesome on Badria); registering that one made the phone see
 POS Awesome's manifest, and Van Sale had none, so it could not be installed.
 
   /vansale/manifest.webmanifest  name, icons, start URL, standalone display
-  /vansale/sw.js                 service worker (no caching, see SW_JS)
+  /vansale/sw.js                 service worker (no caching, shows approval pushes, see SW_JS)
   /vansale/icon-<size>.png       Vansale Settings "App icon", else the default
 """
 
@@ -42,6 +42,53 @@ self.addEventListener("fetch", (event) => {
     fetch(event.request).catch(
       () => new Response(OFFLINE_HTML, { headers: { "Content-Type": "text/html; charset=utf-8" } }),
     ),
+  );
+});
+
+/* Web Push for approvals (vansale/steelforce/approvals_push.py). The payload
+   is {title, body, url, tag}: a document's name at most, never its content. */
+self.addEventListener("push", (event) => {
+  let data = {};
+  try {
+    data = event.data ? event.data.json() : {};
+  } catch (e) {
+    data = {};
+  }
+  if (!data || typeof data !== "object") data = {};
+  event.waitUntil(
+    self.registration.showNotification(data.title || "Approval needed", {
+      body: data.body || "",
+      tag: data.tag,
+      data: { url: data.url || "/vansale/approvals" },
+      icon: "/vansale/icon-192.png",
+    }),
+  );
+});
+
+/* A tap opens the document's approval screen. Only a path of this app is
+   followed (same origin, under /vansale/): a payload can never send the
+   phone anywhere else. */
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const origin = self.location.origin;
+  let target = origin + "/vansale/approvals";
+  try {
+    const url = new URL((event.notification.data && event.notification.data.url) || "", origin);
+    if (url.origin === origin && url.pathname.startsWith("/vansale/")) target = url.href;
+  } catch (e) {
+    /* not a URL: the approvals list it is */
+  }
+  event.waitUntil(
+    self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((windows) => {
+      const open = windows.find((w) => w.url.startsWith(origin + "/vansale"));
+      if (open && typeof open.navigate === "function") {
+        return open.navigate(target).then(
+          (moved) => (moved || open).focus(),
+          () => self.clients.openWindow(target),
+        );
+      }
+      return self.clients.openWindow(target);
+    }),
   );
 });
 """
