@@ -468,7 +468,8 @@ class TestSendForAction(PushCase):
         push.send_for_action("ACT-1")
         self.assertEqual(len(self.sends()), 3)
         frappe.local.db.delete.assert_called_once_with(push.SUBSCRIPTION, {"name": "s1"})
-        self.log_error.assert_called_once()
+        # Pruning a gone subscription is routine: nothing goes to the Error Log.
+        self.log_error.assert_not_called()
 
     def test_other_failures_counted_then_deleted_one_log(self):
         self.subs = [sub("s1", SARA, failures=0), sub("s2", SARA, APPLE, failures=4), sub("o1", OMAR)]

@@ -415,6 +415,10 @@ def _send_one(row, data: str) -> Optional[str]:
         if isinstance(error, pywebpush.WebPushException):
             status = getattr(getattr(error, "response", None), "status_code", None)
         _record_failure(row, status)
+        # A subscription the push service says is gone (the person cleared their
+        # browser data or uninstalled the app) is routine housekeeping, not an error.
+        if status in GONE_STATUSES:
+            return None
         return f"{type(error).__name__}" + (f" {status}" if status else "")
 
     frappe.db.set_value(
