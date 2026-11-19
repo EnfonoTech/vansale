@@ -30,7 +30,7 @@ cannot make a document disappear.
 ## 2. The public HTTP surface
 
 **Every `@frappe.whitelist()` is a public HTTP endpoint** at
-`/api/method/<dotted.path>`. There are currently **120**.
+`/api/method/<dotted.path>`. There are currently **123**.
 
 Adding an endpoint adds attack surface. Before merging one, confirm:
 
@@ -60,7 +60,7 @@ five are structurally pre-login and none returns tenant data:
 second pair of eyes — it is the only category of change here that can expose data
 to the open internet.
 
-### Endpoints with no explicit permission call — 95
+### Endpoints with no explicit permission call — 98
 
 `gen-docs.py` flags these. **Absence is not proof of a hole.** Most are safe
 because every query is scoped to `frappe.session.user`, or because they only read
@@ -123,6 +123,35 @@ nothing: every endpoint above checks on the server.
 
 `steelforce/approvals_parity.py` is not an endpoint: it is a developer check run
 from `bench execute` that compares these lists with PM's own for one user.
+
+### Approval notifications (Web Push) — 3 endpoints and one hook
+
+`steelforce.approvals_push` lets a browser that opted in be told when a new PM
+Workflow Action reaches its user. None of the three is guest reachable
+(`_session_user()` refuses Guest), and the user is always the session user:
+no endpoint takes a user as an argument.
+
+| Endpoint | Verb | Scoped by |
+| --- | --- | --- |
+| `approvals_push.push_config` | GET | **Session user**: whether push is on for this site, the public VAPID key (public by design) and whether the given endpoint is stored for the caller. |
+| `approvals_push.push_subscribe` | POST | **Session user**: stores or moves one subscription to the caller (the same device with another person signed in). The endpoint must be https, at most 1000 characters and on a known browser push service (FCM, Mozilla, Apple, Windows), so a user cannot make the server POST to an address of their choosing; keys are length- and character-checked; at most 10 per user. |
+| `approvals_push.push_unsubscribe` | POST | **Session user**: deletes only the caller's own row for that endpoint. |
+
+- The "Vansale Push Subscription" DocType is System Manager only; the endpoints
+  write it with `ignore_permissions=True` after fixing the user to the session.
+- `notify_new_action` (hook `PM Workflow Action` `after_insert`) never raises into
+  PM's save and queues `send_for_action`. The worker pushes only to opted-in,
+  enabled System Users that PM's `_can_act_on` lets act on the action (a System
+  Manager who opted in therefore hears about everything, as their inbox lists),
+  never for a hidden type. Only the document type and name leave the server, and
+  only for a recipient who may read that document; anyone else gets a generic line.
+- The VAPID private key lives in the site config (`vansale_vapid_private_key`),
+  never in a response or a log; the VAPID subject is the site's https URL, never a
+  person's email. `setup_keys(force=1)` deletes every subscription.
+- The service worker follows a notification's link only if it is a path under
+  `/vansale/` on the same origin. Every logout path drops the device's
+  subscription (best effort), so a signed-out device stops receiving the
+  previous user's approvals.
 
 ---
 

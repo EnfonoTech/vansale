@@ -19,6 +19,7 @@ table has no list view and is only reachable through its parent.
 | [Vansale Office Role](#vansale-office-role) | Child table | 1 |
 | [Vansale Outbox](#vansale-outbox) | Document | 10 |
 | [Vansale Pin](#vansale-pin) | Document | 3 |
+| [Vansale Push Subscription](#vansale-push-subscription) | Document | 8 |
 | [Vansale Settings](#vansale-settings) | Single | 34 |
 
 ## Van Daily Visit
@@ -199,6 +200,24 @@ table has no list view and is only reachable through its parent.
 | `user` | Link | User | required |
 | `pin_hash` | Password | - | required |
 | `created_at` | Datetime | - | read-only |
+
+**Roles with DocPerms:** `System Manager`
+
+
+## Vansale Push Subscription
+
+*Document*
+
+| Field | Type | Options / default | Notes |
+| --- | --- | --- | --- |
+| `endpoint_hash` | Data | - | read-only |
+| `user` | Link | User | required |
+| `endpoint` | Long Text | - | required |
+| `p256dh` | Small Text | - | required |
+| `auth` | Small Text | - | required |
+| `user_agent` | Small Text | - | - |
+| `last_ok` | Datetime | - | - |
+| `failures` | Int | default `0` | - |
 
 **Roles with DocPerms:** `System Manager`
 

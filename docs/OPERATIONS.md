@@ -77,6 +77,30 @@ chown -R v15:v15 $SPA
 `sites/assets/vansale` is a symlink to `apps/vansale/vansale/public`, so no
 `bench build` is needed for this app's assets.
 
+### Enabling approval notifications (needs one migrate)
+
+Web Push for approvals (`steelforce/approvals_push.py`) adds the "Vansale Push
+Subscription" DocType, so this release, unlike the approvals feature below,
+needs `bench migrate` once. Push stays off until the key pair exists, so a pull
+without the steps below changes nothing for users.
+
+```bash
+bench --site <site> backup                       # restore point first
+cd apps/vansale && git merge --ff-only upstream/develop_2
+bench --site <site> migrate                      # creates the subscription table
+bench --site <site> execute vansale.steelforce.approvals_push.setup_keys
+#   prints the public key; the private key is written to site_config.json only.
+#   Idempotent. `force=1` makes a NEW pair and deletes every subscription.
+bench --site <site> clear-cache
+# swap the SPA as below, then restart the web process (the new doc_events hook)
+```
+
+`pywebpush` is a dependency (`pyproject.toml`); install it in the bench env
+(`./env/bin/pip install "pywebpush>=1.14"`) on a bench that lacks it. Each user
+turns it on from More > Approval notifications; it works in the web app and an
+installed iPhone web app, not in the native Android app. To test, enable it on a
+device, then run `send_for_action` for an open action name with `bench execute`.
+
 ### Deploying the approvals feature (no migrate)
 
 The approvals feature (the Permission Manager approvals screens and endpoints)

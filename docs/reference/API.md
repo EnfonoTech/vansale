@@ -6,9 +6,9 @@
 Every `@frappe.whitelist()` function is a **public HTTP endpoint** reachable at
 `/api/method/<dotted.path>`. This file is the complete list.
 
-- **120 endpoints**
+- **123 endpoints**
 - **5 reachable without login** (`allow_guest=True`)
-- **95 with no in-body permission call** - see the note below
+- **98 with no in-body permission call** - see the note below
 
 ## Guest-reachable endpoints
 
@@ -127,6 +127,9 @@ anything here that writes, or reads another user's data, needs an explicit
 | `vansale.steelforce.approvals_extra.history` | limit: int = 100, from_date: str = '', to_date: str = '', transaction: str = '' |
 | `vansale.steelforce.approvals_extra.my_requests` | - |
 | `vansale.steelforce.approvals_extra.return_to_originator` | action_id: str, comment: str = '' |
+| `vansale.steelforce.approvals_push.push_config` | endpoint: str = '' |
+| `vansale.steelforce.approvals_push.push_subscribe` | endpoint: str, p256dh: str, auth: str, user_agent: str = '' |
+| `vansale.steelforce.approvals_push.push_unsubscribe` | endpoint: str |
 
 ## All endpoints by module
 
@@ -1463,4 +1466,40 @@ The documents an approver sent back to the signed-in user for correction, as Per
 ```
 
 <sub>vansale/steelforce/approvals_extra.py:415</sub>
+
+
+### `vansale.steelforce.approvals_push`
+
+#### `push_config` - GET / _no perm call_
+
+Whether push can be used here (`enabled`), the VAPID public key the browser subscribes with ("" when not enabled) and whether this `endpoint` is subscribed for the signed-in user.
+
+```
+/api/method/vansale.steelforce.approvals_push.push_config
+(endpoint: str = '')
+```
+
+<sub>vansale/steelforce/approvals_push.py:180</sub>
+
+#### `push_subscribe` - POST / _no perm call_
+
+Store this browser's subscription for the signed-in user. An endpoint already stored for someone else moves to the signed-in user (same device, another person signed in). Keeps the user's newest 10.
+
+```
+/api/method/vansale.steelforce.approvals_push.push_subscribe
+(endpoint: str, p256dh: str, auth: str, user_agent: str = '')
+```
+
+<sub>vansale/steelforce/approvals_push.py:198</sub>
+
+#### `push_unsubscribe` - POST / _no perm call_
+
+Forget this browser's subscription for the signed-in user (nothing happens when there is none, or it belongs to someone else).
+
+```
+/api/method/vansale.steelforce.approvals_push.push_unsubscribe
+(endpoint: str)
+```
+
+<sub>vansale/steelforce/approvals_push.py:231</sub>
 
