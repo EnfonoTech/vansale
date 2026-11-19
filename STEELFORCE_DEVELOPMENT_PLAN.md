@@ -135,6 +135,7 @@ Every check passed. Frontend type-check and unit tests pass.
 | [SF] | **Delivery person** on cash sales (setting *Ask for the delivery person on cash sales*); the list is the drivers serving the branch. sf_trading's driver rules apply (tested: a driver with an overdue collection is refused) |
 | [SF] | **Request cancellation** on a submitted quotation / order, with sf_trading's reasons. Shown only when sf_trading allows it: the request workflow is active and the salesman holds a requester role (Sales User / Counter Sale / Branch Head) |
 | [STD]+[SF] | **Customer form:** optional photo of the CR / VAT certificate, attached to the customer. On Steel Force: mobile required (≥ 10 digits), and a VAT number needs the CR number and the photo |
+| [STD]+[SF] | **New customers as on the desk** (sf_trading's Create Customer dialog, 19 Nov). Steel Force: the B2B choice is shown only to a **B2B Creator** (or System Manager); others see no customer type at all and make B2C only, and the server refuses a B2B one from them. A second customer of the same name is refused ("Customer 'X' already exists.", case ignored). Mobile and, with a VAT number, the certificate photo are required on the server too. The photo is filed on the customer's *VAT Certificate* document row. Sending a held customer for approval is left to the approvals work (see "Approvals" below). Standard: VAT / CR number only on a B2B customer (a VAT buyer gets a standard tax invoice, which needs the address); the address title is the name as saved |
 | [STD]+[SF] | **Credit panel** (replaces the Phase 2 "customer status" card), on the customer screen and inside *Payment* on the invoice and order forms. It uses `vansale.api.customer.credit_status` and is cached per customer for offline use. It shows: limit, used (ERPNext's own figure: unpaid invoices + open orders), available, a bar, overdue invoices, and what this sale does ("after this sale: X available" / "X over the limit, will be refused"). On Steel Force it also shows: cash doesn't use the limit, the credit-days overdue that blocks credit, the approval state and what it misses, and the branch sub-limit |
 | [STD]+[SF] | **Credit / Cheque refused on tap** (with the reason as a toast) when the customer can't have it: no credit limit under the setting, or (Credit only) sf_trading's overdue rule. The buttons look greyed with a warning icon |
 | [STD]+[SF] | **Pre-check: credit limit.** ERPNext's limit check is run ahead with the sale's unpaid part (an invoice made from an order is skipped, as ERPNext does; the order-level bypass is respected; a Credit Controller gets a warning, not a stop). Also on Steel Force: the branch sub-limit. Fix: the overdue rule now applies only to Credit, not Cheque, matching sf_trading |
@@ -244,6 +245,11 @@ We don't build approval screens. We make sure:
   `custom_approval_status` for customers, `workflow_state` otherwise.
 - `vansale.steelforce` is where the approval calls will go: `get_approval_state`, `get_transitions`,
   `quick_apply_workflow_action`, `get_my_pending_approvals`. The other developer can add them there.
+- **Open for the approvals work: sending a new customer for approval.** A customer the approval holds (a
+  credit customer, or one with a VAT number while sf_trading's B2B approval is on) stays in Draft when the app
+  creates it, and nothing sends it; the app only shows "waiting for approval". sf_trading's desk dialog sends it
+  at once with `sf_trading.master_approval.send_new_master("Customer", name)`. The app already files the VAT
+  certificate on the customer's VAT Certificate row, which that approval checks.
 
 ## Risks / notes
 
@@ -267,11 +273,12 @@ We don't build approval screens. We make sure:
    - warehouse (order taker: the branch warehouse; van: his own warehouse);
    - cost center and selling price list;
    - default customer group (leaf) and territory;
-   - *Invoice updates stock* (Disabled for order takers) and *Cash sale collection*.
+   - *Invoice updates stock* (Disabled for order takers).
    - *Cash sale posting* = Payment Entry.
-3. **Van mode only:** add the van warehouse to the branch's Branch Configuration.
-4. Items need an Item Default for the company; sf_trading hides other items from branch users.
-5. Cancellation requests: the salesman needs a requester role (Sales User / Counter Sale / Branch Head) and the
+3. **B2B customers:** only a salesman with the **B2B Creator** role sees the B2B choice in the app.
+4. **Van mode only:** add the van warehouse to the branch's Branch Configuration.
+5. Items need an Item Default for the company; sf_trading hides other items from branch users.
+6. Cancellation requests: the salesman needs a requester role (Sales User / Counter Sale / Branch Head) and the
    cancellation workflow must be active.
 
 ## Test site state (steelforce.local)

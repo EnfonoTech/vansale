@@ -69,6 +69,8 @@ export interface ConfigDefaults {
     vat_needs_cr_and_document?: boolean;
     /** Mobile number mandatory (the site bills only customers with a phone). */
     mobile_required?: boolean;
+    /** B2B (company) customers may be made; false = B2C only (Steel Force: B2B Creator role). */
+    b2b?: boolean;
   };
   /** Selling-flow settings (Vansale Settings / van). Missing on older servers = old behaviour. */
   selling_flow?: SellingFlow;

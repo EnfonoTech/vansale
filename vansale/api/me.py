@@ -322,6 +322,12 @@ def steelforce_rules_active() -> bool:
     return steelforce.is_active()
 
 
+def _can_create_b2b() -> bool:
+    from vansale import steelforce
+
+    return steelforce.can_create_b2b()
+
+
 def customer_form_config() -> dict:
     """Optional customer fields this site has, for the app's customer form."""
     meta = frappe.get_meta("Customer")
@@ -333,6 +339,8 @@ def customer_form_config() -> dict:
         # document on file before it can be billed; every customer needs a phone.
         "vat_needs_cr_and_document": steelforce_rules_active(),
         "mobile_required": steelforce_rules_active(),
+        # B2B (company) customers: Steel Force lets only a B2B Creator make one.
+        "b2b": _can_create_b2b(),
         # ZATCA "additional number" only where the site's Address has a field for it.
         "additional_number": any(
             frappe.get_meta("Address").has_field(f) for f in ("custom_additional_number", "additional_number")
