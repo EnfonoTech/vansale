@@ -85,4 +85,9 @@ doc_events = {
         "before_insert": "vansale.van_series.set_naming_series_from_van",
         "before_validate": "vansale.van_defaults.override_cost_center_from_van",
     },
+    # Web Push to subscribed approvers (Permission Manager registers its own
+    # after_insert for the same doctype; Frappe runs both). Never raises.
+    "PM Workflow Action": {
+        "after_insert": "vansale.steelforce.approvals_push.notify_new_action",
+    },
 }
