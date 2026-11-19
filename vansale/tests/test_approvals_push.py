@@ -327,7 +327,8 @@ class TestNotifyNewAction(PushCase):
             queue="short",
             action_name="ACT-1",
             enqueue_after_commit=True,
-            job_name="vansale_push_ACT-1",
+            job_id="vansale_push_ACT-1",
+            deduplicate=True,
         )
 
     def test_skips_closed_action(self):

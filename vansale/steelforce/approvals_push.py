@@ -314,7 +314,9 @@ def notify_new_action(doc, method=None) -> None:
             queue="short",
             action_name=doc.name,
             enqueue_after_commit=True,
-            job_name=f"vansale_push_{doc.name}",
+            # job_id (job_name is deprecated and never deduplicated): one queued job per action.
+            job_id=f"vansale_push_{doc.name}",
+            deduplicate=True,
         )
     except Exception:
         frappe.log_error(title="vansale push: queue failed", defer_insert=True)
