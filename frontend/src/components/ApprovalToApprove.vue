@@ -4,8 +4,11 @@
  * on others (shown for the count, nothing to press).
  *
  * The inbox lives in the approvals store; this only filters it (area chip,
- * search text) and lays it out. The sections keep the order the server sent,
- * which is Permission Manager's own: its categories, urgency first.
+ * search text) and lays it out. By default the sections keep the order the
+ * server sent, which is Permission Manager's own: its categories, urgency
+ * first. "Newest first" / "Oldest first" drop the category sections and list
+ * the documents in one run ordered by when each reached the user; the choice
+ * is remembered on this phone.
  *
  * Offline it shows the saved list with when it was fetched, and the banner
  * says why nothing can be decided (approvals need a connection). Offline with
@@ -25,7 +28,7 @@ import { useI18n } from "vue-i18n";
 import { useRouter } from "vue-router";
 import type { ActionFlag, ApprovalItem } from "@/api/approvals";
 import { useOnline } from "@/app/online";
-import { filterItems } from "@/features/approvals/filter";
+import { SORT_MODES, filterItems, sortItems, type SortMode } from "@/features/approvals/filter";
 import {
   BULK_MAX,
   actionTone,
@@ -54,10 +57,39 @@ const online = useOnline();
 const area = ref<string>("All");
 const search = ref("");
 
+const SORT_KEY = "vansale.approvals.sort";
+
+/** The sort the user last chose on this phone; storage may be blocked, then the default holds. */
+function savedSort(): SortMode {
+  try {
+    const value = window.localStorage.getItem(SORT_KEY);
+    return SORT_MODES.find((mode) => mode === value) ?? "priority";
+  } catch {
+    return "priority";
+  }
+}
+
+const sort = ref<SortMode>(savedSort());
+
+function chooseSort(mode: SortMode) {
+  sort.value = mode;
+  try {
+    window.localStorage.setItem(SORT_KEY, mode);
+  } catch {
+    // Not remembered; the choice still holds for now.
+  }
+}
+
 const inbox = computed(() => store.inbox);
 const filter = computed(() => ({ area: area.value, query: search.value }));
 const sections = computed(() => filterSections(inbox.value?.sections ?? [], filter.value));
-const waiting = computed(() => filterItems(inbox.value?.waiting_items ?? [], filter.value));
+const waiting = computed(() =>
+  sortItems(filterItems(inbox.value?.waiting_items ?? [], filter.value), sort.value),
+);
+/** The documents waiting on the user in one run by arrival, or null when the server's sections are shown. */
+const sortedRun = computed<ApprovalItem[] | null>(() =>
+  sort.value === "priority" ? null : sortItems(sections.value.flatMap((section) => section.items), sort.value),
+);
 const everything = computed<ApprovalItem[]>(() => [
   ...(inbox.value?.sections.flatMap((section) => section.items) ?? []),
   ...(inbox.value?.waiting_items ?? []),
@@ -231,6 +263,19 @@ function categoryName(category: string): string {
       </button>
     </div>
 
+    <div class="chips sort" role="group" :aria-label="t('approvalsInbox.sort.label')">
+      <button
+        v-for="mode in SORT_MODES"
+        :key="mode"
+        type="button"
+        class="chip"
+        :aria-pressed="sort === mode"
+        @click="chooseSort(mode)"
+      >
+        {{ t(`approvalsInbox.sort.${mode}`) }}
+      </button>
+    </div>
+
     <ListSearch v-model="search" :placeholder="t('approvalsInbox.search')" />
 
     <div v-if="failed" class="failed" role="alert">
@@ -264,10 +309,10 @@ function categoryName(category: string): string {
     </div>
 
     <template v-else-if="inbox">
-      <section v-for="section in sections" :key="section.category" class="group">
-        <h3 class="group-h">{{ categoryName(section.category) }} · {{ section.items.length }}</h3>
+      <section v-if="sortedRun?.length" class="group">
+        <h3 class="group-h">{{ t(`approvalsInbox.sort.${sort}`) }} · {{ sortedRun.length }}</h3>
         <ApprovalCard
-          v-for="item in section.items"
+          v-for="item in sortedRun"
           :key="itemKey(item)"
           :item="item"
           :selecting="selecting"
@@ -279,6 +324,23 @@ function categoryName(category: string): string {
           @select="startSelecting"
         />
       </section>
+      <template v-else>
+        <section v-for="section in sections" :key="section.category" class="group">
+          <h3 class="group-h">{{ categoryName(section.category) }} · {{ section.items.length }}</h3>
+          <ApprovalCard
+            v-for="item in section.items"
+            :key="itemKey(item)"
+            :item="item"
+            :selecting="selecting"
+            :selected="chosen.includes(itemKey(item))"
+            :blocked="blockText(item)"
+            :can-select="canSelect(item)"
+            @open="open"
+            @toggle="toggle"
+            @select="startSelecting"
+          />
+        </section>
+      </template>
 
       <section v-if="waiting.length" class="group">
         <h3 class="group-h">{{ t("approvalsInbox.sections.waiting") }} · {{ waiting.length }}</h3>

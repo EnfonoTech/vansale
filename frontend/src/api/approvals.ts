@@ -48,7 +48,10 @@ export interface ApprovalItem {
   state: string;
   role_id: string;
   days: number;
+  /** Full name of who created the document. */
   creator: string;
+  /** When it reached the user, "2026-07-20T16:24:00" in the site's clock; "" when unknown (order by `days`). */
+  created: string;
   /** Permission Manager's category, e.g. "Approval Pending"; "" when it gave none. */
   category: string;
   is_adhoc: boolean;

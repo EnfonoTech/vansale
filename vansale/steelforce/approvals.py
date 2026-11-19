@@ -23,7 +23,7 @@ from frappe import _
 from frappe.utils import cint, cstr, flt, get_datetime, now_datetime, strip_html
 
 from vansale.api.datetime_util import naive_site_to_utc_iso
-from vansale.steelforce.approvals_rules import area_of, check_apply, inbox_stats, tone_of
+from vansale.steelforce.approvals_rules import arrived_at, area_of, check_apply, inbox_stats, tone_of
 from vansale.steelforce.approvals_summary import first_lines, key_facts, pick_party_amount
 
 PM_APP = "permission_manager"
@@ -350,6 +350,7 @@ def _approval_item(item: dict, facts: dict, flags: dict, forwarded: dict) -> dic
         "role_id": item.get("role_id") or "",
         "days": cint(item.get("days")),
         "creator": item.get("creator") or "",
+        "created": arrived_at(item),
         "category": item.get("category") or "",
         "is_adhoc": bool(item.get("is_adhoc")),
         "forwarded_by": forwarded.get(item["name"], ""),

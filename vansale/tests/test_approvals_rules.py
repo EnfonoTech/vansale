@@ -13,6 +13,7 @@ import unittest
 
 from vansale.steelforce.approvals_rules import (
     area_of,
+    arrived_at,
     check_apply,
     inbox_stats,
     required_inputs,
@@ -156,6 +157,26 @@ class TestInboxStats(unittest.TestCase):
     def test_medium_is_not_high_and_missing_days_is_not_overdue(self):
         items = [{"days": None, "priority": "Medium"}, {"priority": "Medium"}]
         self.assertEqual(inbox_stats(items), {"high": 0, "overdue": 0})
+
+
+class TestArrivedAt(unittest.TestCase):
+    def test_the_minute_from_pm_date_wins(self):
+        item = {"date": "20/07/26 16:24", "creation_iso": "2026-07-20"}
+        self.assertEqual(arrived_at(item), "2026-07-20T16:24:00")
+
+    def test_two_items_of_the_same_day_keep_their_order(self):
+        early = arrived_at({"date": "23/07/26 17:50", "creation_iso": "2026-07-23"})
+        late = arrived_at({"date": "23/07/26 17:59", "creation_iso": "2026-07-23"})
+        self.assertLess(early, late)
+
+    def test_day_only_when_date_is_missing_or_unreadable(self):
+        self.assertEqual(arrived_at({"creation_iso": "2026-09-30"}), "2026-09-30T00:00:00")
+        self.assertEqual(arrived_at({"date": "garbage", "creation_iso": "2026-09-30"}), "2026-09-30T00:00:00")
+
+    def test_blank_when_nothing_usable(self):
+        self.assertEqual(arrived_at({}), "")
+        self.assertEqual(arrived_at({"date": None, "creation_iso": None}), "")
+        self.assertEqual(arrived_at({"date": "x", "creation_iso": "y"}), "")
 
 
 if __name__ == "__main__":

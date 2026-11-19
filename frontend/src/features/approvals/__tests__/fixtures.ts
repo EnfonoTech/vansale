@@ -40,6 +40,7 @@ export function item(over: Partial<ApprovalItem> = {}): ApprovalItem {
     role_id: "Accounts Manager",
     days: 3,
     creator: "Fatima Hassan",
+    created: "2026-11-16T09:30:00",
     category: "Approval Pending",
     is_adhoc: false,
     forwarded_by: "",

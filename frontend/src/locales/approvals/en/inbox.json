@@ -34,7 +34,8 @@
       "forwardedBy": "Forwarded by {name}",
       "with": "With {name}",
       "select": "Select {name}",
-      "open": "Open {name}"
+      "open": "Open {name}",
+      "createdBy": "Created by {name}"
     },
     "age": {
       "today": "Today",
@@ -91,6 +92,12 @@
     "more": {
       "label": "Approvals",
       "sub": "Documents waiting for your decision"
+    },
+    "sort": {
+      "label": "Sort order",
+      "priority": "Urgent first",
+      "newest": "Newest first",
+      "oldest": "Oldest first"
     }
   },
   "approvals": {

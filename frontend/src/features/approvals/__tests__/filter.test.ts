@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { filterItems } from "../filter";
+import { filterItems, sortItems } from "../filter";
 import { item } from "./fixtures";
 
 const items = [
@@ -38,5 +38,53 @@ describe("filterItems", () => {
 
   it("does not match on fields outside the four searched", () => {
     expect(filterItems(items, { area: "All", query: "Approval Pending" })).toEqual([]);
+  });
+});
+
+describe("sortItems", () => {
+  const NOW = Date.parse("2026-11-19T12:00:00");
+  const a = item({ docname: "A", created: "2026-11-16T09:00:00", days: 3 });
+  const b = item({ docname: "B", created: "2026-11-18T15:30:00", days: 1 });
+  const c = item({ docname: "C", created: "2026-11-17T08:00:00", days: 2 });
+  const names = (list: typeof items) => list.map((i) => i.docname);
+
+  it("priority keeps the given order and returns the same list", () => {
+    const given = [a, b, c];
+    expect(sortItems(given, "priority", NOW)).toBe(given);
+  });
+
+  it("newest puts the latest arrival first", () => {
+    expect(names(sortItems([a, b, c], "newest", NOW))).toEqual(["B", "C", "A"]);
+  });
+
+  it("oldest puts the earliest arrival first", () => {
+    expect(names(sortItems([a, b, c], "oldest", NOW))).toEqual(["A", "C", "B"]);
+  });
+
+  it("orders two documents of the same day by the minute", () => {
+    const early = item({ docname: "EARLY", created: "2026-11-18T09:00:00", days: 1 });
+    const late = item({ docname: "LATE", created: "2026-11-18T17:45:00", days: 1 });
+    expect(names(sortItems([early, late], "newest", NOW))).toEqual(["LATE", "EARLY"]);
+    expect(names(sortItems([late, early], "oldest", NOW))).toEqual(["EARLY", "LATE"]);
+  });
+
+  it("keeps the given order for documents that arrived at the same moment", () => {
+    const x = item({ docname: "X", created: "2026-11-18T10:00:00" });
+    const y = item({ docname: "Y", created: "2026-11-18T10:00:00" });
+    expect(names(sortItems([x, y], "newest", NOW))).toEqual(["X", "Y"]);
+    expect(names(sortItems([x, y], "oldest", NOW))).toEqual(["X", "Y"]);
+  });
+
+  it("falls back to the age in days when the arrival time is missing or unreadable", () => {
+    const old = item({ docname: "OLD", created: "", days: 40 });
+    const fresh = item({ docname: "FRESH", created: "not a date", days: 0 });
+    const mid = item({ docname: "MID", created: "2026-11-10T00:00:00", days: 9 });
+    expect(names(sortItems([old, mid, fresh], "newest", NOW))).toEqual(["FRESH", "MID", "OLD"]);
+  });
+
+  it("does not change the list it is given", () => {
+    const given = [a, b, c];
+    sortItems(given, "newest", NOW);
+    expect(names(given)).toEqual(["A", "B", "C"]);
   });
 });

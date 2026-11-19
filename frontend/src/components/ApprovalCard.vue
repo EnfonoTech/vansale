@@ -148,6 +148,7 @@ function activate() {
       <strong v-if="amount" class="amount"><SarSymbol :code="currency" />{{ amount }}</strong>
     </div>
     <div class="sub">{{ subline }}</div>
+    <div v-if="item.creator" class="by">{{ t("approvalsInbox.card.createdBy", { name: item.creator }) }}</div>
 
     <div class="meta">
       <span class="tag" :class="{ overdue }">{{ age }}</span>
@@ -212,6 +213,14 @@ function activate() {
 .sub {
   color: var(--text-muted);
   font-size: var(--text-sm);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.by {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

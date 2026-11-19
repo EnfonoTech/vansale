@@ -410,6 +410,7 @@ class TestInbox(ApiCase):
                 "role_id": "Finance Head",
                 "days": 3,
                 "creator": "Ali Hassan",
+                "created": "2026-11-10T09:30:00",
                 "category": "Approval Pending",
                 "is_adhoc": False,
                 "forwarded_by": "",

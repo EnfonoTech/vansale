@@ -34,7 +34,8 @@
       "forwardedBy": "محوّل من {name}",
       "with": "لدى {name}",
       "select": "تحديد {name}",
-      "open": "فتح {name}"
+      "open": "فتح {name}",
+      "createdBy": "أنشأه {name}"
     },
     "age": {
       "today": "اليوم",
@@ -91,6 +92,12 @@
     "more": {
       "label": "الموافقات",
       "sub": "المستندات التي تنتظر قرارك"
+    },
+    "sort": {
+      "label": "ترتيب القائمة",
+      "priority": "الأكثر إلحاحًا أولًا",
+      "newest": "الأحدث أولًا",
+      "oldest": "الأقدم أولًا"
     }
   },
   "approvals": {

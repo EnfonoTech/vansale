@@ -9,6 +9,7 @@ action is labelled, what it must be given and how the inbox is summed up.
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Optional
 
 OVERDUE_DAYS = 30
@@ -107,3 +108,27 @@ def inbox_stats(needs_you_items: list[dict]) -> dict:
         if (item.get("days") or 0) > OVERDUE_DAYS:
             overdue += 1
     return {"high": high, "overdue": overdue}
+
+
+def arrived_at(item: dict) -> str:
+    """When the item reached the approver, as a naive site-time ISO string
+    ("2026-07-20T16:24:00"), so the PWA can order the inbox newest-first.
+
+    Permission Manager gives the moment as `date` ("dd/MM/yy HH:mm", a fixed
+    format) and the day as `creation_iso` ("YYYY-MM-DD"). The minute is used
+    when it parses; the day alone (midnight) when only that is usable; "" when
+    neither is, so the PWA falls back to the age in days.
+    """
+    stamp = (item.get("date") or "").strip()
+    if stamp:
+        try:
+            return datetime.strptime(stamp, "%d/%m/%y %H:%M").isoformat(timespec="seconds")
+        except ValueError:
+            pass
+    day = (item.get("creation_iso") or "").strip()[:10]
+    if day:
+        try:
+            return datetime.strptime(day, "%Y-%m-%d").isoformat(timespec="seconds")
+        except ValueError:
+            pass
+    return ""
