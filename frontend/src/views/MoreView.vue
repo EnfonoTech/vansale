@@ -1,21 +1,27 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, onBeforeUnmount, onMounted, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { useRouter } from "vue-router";
 import { approvalsOnly } from "@/features/approvals/inbox";
 import { useSessionStore } from "@/stores/session";
 import { useApprovalsStore } from "@/stores/approvals";
+import { usePushStore } from "@/stores/push";
+import { canToggle, isOn, statusKey } from "@/features/push/toggle";
+import { isIos } from "@/features/push/support";
 import { logout } from "@/api/auth";
 import { forgetPin } from "@/app/pin-offline";
 import { useSyncStore } from "@/stores/sync";
 import { useConfirmStore } from "@/stores/confirm";
 import { clearSiteUrl, isNative, siteUrl } from "@/app/platform";
+import { useOnline } from "@/app/online";
 import Icon from "@/components/Icon.vue";
 import SarSymbol from "@/components/SarSymbol.vue";
 
 const router = useRouter();
 const session = useSessionStore();
 const approvals = useApprovalsStore();
+const push = usePushStore();
+const online = useOnline();
 const { t } = useI18n();
 const sync = useSyncStore();
 const confirm = useConfirmStore();
@@ -67,6 +73,41 @@ async function onChangeSite() {
   }
 }
 
+// Approval notifications (Web Push): the web app only, for someone who approves, on a server that can send.
+const pushWanted = computed(() => session.approvalsEnabled && !isNative());
+const showPush = computed(() => pushWanted.value && push.visible);
+const pushOn = computed(() => isOn(push.toggle));
+const pushLocked = computed(() => !canToggle(push.toggle, online.value));
+const pushIos =
+  typeof navigator !== "undefined" && isIos(navigator.userAgent, navigator.platform, navigator.maxTouchPoints);
+const pushStatus = computed(() => t(`approvalsPush.status.${statusKey(push.toggle, online.value, pushIos)}`));
+
+function refreshPush() {
+  if (pushWanted.value) void push.refresh();
+}
+function onVisible() {
+  // Back from the browser's settings: the permission may have changed there.
+  if (document.visibilityState === "visible") refreshPush();
+}
+onMounted(() => {
+  refreshPush();
+  document.addEventListener("visibilitychange", onVisible);
+});
+onBeforeUnmount(() => document.removeEventListener("visibilitychange", onVisible));
+watch(pushWanted, refreshPush);
+watch(online, (now) => {
+  if (now) refreshPush();
+});
+
+function onPushToggle(event: Event) {
+  const input = event.target as HTMLInputElement;
+  // Straight from the tap: the permission prompt needs it, so nothing is awaited first.
+  if (input.checked) void push.enable();
+  else void push.disable();
+  // The switch follows the store, never the tap: a refused or ignored tap springs back.
+  input.checked = pushOn.value;
+}
+
 const initials = computed(() => {
   const name = session.fullName ?? session.email ?? "";
   return name
@@ -92,8 +133,11 @@ async function onLogout() {
     return;
   }
   forgetPin();
+  // Stop this device receiving the user's approvals. Before the server logout, which ends the session
+  // the call needs; quick, and it never throws, so it cannot hold the logout up.
+  await push.detach();
   try { await logout(); }
-  finally { approvals.reset(); session.logout(); await router.replace({ name: "login" }); }
+  finally { approvals.reset(); push.reset(); session.logout(); await router.replace({ name: "login" }); }
 }
 
 interface Link {
@@ -207,6 +251,30 @@ const links = computed<Link[]>(() => {
         <span class="muted">Currency</span>
         <span><SarSymbol :code="session.currency" /> {{ session.currency }}</span>
       </div>
+      <label
+        v-if="showPush"
+        class="switch-row"
+        :data-locked="pushLocked || undefined"
+        :aria-busy="push.toggle.kind === 'busy' || undefined"
+      >
+        <span class="switch-text">
+          <strong>{{ t("approvalsPush.label") }}</strong>
+          <span
+            class="muted xsmall"
+            :data-tone="push.toggle.kind === 'error' ? 'danger' : undefined"
+            role="status"
+            aria-live="polite"
+          >{{ pushStatus }}</span>
+        </span>
+        <input
+          type="checkbox"
+          role="switch"
+          class="switch"
+          :checked="pushOn"
+          :disabled="pushLocked"
+          @change="onPushToggle"
+        />
+      </label>
       <button v-if="session.pinRequired" class="ghost small site-btn" @click="onChangePin">
         Change PIN
       </button>
@@ -297,6 +365,48 @@ const links = computed<Link[]>(() => {
 .link-icon[data-tone="danger"] { background: var(--danger-soft); color: var(--danger); }
 .link-body { display: flex; flex-direction: column; gap: 0.05rem; min-width: 0; }
 .chev { color: var(--text-muted); }
+
+.switch-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  min-height: 2.75rem;
+  cursor: pointer;
+}
+.switch-row[data-locked] { cursor: default; }
+.switch-text { display: flex; flex-direction: column; gap: 0.05rem; min-width: 0; }
+.switch-text [data-tone="danger"] { color: var(--danger); }
+.switch {
+  appearance: none;
+  -webkit-appearance: none;
+  flex-shrink: 0;
+  position: relative;
+  width: 2.6rem;
+  height: 1.5rem;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-pill);
+  background: var(--border-strong);
+  cursor: inherit;
+  transition: background var(--dur-fast) var(--ease);
+}
+.switch::after {
+  content: "";
+  position: absolute;
+  inset-block-start: 0.18rem;
+  inset-inline-start: 0.18rem;
+  width: 1.14rem;
+  height: 1.14rem;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: var(--shadow-sm);
+  transition: inset-inline-start var(--dur-fast) var(--ease);
+}
+.switch:checked { background: var(--primary); }
+.switch:checked::after { inset-inline-start: 1.28rem; }
+.switch:disabled { opacity: 0.55; }
+.switch:focus-visible { box-shadow: 0 0 0 3px var(--primary-soft-strong); outline: none; }
 
 .meta-row { display: flex; justify-content: space-between; align-items: baseline; font-variant-numeric: tabular-nums; }
 
