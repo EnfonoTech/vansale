@@ -8,13 +8,12 @@
  * again when the batch is applied.
  */
 import type { ActionFlag, ActionTone, ApprovalItem, InboxSection } from "@/api/approvals";
-import { filterItems, type ItemFilter } from "./filter";
+import { OVERDUE_DAYS, filterItems, type ItemFilter } from "./filter";
 import { bulkShared } from "./rules";
 
 /** Most documents one batch may hold (the server refuses more). */
 export const BULK_MAX = 20;
-/** "Overdue" means more than this many days. */
-export const OVERDUE_DAYS = 30;
+export { OVERDUE_DAYS };
 
 /** i18n keys of why a document cannot join the selection (the mixed-types key is `BULK_MIXED_TYPES`). */
 export const NO_SHARED_REASON = "approvalsInbox.selection.noShared";

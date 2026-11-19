@@ -28,7 +28,7 @@ import { useI18n } from "vue-i18n";
 import { useRouter } from "vue-router";
 import type { ActionFlag, ApprovalItem } from "@/api/approvals";
 import { useOnline } from "@/app/online";
-import { SORT_MODES, filterItems, sortItems, type SortMode } from "@/features/approvals/filter";
+import { SORT_MODES, filterItems, sortItems, type QuickFilter, type SortMode } from "@/features/approvals/filter";
 import {
   BULK_MAX,
   actionTone,
@@ -57,6 +57,14 @@ const online = useOnline();
 const area = ref<string>("All");
 const search = ref("");
 
+/** The stat the user tapped to narrow the list to it; "all" is no narrowing. */
+const quick = ref<QuickFilter>("all");
+
+function pickQuick(next: QuickFilter) {
+  // Tapping the stat that is already on turns it off.
+  quick.value = quick.value === next ? "all" : next;
+}
+
 const SORT_KEY = "vansale.approvals.sort";
 
 /** The sort the user last chose on this phone; storage may be blocked, then the default holds. */
@@ -81,10 +89,13 @@ function chooseSort(mode: SortMode) {
 }
 
 const inbox = computed(() => store.inbox);
-const filter = computed(() => ({ area: area.value, query: search.value }));
+const filter = computed(() => ({ area: area.value, query: search.value, quick: quick.value }));
 const sections = computed(() => filterSections(inbox.value?.sections ?? [], filter.value));
+// The stats count the documents that need the user, so a tapped stat leaves the "waiting on others" section out.
 const waiting = computed(() =>
-  sortItems(filterItems(inbox.value?.waiting_items ?? [], filter.value), sort.value),
+  quick.value === "all"
+    ? sortItems(filterItems(inbox.value?.waiting_items ?? [], filter.value), sort.value)
+    : [],
 );
 /** The documents waiting on the user in one run by arrival, or null when the server's sections are shown. */
 const sortedRun = computed<ApprovalItem[] | null>(() =>
@@ -223,9 +234,29 @@ function categoryName(category: string): string {
     </div>
 
     <div v-else-if="inbox" class="stats">
-      <span><b>{{ stats.needsYou }}</b> {{ t("approvalsInbox.stats.needsYou") }}</span>
-      <span :class="{ hot: stats.high > 0 }"><b>{{ stats.high }}</b> {{ t("approvalsInbox.stats.high") }}</span>
-      <span :class="{ hot: stats.overdue > 0 }"><b>{{ stats.overdue }}</b> {{ t("approvalsInbox.stats.overdue") }}</span>
+      <button type="button" class="stat" :aria-pressed="quick === 'all'" @click="quick = 'all'">
+        <b>{{ stats.needsYou }}</b> {{ t("approvalsInbox.stats.needsYou") }}
+      </button>
+      <button
+        type="button"
+        class="stat"
+        :class="{ hot: stats.high > 0 }"
+        :aria-pressed="quick === 'high'"
+        :aria-label="t('approvalsInbox.stats.filterHigh', { count: stats.high })"
+        @click="pickQuick('high')"
+      >
+        <b>{{ stats.high }}</b> {{ t("approvalsInbox.stats.high") }}
+      </button>
+      <button
+        type="button"
+        class="stat"
+        :class="{ hot: stats.overdue > 0 }"
+        :aria-pressed="quick === 'overdue'"
+        :aria-label="t('approvalsInbox.stats.filterOverdue', { count: stats.overdue })"
+        @click="pickQuick('overdue')"
+      >
+        <b>{{ stats.overdue }}</b> {{ t("approvalsInbox.stats.overdue") }}
+      </button>
       <span class="spacer" />
       <button
         v-if="needsYou.length"
@@ -409,6 +440,16 @@ function categoryName(category: string): string {
 }
 .stats b { color: var(--text); font-variant-numeric: tabular-nums; }
 .stats .hot b { color: var(--danger); }
+/* A stat is also a filter: the one in use is underlined so it reads as pressed. */
+.stat {
+  all: unset;
+  box-sizing: border-box;
+  cursor: pointer;
+  padding-block: 0.2rem;
+  border-bottom: 2px solid transparent;
+}
+.stat:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+.stat[aria-pressed="true"] { border-bottom-color: var(--primary); color: var(--text); }
 .spacer { flex: 1; }
 .select-btn {
   all: unset;

@@ -15,7 +15,9 @@
     "stats": {
       "needsYou": "need you",
       "high": "high priority",
-      "overdue": "over 30 days"
+      "overdue": "over 30 days",
+      "filterHigh": "Show only the {count} high priority documents",
+      "filterOverdue": "Show only the {count} documents over 30 days"
     },
     "areas": {
       "label": "Filter by area",
@@ -97,7 +99,8 @@
       "label": "Sort order",
       "priority": "Urgent first",
       "newest": "Newest first",
-      "oldest": "Oldest first"
+      "oldest": "Oldest first",
+      "amount": "Largest first"
     }
   },
   "approvals": {

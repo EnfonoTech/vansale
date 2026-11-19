@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { filterItems, sortItems } from "../filter";
+import { OVERDUE_DAYS, filterItems, sortItems } from "../filter";
 import { item } from "./fixtures";
 
 const items = [
@@ -86,5 +86,61 @@ describe("sortItems", () => {
     const given = [a, b, c];
     sortItems(given, "newest", NOW);
     expect(names(given)).toEqual(["A", "B", "C"]);
+  });
+});
+
+describe("quick filters (the tapped stats)", () => {
+  const rows = [
+    item({ docname: "LOW", priority: "Low", days: 2 }),
+    item({ docname: "HIGH", priority: "High", days: 5 }),
+    item({ docname: "CRIT-OLD", priority: "Critical", days: 31 }),
+    item({ docname: "MED-OLD", priority: "Medium", days: 120 }),
+    item({ docname: "EDGE", priority: "Medium", days: OVERDUE_DAYS }),
+  ];
+  const names = (list: typeof rows) => list.map((i) => i.docname);
+
+  it("missing or all keeps everything", () => {
+    expect(names(filterItems(rows, { area: "All", query: "" }))).toEqual(names(rows));
+    expect(names(filterItems(rows, { area: "All", query: "", quick: "all" }))).toEqual(names(rows));
+  });
+
+  it("high keeps High and Critical, the same two the stat counts", () => {
+    expect(names(filterItems(rows, { area: "All", query: "", quick: "high" }))).toEqual(["HIGH", "CRIT-OLD"]);
+  });
+
+  it("overdue keeps only more than 30 days (30 itself is not overdue)", () => {
+    expect(names(filterItems(rows, { area: "All", query: "", quick: "overdue" }))).toEqual(["CRIT-OLD", "MED-OLD"]);
+  });
+
+  it("combines with an area and a query", () => {
+    const mixed = [
+      item({ docname: "A", area: "Purchase", priority: "High", party: "Gulf Steel" }),
+      item({ docname: "B", area: "Sales", priority: "High", party: "Gulf Steel" }),
+      item({ docname: "C", area: "Purchase", priority: "Low", party: "Gulf Steel" }),
+    ];
+    expect(names(filterItems(mixed, { area: "Purchase", query: "gulf", quick: "high" }))).toEqual(["A"]);
+  });
+});
+
+describe("sortItems by amount", () => {
+  const a = item({ docname: "A", amount: 100 });
+  const b = item({ docname: "B", amount: 5000.5 });
+  const c = item({ docname: "C", amount: null });
+  const d = item({ docname: "D", amount: 100 });
+  const e = item({ docname: "E", amount: 0 });
+  const names = (list: typeof rows) => list.map((i) => i.docname);
+  const rows = [a, b, c, d, e];
+
+  it("puts the largest first, ties in given order, no-amount documents last", () => {
+    expect(names(sortItems(rows, "amount"))).toEqual(["B", "A", "D", "E", "C"]);
+  });
+
+  it("a zero amount is an amount, not a missing one", () => {
+    expect(names(sortItems([c, e], "amount"))).toEqual(["E", "C"]);
+  });
+
+  it("does not change the list it is given", () => {
+    sortItems(rows, "amount");
+    expect(names(rows)).toEqual(["A", "B", "C", "D", "E"]);
   });
 });
