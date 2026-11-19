@@ -34,6 +34,7 @@ Checked against `upstream/develop` at `973e5b5` on 18 Nov 2026: every fix in par
 | 9 | Warehouse, cost center, branch and company came only from the user's default User Permission, which another app's Branch Configuration can reset. Now the van is read first, then the User Permission. | `806fbc8` | `vansale/api/me.py` `van_default()`, used in `invoice.py`, `item.py`, `van_defaults.py`. Not the `steelforce/` uses |
 | 10 | An Individual customer could be saved with a VAT number and no address. A VAT buyer gets a standard tax invoice, which ZATCA refuses without the buyer's address. Now the VAT / CR number (and the certificate photo) are on B2B only, and the server refuses a VAT number on a B2C customer in Saudi Arabia. | `9f6e573` | `CustomerFormView.vue` (`isB2B` gates the VAT / CR / photo fields and what is sent); `vansale/api/customer.py` `create` |
 | 11 | A new customer's address title kept the name as typed, while the customer name may be saved in Title Case. Now the address title is the saved name. | `9f6e573` | `vansale/api/customer.py` `create`: `"address_title": doc.customer_name` |
+| 12 | The customer and address forms always started in Saudi Arabia, so a van of a non-Saudi company got the KSA / ZATCA rules (VAT format, building number, postal code) unless the salesman changed the country. Now they start in the company's country; the address form also applies the B2B address rules to any customer with a VAT number. | 19 Nov | `vansale/api/me.py` `customer_form_config(company)` (`country`); `features/van/ksa.ts` (`defaultCountry`, `countryOptions`); `CustomerFormView.vue`, `AddressFormView.vue` |
 
 Details for fix 7:
 
@@ -65,7 +66,8 @@ These are new behaviour, not fixes. Each defaults to the old behaviour.
 - **"Cash sale collection" setting:** added and then removed on develop_2, so there is nothing to move.
 - **Delivery person on cash sales:** this uses sf_trading's `custom_driver`, so it is Steel Force only.
 - **Steel Force customer rules** (19 Nov): B2B only for the B2B Creator role, duplicate name refused, mobile and
-  VAT photo required on the server, the photo filed on the VAT Certificate row. All in
+  VAT photo required on the server, the photo filed on the VAT Certificate row, the 10-digit mobile rule for a
+  Saudi company only (`mobile_min_digits`). All in
   `vansale/steelforce/` and `customer_form.b2b`; on a standard site `can_create_b2b()` is always true.
 - **Everything tagged [SF] and all of `vansale/steelforce/`.**
 

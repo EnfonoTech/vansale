@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ksaAddressErrors, ksaVatError } from "@/features/van/ksa";
+import { countryOptions, defaultCountry, ksaAddressErrors, ksaVatError, mobileProblem } from "@/features/van/ksa";
 
 describe("KSA customer rules", () => {
   it("VAT: 15 digits starting and ending with 3", () => {
@@ -28,5 +28,23 @@ describe("KSA customer rules", () => {
 
   it("other countries are not checked", () => {
     expect(ksaAddressErrors({ isB2B: true, country: "India" })).toEqual([]);
+  });
+});
+
+describe("company country and mobile", () => {
+  it("a new customer starts in the company's country", () => {
+    expect(defaultCountry("Bahrain")).toBe("Bahrain");
+    expect(defaultCountry(null)).toBe("Saudi Arabia");
+    expect(countryOptions("Bahrain")[0]).toBe("Saudi Arabia");
+    expect(countryOptions("Egypt")[0]).toBe("Egypt");
+  });
+
+  it("mobile: required and minimum digits", () => {
+    expect(mobileProblem("", true, 10)).toBe("Mobile number is required");
+    expect(mobileProblem("", false, 10)).toBeNull();
+    expect(mobileProblem("0551234567", true, 10)).toBeNull();
+    // a Bahrain mobile (8 digits): fine where the company is not Saudi
+    expect(mobileProblem("36123456", true, 0)).toBeNull();
+    expect(mobileProblem("36123456", true, 10)).toBe("Mobile number needs at least 10 digits");
   });
 });

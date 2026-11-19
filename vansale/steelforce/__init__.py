@@ -76,6 +76,19 @@ def can_create_b2b(user: Optional[str] = None) -> bool:
     return user == "Administrator" or bool(set(frappe.get_roles(user)) & _B2B_CREATOR_ROLES)
 
 
+def mobile_min_digits(company: Optional[str]) -> int:
+    """Steel Force: a Saudi company's customer needs a mobile of at least 10
+    digits (sf_trading's party_master_rules; a Bahrain company's does not).
+    0 = no length rule."""
+    if not is_active() or not company:
+        return 0
+    try:
+        from sf_trading.party_master_rules import is_saudi
+    except ImportError:
+        return 0
+    return 10 if is_saudi(company) else 0
+
+
 def check_new_customer(
     customer_name: str, is_b2b: bool, mobile_no: Optional[str], tax_id: Optional[str] = None, has_document: bool = False
 ) -> None:

@@ -210,7 +210,7 @@ def config_defaults() -> dict:
         "return_without_invoice": return_without_invoice_allowed(user),
         "print_formats": print_formats(user),
         "print": print_behaviour(user),
-        "customer_form": customer_form_config(),
+        "customer_form": customer_form_config(company),
         "selling_flow": selling_flow(user),
         "approvals": {"enabled": approvals.is_available()},
     }
@@ -328,8 +328,12 @@ def _can_create_b2b() -> bool:
     return steelforce.can_create_b2b()
 
 
-def customer_form_config() -> dict:
-    """Optional customer fields this site has, for the app's customer form."""
+def customer_form_config(company: str | None = None) -> dict:
+    """Optional customer fields this site has, for the app's customer form.
+    `company`: the user's company — its country is the form's default country
+    (the KSA / ZATCA rules follow the country)."""
+    from vansale import steelforce
+
     meta = frappe.get_meta("Customer")
     name_2 = customer_name_2_field()
     return {
@@ -339,6 +343,9 @@ def customer_form_config() -> dict:
         # document on file before it can be billed; every customer needs a phone.
         "vat_needs_cr_and_document": steelforce_rules_active(),
         "mobile_required": steelforce_rules_active(),
+        # Shortest mobile accepted (Steel Force: 10 digits for a Saudi company's customer).
+        "mobile_min_digits": steelforce.mobile_min_digits(company),
+        "country": frappe.db.get_value("Company", company, "country") if company else None,
         # B2B (company) customers: Steel Force lets only a B2B Creator make one.
         "b2b": _can_create_b2b(),
         # ZATCA "additional number" only where the site's Address has a field for it.

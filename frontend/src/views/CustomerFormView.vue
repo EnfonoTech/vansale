@@ -19,7 +19,7 @@ import { ref, computed } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { create as createCustomer } from "@/api/customer";
 import { ApiError } from "@/app/frappe";
-import { isKsa, ksaAddressErrors, ksaVatError } from "@/features/van/ksa";
+import { countryOptions, defaultCountry, isKsa, ksaAddressErrors, ksaVatError, mobileProblem } from "@/features/van/ksa";
 import { useSessionStore } from "@/stores/session";
 import { useToastStore } from "@/stores/toasts";
 import Icon from "@/components/Icon.vue";
@@ -53,18 +53,11 @@ const addressLine2 = ref("");
 const city = ref("");
 const stateField = ref("");
 const pincode = ref("");
-// Default to KSA because that's where 99% of our customers are (and the
-// site-level Customer.custom_country field is Reqd on trading-demo).
-// GCC-only list keeps the dropdown short + meaningful for the driver.
-const country = ref("Saudi Arabia");
-const GCC_COUNTRIES = [
-  "Saudi Arabia",
-  "United Arab Emirates",
-  "Kuwait",
-  "Bahrain",
-  "Qatar",
-  "Oman",
-] as const;
+// Starts in the company's country (a Bahrain company's van: Bahrain), else
+// KSA; the KSA / ZATCA rules below follow the country chosen. GCC list (plus
+// the company's own country) keeps the dropdown short for the driver.
+const country = ref(defaultCountry(session.customerForm?.country));
+const COUNTRIES = countryOptions(session.customerForm?.country);
 // KSA ZATCA Phase 2 — building number is mandatory on B2B addresses.
 const buildingNumber = ref("");
 const additionalNumber = ref("");
@@ -81,11 +74,13 @@ const problems = computed(() => {
   const list: string[] = [];
   if (!customerName.value.trim()) list.push("Customer name is required");
   const rules = session.customerForm;
-  if (rules?.mobile_required) {
-    const digits = mobileNo.value.replace(/\D/g, "");
-    if (!digits) list.push("Mobile number is required");
-    else if (digits.length < 10) list.push("Mobile number needs at least 10 digits");
-  }
+  // Steel Force: required, and 10 digits for a Saudi company's customer.
+  const mobileError = mobileProblem(
+    mobileNo.value,
+    Boolean(rules?.mobile_required),
+    rules?.mobile_min_digits ?? (rules?.mobile_required ? 10 : 0),
+  );
+  if (mobileError) list.push(mobileError);
   if (isB2B.value && rules?.vat_needs_cr_and_document && taxId.value.trim()) {
     if (!crNumber.value.trim()) list.push("CR number is required with a VAT number");
     if (!documentFile.value) list.push("Add a photo of the CR / VAT certificate");
@@ -263,7 +258,7 @@ async function submit() {
       <label class="field">
         <span class="tiny">Country *</span>
         <select v-model="country">
-          <option v-for="c in GCC_COUNTRIES" :key="c" :value="c">{{ c }}</option>
+          <option v-for="c in COUNTRIES" :key="c" :value="c">{{ c }}</option>
         </select>
       </label>
     </section>

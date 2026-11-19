@@ -71,6 +71,11 @@ export interface ConfigDefaults {
     mobile_required?: boolean;
     /** B2B (company) customers may be made; false = B2C only (Steel Force: B2B Creator role). */
     b2b?: boolean;
+    /** Shortest mobile accepted (Steel Force: 10 for a Saudi company's customer; 0 = none).
+     *  Missing on older servers: 10 when the mobile is required. */
+    mobile_min_digits?: number;
+    /** The company's country: the form's default country. */
+    country?: string | null;
   };
   /** Selling-flow settings (Vansale Settings / van). Missing on older servers = old behaviour. */
   selling_flow?: SellingFlow;
