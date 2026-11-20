@@ -690,6 +690,9 @@ def create(
             }
     ctype = (customer_type or "b2c").lower()
     is_b2b = ctype == "b2b"
+    # Steel Force: the desk dialog's rules (B2B Creator only, mobile, no second
+    # customer of the same name).
+    steelforce.check_new_customer(customer_name, is_b2b, mobile_no, tax_id, bool(attachment))
 
     # Resolve country once — used for both Customer.custom_country (a
     # site-custom reqd Link field added on trading-demo) and the primary
@@ -702,6 +705,10 @@ def create(
         or "Saudi Arabia"
     )
 
+    if resolved_country == _KSA and tax_id and not is_b2b:
+        # A buyer with a VAT number gets a standard (B2B) tax invoice, which
+        # ZATCA refuses without the buyer's address.
+        frappe.throw(_("A customer with a VAT number is a B2B (company) customer."))
     if resolved_country == _KSA:
         _validate_ksa(resolved_country, is_b2b, tax_id, building_number, pincode, district, address_line1, city)
     elif is_b2b:
@@ -768,7 +775,8 @@ def create(
     if address_line1:
         addr_data = {
             "doctype": "Address",
-            "address_title": customer_name,
+            # The name as saved (some sites put it in Title Case).
+            "address_title": doc.customer_name,
             "address_type": "Billing",
             "address_line1": address_line1,
             "address_line2": address_line2,
@@ -799,7 +807,9 @@ def create(
     # Outbox row in the same transaction as the Customer (claimed above), so
     # a retry can never create a second customer and a rollback drops both.
     if attachment:
-        _attach_document(doc.name, attachment)
+        file_url = _attach_document(doc.name, attachment)
+        if tax_id:
+            steelforce.link_vat_document(doc.name, file_url)
     if client_id:
         _record_customer_outbox(
             client_id,
@@ -825,9 +835,10 @@ def create(
 _MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024
 
 
-def _attach_document(customer: str, attachment: dict) -> None:
+def _attach_document(customer: str, attachment: dict) -> str | None:
     """A photo of the customer's CR / VAT certificate, attached to the Customer
-    (private). Some sites refuse to bill a VAT-registered customer without one."""
+    (private). Some sites refuse to bill a VAT-registered customer without one.
+    Returns the file's URL."""
     import base64
 
     filename = (attachment.get("filename") or "document.jpg").strip()[:140]
@@ -839,10 +850,10 @@ def _attach_document(customer: str, attachment: dict) -> None:
     except Exception:
         frappe.throw(_("The attached document could not be read"))
     if not content:
-        return
+        return None
     if len(content) > _MAX_ATTACHMENT_BYTES:
         frappe.throw(_("The attached document is too large (8 MB at most)"))
-    frappe.get_doc({
+    file = frappe.get_doc({
         "doctype": "File",
         "file_name": filename,
         "attached_to_doctype": "Customer",
@@ -850,6 +861,7 @@ def _attach_document(customer: str, attachment: dict) -> None:
         "is_private": 1,
         "content": content,
     }).insert()
+    return file.file_url
 
 
 # Statement labels: English with the Arabic underneath (KSA statements).

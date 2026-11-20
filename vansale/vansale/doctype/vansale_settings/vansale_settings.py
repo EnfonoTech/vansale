@@ -13,13 +13,18 @@ from frappe.model.document import Document
 
 CACHE_KEY = "vansale_settings_flags"
 
+# (field on Vansale Settings / Vansale Configuration, doctype it prints)
+PRINT_FORMAT_FIELDS = (
+    ("invoice_print_format", "Sales Invoice"),
+    ("receipt_print_format", "Payment Entry"),
+    ("quotation_print_format", "Quotation"),
+    ("sales_order_print_format", "Sales Order"),
+)
+
 
 def validate_print_formats(doc) -> None:
-    """The invoice / receipt print format must be one for that doctype."""
-    for fieldname, doctype in (
-        ("invoice_print_format", "Sales Invoice"),
-        ("receipt_print_format", "Payment Entry"),
-    ):
+    """Each print format must be one for its doctype."""
+    for fieldname, doctype in PRINT_FORMAT_FIELDS:
         fmt = doc.get(fieldname)
         if fmt and frappe.db.get_value("Print Format", fmt, "doc_type") != doctype:
             frappe.throw(
@@ -72,6 +77,8 @@ def global_flags() -> dict:
         "stock_source": "Bin",
         "invoice_print_format": None,
         "receipt_print_format": None,
+        "quotation_print_format": None,
+        "sales_order_print_format": None,
         "allow_split_payment": False,
         "allow_return_without_invoice": False,
         "direct_print": False,
@@ -108,6 +115,8 @@ def global_flags() -> dict:
             "default_payment_type",
             "invoice_print_format",
             "receipt_print_format",
+            "quotation_print_format",
+            "sales_order_print_format",
             "quotation_next_step",
         ):
             if row.get(key):

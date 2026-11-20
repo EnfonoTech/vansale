@@ -210,7 +210,7 @@ def config_defaults() -> dict:
         "return_without_invoice": return_without_invoice_allowed(user),
         "print_formats": print_formats(user),
         "print": print_behaviour(user),
-        "customer_form": customer_form_config(),
+        "customer_form": customer_form_config(company),
         "selling_flow": selling_flow(user),
         "approvals": {"enabled": approvals.is_available()},
     }
@@ -322,8 +322,18 @@ def steelforce_rules_active() -> bool:
     return steelforce.is_active()
 
 
-def customer_form_config() -> dict:
-    """Optional customer fields this site has, for the app's customer form."""
+def _can_create_b2b() -> bool:
+    from vansale import steelforce
+
+    return steelforce.can_create_b2b()
+
+
+def customer_form_config(company: str | None = None) -> dict:
+    """Optional customer fields this site has, for the app's customer form.
+    `company`: the user's company — its country is the form's default country
+    (the KSA / ZATCA rules follow the country)."""
+    from vansale import steelforce
+
     meta = frappe.get_meta("Customer")
     name_2 = customer_name_2_field()
     return {
@@ -333,6 +343,11 @@ def customer_form_config() -> dict:
         # document on file before it can be billed; every customer needs a phone.
         "vat_needs_cr_and_document": steelforce_rules_active(),
         "mobile_required": steelforce_rules_active(),
+        # Shortest mobile accepted (Steel Force: 10 digits for a Saudi company's customer).
+        "mobile_min_digits": steelforce.mobile_min_digits(company),
+        "country": frappe.db.get_value("Company", company, "country") if company else None,
+        # B2B (company) customers: Steel Force lets only a B2B Creator make one.
+        "b2b": _can_create_b2b(),
         # ZATCA "additional number" only where the site's Address has a field for it.
         "additional_number": any(
             frappe.get_meta("Address").has_field(f) for f in ("custom_additional_number", "additional_number")
@@ -510,7 +525,11 @@ def return_without_invoice_allowed(user: str | None = None) -> bool:
 
 
 def print_formats(user: str | None = None) -> dict:
-    """Print formats the app uses: van → Vansale Settings → the app's own."""
+    """Print formats the app uses: van → Vansale Settings → the app's own.
+
+    Quotation / Sales Order have no app layout: they fall back to the
+    doctype's default print format (Customize Form), else Standard.
+    """
     return {
         "invoice": _van_or_global(
             "invoice_print_format", "invoice_print_format", DEFAULT_INVOICE_PRINT_FORMAT, user
@@ -518,7 +537,21 @@ def print_formats(user: str | None = None) -> dict:
         "receipt": _van_or_global(
             "receipt_print_format", "receipt_print_format", DEFAULT_RECEIPT_PRINT_FORMAT, user
         ),
+        "quotation": _van_or_global(
+            "quotation_print_format", "quotation_print_format", _desk_print_format("Quotation"), user
+        ),
+        "sales_order": _van_or_global(
+            "sales_order_print_format", "sales_order_print_format", _desk_print_format("Sales Order"), user
+        ),
     }
+
+
+def _desk_print_format(doctype: str) -> str:
+    """The doctype's default print format as desk prints it, else Standard."""
+    fmt = frappe.get_meta(doctype).default_print_format
+    if fmt and not frappe.db.get_value("Print Format", fmt, "disabled"):
+        return fmt
+    return "Standard"
 
 
 def print_behaviour(user: str | None = None) -> dict:

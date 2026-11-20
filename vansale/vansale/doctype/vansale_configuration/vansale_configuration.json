@@ -51,6 +51,8 @@
   "section_break_printing",
   "invoice_print_format",
   "receipt_print_format",
+  "quotation_print_format",
+  "sales_order_print_format",
   "column_break_printing",
   "direct_print_mode",
   "print_after_submit_mode",
@@ -310,6 +312,18 @@
    "options": "Print Format"
   },
   {
+   "fieldname": "quotation_print_format",
+   "fieldtype": "Link",
+   "label": "Quotation print format",
+   "options": "Print Format"
+  },
+  {
+   "fieldname": "sales_order_print_format",
+   "fieldtype": "Link",
+   "label": "Sales Order print format",
+   "options": "Print Format"
+  },
+  {
    "fieldname": "column_break_printing",
    "fieldtype": "Column Break"
   },
@@ -359,7 +373,7 @@
  ],
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-11-17 12:00:00.000000",
+ "modified": "2026-11-18 12:00:00.000000",
  "modified_by": "Administrator",
  "module": "Vansale",
  "name": "Vansale Configuration",

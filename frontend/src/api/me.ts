@@ -1,5 +1,14 @@
 import { apiCall } from "./client";
 
+/** Print format per document: van → Vansale Settings → the app's own / desk default. */
+export interface PrintFormats {
+  invoice: string;
+  receipt: string;
+  /** Older cached defaults have no quotation / order entry. */
+  quotation?: string;
+  sales_order?: string;
+}
+
 export interface ConfigDefaults {
   user: string;
   full_name: string;
@@ -47,7 +56,7 @@ export interface ConfigDefaults {
   /** Returns without an original invoice allowed (setting). */
   return_without_invoice?: boolean;
   /** Print formats chosen in Vansale Settings / the van. */
-  print_formats?: { invoice: string; receipt: string };
+  print_formats?: PrintFormats;
   /** Print button: direct or preview; print after submit; copies. */
   /** pdf_button: missing on sessions from older servers = shown. */
   print?: { direct: boolean; after_submit: boolean; copies: number; pdf_button?: boolean; share_button?: boolean };
@@ -60,6 +69,13 @@ export interface ConfigDefaults {
     vat_needs_cr_and_document?: boolean;
     /** Mobile number mandatory (the site bills only customers with a phone). */
     mobile_required?: boolean;
+    /** B2B (company) customers may be made; false = B2C only (Steel Force: B2B Creator role). */
+    b2b?: boolean;
+    /** Shortest mobile accepted (Steel Force: 10 for a Saudi company's customer; 0 = none).
+     *  Missing on older servers: 10 when the mobile is required. */
+    mobile_min_digits?: number;
+    /** The company's country: the form's default country. */
+    country?: string | null;
   };
   /** Selling-flow settings (Vansale Settings / van). Missing on older servers = old behaviour. */
   selling_flow?: SellingFlow;

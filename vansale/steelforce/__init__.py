@@ -62,6 +62,85 @@ def on_new_customer(doc, company: Optional[str] = None) -> None:
         doc.custom_company = company or _user_company()
 
 
+# The desk's Create Customer dialog lets only these make a B2B customer
+# (sf_trading/public/js/create_customer.js); Administrator too.
+_B2B_CREATOR_ROLES = {"B2B Creator", "System Manager"}
+
+
+def can_create_b2b(user: Optional[str] = None) -> bool:
+    """Steel Force: only a B2B Creator makes a B2B (company) customer, as on
+    the desk. Elsewhere everyone may."""
+    if not is_active():
+        return True
+    user = user or frappe.session.user
+    return user == "Administrator" or bool(set(frappe.get_roles(user)) & _B2B_CREATOR_ROLES)
+
+
+def mobile_min_digits(company: Optional[str]) -> int:
+    """Steel Force: a Saudi company's customer needs a mobile of at least 10
+    digits (sf_trading's party_master_rules; a Bahrain company's does not).
+    0 = no length rule."""
+    if not is_active() or not company:
+        return 0
+    try:
+        from sf_trading.party_master_rules import is_saudi
+    except ImportError:
+        return 0
+    return 10 if is_saudi(company) else 0
+
+
+def check_new_customer(
+    customer_name: str, is_b2b: bool, mobile_no: Optional[str], tax_id: Optional[str] = None, has_document: bool = False
+) -> None:
+    """The rules sf_trading keeps in its Create Customer dialog rather than on
+    the Customer itself (sf_trading/api/customer.py), so an app-made customer
+    meets them too. Nothing elsewhere."""
+    if not is_active():
+        return
+    from frappe import _
+
+    if is_b2b and not can_create_b2b():
+        frappe.throw(_("Only a B2B Creator can create a B2B customer."))
+    if not (mobile_no or "").strip():
+        frappe.throw(_("Mobile No is required"))
+    # sf_trading bills a VAT customer only with its certificate on file.
+    if (tax_id or "").strip() and not has_document:
+        frappe.throw(_("Add a photo of the CR / VAT certificate."))
+    # The name sf_trading saves is in Title Case; the lookup ignores case.
+    if frappe.db.exists("Customer", {"customer_name": customer_name.strip()}):
+        frappe.throw(_("Customer '{0}' already exists.").format(customer_name.strip()))
+
+
+def link_vat_document(customer: str, file_url: Optional[str]) -> None:
+    """Steel Force: the photo taken with a VAT number is the customer's VAT
+    Certificate, filed in the Supporting Documents row sf_trading adds for the
+    number (the desk's dialog files its upload the same way); sf_trading's
+    customer approval looks for the file there."""
+    if not is_active() or not file_url:
+        return
+    try:
+        from sf_trading.party_documents import TABLE, VAT_DOCUMENT_TYPE
+    except ImportError:
+        return
+    field = frappe.get_meta("Customer").get_field(TABLE)
+    if not field:
+        return
+    row = frappe.db.get_value(
+        field.options,
+        {
+            "parent": customer,
+            "parenttype": "Customer",
+            "parentfield": TABLE,
+            "document_type": VAT_DOCUMENT_TYPE,
+            "attachment": ["is", "not set"],
+        },
+        "name",
+        order_by="idx asc",
+    )
+    if row:
+        frappe.db.set_value(field.options, row, "attachment", file_url, update_modified=False)
+
+
 # ─── Return reasons ───────────────────────────────────────────────────────────
 
 _REASON_TEMPLATE_FIELD = "custom_return_reason_template"
