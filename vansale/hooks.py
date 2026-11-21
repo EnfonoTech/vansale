@@ -26,12 +26,25 @@ website_route_rules = [
 page_renderer = ["vansale.pwa.VansalePWARenderer"]
 
 # Fixtures exported on `bench export-fixtures --app vansale`.
+# `Sales Invoice-custom_return_reason` is deliberately NOT a fixture: Frappe
+# re-imports fixtures on install-app and on every migrate, so a site that
+# already owns a field of that name (Steel Force: Data, mandatory on return)
+# would have it overwritten each time. setup.CREATE_ONLY_CUSTOM_FIELDS creates
+# it only when missing; the filter keeps `export-fixtures` from adding it back
+# on a dev site where vansale made it.
 fixtures = [
     {
         "dt": "Custom Field",
-        "filters": [["module", "=", "Vansale"]],
+        "filters": [
+            ["module", "=", "Vansale"],
+            ["name", "!=", "Sales Invoice-custom_return_reason"],
+        ],
     },
 ]
+
+# Runs once on install-app (install does not run after_migrate), so a fresh
+# site gets the create-only custom fields straight away.
+after_install = "vansale.setup.after_install"
 
 # Inject Van User defaults + sidebar restrictions into the desk session.
 boot_session = "vansale.boot.boot_session"
