@@ -14,6 +14,7 @@ import SarSymbol from "@/components/SarSymbol.vue";
 import { vDecimals } from "@/components/decimals";
 import { confirmSubmit, withCurrency } from "@/stores/confirm";
 import { customerLine } from "@/app/customerName";
+import { precheckBeforeSubmit } from "@/api/precheck";
 
 const route = useRoute();
 const router = useRouter();
@@ -120,7 +121,7 @@ async function openRefund() {
   refundOpen.value = true;
   if (refundMops.value.length) return;
   try {
-    refundMops.value = await modesOfPayment();
+    refundMops.value = await modesOfPayment(true);
   } catch {
     refundMops.value = [];
   }
@@ -215,12 +216,29 @@ function editDraft() {
  */
 async function submitInvoice() {
   if (!inv.value || busy.value) return;
+  // Locked from the first tap: the pre-check and the confirm take a moment.
+  busy.value = true;
+  const go = await precheckBeforeSubmit(
+    "Sales Invoice",
+    inv.value.customer,
+    inv.value.payment_type,
+    (inv.value.items ?? []).map((i) => ({
+      item_code: i.item_code,
+      item_name: i.item_name,
+      rate: i.rate,
+      // ERPNext's own figure for the draft (after the invoice discount).
+      net_rate: i.net_rate ?? i.rate,
+      conversion_factor: i.conversion_factor,
+    })),
+    // What the credit-limit check will count: the draft's unpaid part.
+    { amount: inv.value.outstanding_amount ?? inv.value.grand_total, fromOrder: Boolean(inv.value.sales_order) },
+  );
+  if (!go) { busy.value = false; return; }
   const ok = await confirmSubmit(`Submit ${inv.value.name}?`, [
     customerLine(inv.value.customer_title, inv.value.customer_name, inv.value.customer),
     `${withCurrency(fmt(inv.value.grand_total))}`,
   ]);
-  if (!ok) return;
-  busy.value = true;
+  if (!ok) { busy.value = false; return; }
   try {
     await submitDraft(inv.value.name);
     toasts.success(`Submitted ${inv.value.name}`);
@@ -297,6 +315,10 @@ async function deleteInvoice() {
             <strong :class="inv.outstanding_amount > 0 ? 'warn' : ''"><SarSymbol :code="session.currency" />{{ fmt(inv.outstanding_amount) }}</strong>
           </div>
         </div>
+        <p v-if="inv.driver" class="muted small driver-line">
+          <Icon name="truck" :size="14" /> Delivery person: {{ inv.driver_name || inv.driver }}<template
+            v-if="!inv.is_return && inv.outstanding_amount > 0"> — collects on delivery</template>
+        </p>
         <div class="row actions">
           <!-- Draft stage: submit or delete. Print is also allowed
                (useful to preview the invoice before committing stock). -->
@@ -307,7 +329,7 @@ async function deleteInvoice() {
             <button class="ghost" :disabled="busy" @click="editDraft">
               <Icon name="edit" :size="16" /> Edit
             </button>
-            <button class="ghost" :disabled="busy" @click="printInvoice">
+            <button v-if="session.draftSalePrint || inv.is_return" class="ghost" :disabled="busy" @click="printInvoice">
               <Icon name="receipt" :size="16" /> Print
             </button>
             <button class="ghost danger-ghost" :disabled="busy" @click="deleteInvoice">
@@ -334,7 +356,7 @@ async function deleteInvoice() {
               <Icon name="share" :size="16" /> {{ sharing ? "Preparing…" : "Share" }}
             </button>
             <button
-              v-if="inv.docstatus === 1 && !inv.is_return"
+              v-if="inv.docstatus === 1 && !inv.is_return && !inv.return_window?.blocked"
               class="ghost"
               @click="returnInvoice"
             >
@@ -342,6 +364,11 @@ async function deleteInvoice() {
             </button>
           </template>
         </div>
+        <!-- Steel Force return window: said here, not after the return is filled in. -->
+        <p v-if="inv.return_window?.past_window" class="xsmall" :class="inv.return_window.blocked ? 'muted' : 'warn-note'">
+          {{ inv.return_window.blocked ? "No return:" : "Past the return window:" }}
+          sold {{ inv.return_window.age }} days ago, returns allowed within {{ inv.return_window.days }} days{{ inv.return_window.blocked ? "." : " (you may still return it)." }}
+        </p>
       </section>
 
       <!-- Pay the customer back for this credit note (kept as credit at the return). -->
@@ -427,6 +454,10 @@ async function deleteInvoice() {
           <strong>Grand total</strong>
           <strong><SarSymbol :code="session.currency" />{{ fmt(inv.grand_total) }}</strong>
         </div>
+        <div v-if="(inv.total_advance ?? 0) > 0" class="totals-row">
+          <span class="muted">Advance (paid on the order)</span>
+          <span><SarSymbol :code="session.currency" />{{ fmt(inv.total_advance ?? 0) }}</span>
+        </div>
         <div class="totals-row">
           <span class="muted">Paid</span>
           <span><SarSymbol :code="session.currency" />{{ fmt(inv.paid_amount) }}</span>
@@ -457,6 +488,7 @@ async function deleteInvoice() {
 </template>
 
 <style scoped>
+.warn-note { color: var(--warning); margin: 0.4rem 0 0; }
 .hero {
   background: linear-gradient(135deg, color-mix(in srgb, var(--primary) 10%, var(--surface)) 0%, var(--surface) 100%);
 }
@@ -468,6 +500,7 @@ async function deleteInvoice() {
 }
 .hero-total .big { display: block; font-size: var(--text-2xl); font-variant-numeric: tabular-nums; }
 .hero-sub { text-align: right; }
+.driver-line { display: flex; align-items: center; gap: 0.35rem; margin: 0; }
 .warn { color: var(--warning); }
 .refund-head { display: flex; justify-content: space-between; align-items: baseline; gap: 0.5rem; }
 .refund-grid { display: grid; grid-template-columns: 1fr 8rem; gap: 0.5rem; }

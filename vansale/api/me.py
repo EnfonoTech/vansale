@@ -90,6 +90,14 @@ def config_defaults() -> dict:
             if is_default:
                 default_cost_center = value
 
+    # The van's own warehouse / cost center / branch / company win over User
+    # Permission defaults: other apps (e.g. sf_trading's Branch Configuration)
+    # reset a user's permission defaults, which silently moved the van.
+    default_warehouse = van_default("Warehouse", user) or default_warehouse
+    default_cost_center = van_default("Cost Center", user) or default_cost_center
+    branch = van_default("Branch", user) or branch
+    company = van_default("Company", user) or company
+
     # Van code + sales person — first Vansale Configuration that lists this user.
     cfg_user = frappe.db.get_value(
         "Vansale Configuration User",
@@ -164,13 +172,16 @@ def config_defaults() -> dict:
     if company:
         currency = frappe.db.get_value("Company", company, "default_currency")
 
+    from vansale.steelforce import approvals
+
     return {
         "user": user_doc.name,
         "full_name": user_doc.full_name,
         "language": user_doc.language or "en",
         "is_van_user": "Van User" in roles,
         "is_van_manager": "Van Manager" in roles,
-        "is_system_manager": "System Manager" in roles,
+        # Administrator's own role rows are not its full list of roles.
+        "is_system_manager": user == "Administrator" or "System Manager" in roles,
         "roles": roles,
         "company": company,
         "branch": branch,
@@ -199,7 +210,32 @@ def config_defaults() -> dict:
         "return_without_invoice": return_without_invoice_allowed(user),
         "print_formats": print_formats(user),
         "print": print_behaviour(user),
-        "customer_form": customer_form_config(),
+        "customer_form": customer_form_config(company),
+        "selling_flow": selling_flow(user),
+        "approvals": {"enabled": approvals.is_available()},
+        "loyalty": loyalty_settings(company, user),
+        # sf_trading runs next to the app (its credit / approval rules need a connection).
+        "steelforce": steelforce_rules_active(),
+        # Lists a line may be priced from instead of the document's (an offer list).
+        "row_price_lists": row_price_lists(),
+    }
+
+
+def loyalty_settings(company: str | None, user: str | None = None) -> dict | None:
+    """Steel Force "Loyalty" (written off when the customer pays): the
+    company's maximum, and whether a cash sale can carry it (it rides on the
+    Payment Entry sf_trading makes, so only a cash sale posted by Payment
+    Entry and submitted at once; a cheque always). None where not set up."""
+    from vansale import steelforce
+
+    config = steelforce.loyalty_config(company)
+    if not config:
+        return None
+    cash = cash_sale_settings(user)
+    return {
+        "max": config["max"],
+        "on_cash": cash["posting"] == "Payment Entry" and cash["payment_entry_status"] == "Submit",
+        "on_collection": collection_payment_entry_status(user) == "Submit",
     }
 
 
@@ -290,13 +326,59 @@ def customer_name_2_field() -> str | None:
     return None
 
 
-def customer_form_config() -> dict:
-    """Optional customer fields this site has, for the app's customer form."""
+def cr_number_field() -> str | None:
+    """Customer field for the Commercial Registration number: Vansale Settings
+    "CR number field" when it exists on Customer, else the first known one
+    (`custom_cr_number`, or sf_trading's `custom_commercial_registration_number`,
+    which refuses a VAT customer without it)."""
+    meta = frappe.get_meta("Customer")
+    configured = frappe.db.get_single_value("Vansale Settings", "cr_number_field") if frappe.get_meta(
+        "Vansale Settings"
+    ).has_field("cr_number_field") else None
+    for fieldname in ([configured] if configured else []) + ["custom_cr_number", "custom_commercial_registration_number"]:
+        if fieldname and meta.has_field(fieldname):
+            return fieldname
+    return None
+
+
+def row_price_lists() -> list[str]:
+    from vansale import steelforce
+
+    return steelforce.row_price_lists()
+
+
+def steelforce_rules_active() -> bool:
+    from vansale import steelforce
+
+    return steelforce.is_active()
+
+
+def _can_create_b2b() -> bool:
+    from vansale import steelforce
+
+    return steelforce.can_create_b2b()
+
+
+def customer_form_config(company: str | None = None) -> dict:
+    """Optional customer fields this site has, for the app's customer form.
+    `company`: the user's company — its country is the form's default country
+    (the KSA / ZATCA rules follow the country)."""
+    from vansale import steelforce
+
     meta = frappe.get_meta("Customer")
     name_2 = customer_name_2_field()
     return {
         "name_2": {"field": name_2, "label": _(meta.get_label(name_2))} if name_2 else None,
-        "cr_number": meta.has_field("custom_cr_number"),
+        "cr_number": bool(cr_number_field()),
+        # Steel Force (sf_trading): a VAT-registered customer needs its CR number and a
+        # document on file before it can be billed; every customer needs a phone.
+        "vat_needs_cr_and_document": steelforce_rules_active(),
+        "mobile_required": steelforce_rules_active(),
+        # Shortest mobile accepted (Steel Force: 10 digits for a Saudi company's customer).
+        "mobile_min_digits": steelforce.mobile_min_digits(company),
+        "country": frappe.db.get_value("Company", company, "country") if company else None,
+        # B2B (company) customers: Steel Force lets only a B2B Creator make one.
+        "b2b": _can_create_b2b(),
         # ZATCA "additional number" only where the site's Address has a field for it.
         "additional_number": any(
             frappe.get_meta("Address").has_field(f) for f in ("custom_additional_number", "additional_number")
@@ -313,6 +395,33 @@ def user_to_van_config(user: str | None) -> str | None:
         {"user": user},
         "parent",
     )
+
+
+_VAN_DEFAULT_SOURCES = {
+    # allow -> (child doctype, field) on Vansale Configuration; first row wins
+    "Warehouse": ("Vansale Configuration Warehouse", "warehouse"),
+    "Cost Center": ("Vansale Configuration Cost Center", "cost_center"),
+}
+
+
+def van_default(allow: str, user: str | None = None) -> str | None:
+    """The user's van value for a User Permission type (Warehouse, Cost Center,
+    Branch, Company), or None when the user has no van / the van leaves it blank.
+
+    Callers prefer this over the user's default User Permission and fall back
+    to that, so sites without a van row keep working as before.
+    """
+    van = user_to_van_config(user or frappe.session.user)
+    if not van:
+        return None
+    if allow in _VAN_DEFAULT_SOURCES:
+        child, field = _VAN_DEFAULT_SOURCES[allow]
+        return frappe.db.get_value(
+            child, {"parent": van, "parenttype": "Vansale Configuration"}, field, order_by="idx asc"
+        )
+    if allow in ("Branch", "Company"):
+        return frappe.db.get_value("Vansale Configuration", van, allow.lower()) or None
+    return None
 
 
 def rate_precision() -> int:
@@ -378,6 +487,38 @@ def collection_payment_entry_status(user: str | None = None) -> str:
     return cash_sale_settings(user)["payment_entry_status"]
 
 
+def update_stock_enabled(user: str | None = None) -> bool:
+    """Whether an invoice moves stock out of the salesman's warehouse (a van
+    sale) or not (an order taker: delivery is done from the branch).
+    Van → Vansale Settings (default on)."""
+    return _resolve_mode(
+        _van_value("update_stock_mode", user), default=global_flags().get("update_stock_on_invoice", True)
+    )
+
+
+def quotation_next_step() -> str:
+    """What a submitted quotation becomes in the app: "Sales Order",
+    "Sales Invoice" or "Both" (Vansale Settings, default Sales Order)."""
+    value = global_flags().get("quotation_next_step")
+    return value if value in ("Sales Order", "Sales Invoice", "Both") else "Sales Order"
+
+
+def selling_flow(user: str | None = None) -> dict:
+    """The selling-flow settings the app's screens follow."""
+    from vansale import steelforce
+
+    return {
+        "update_stock": update_stock_enabled(user),
+        "quotation_next_step": quotation_next_step(),
+        "return_reasons": steelforce.return_reason_options(),
+        "draft_sale_print": steelforce.draft_sale_printable(),
+        # Delivery person on cash sales (Steel Force drivers), when asked for.
+        "ask_driver": bool(global_flags().get("ask_driver")) and steelforce.has_driver_field(),
+        # Cash / credit chosen on sales orders (sites that keep it on the order).
+        "order_payment_type": steelforce.has_order_payment_mode(),
+    }
+
+
 def invoice_options() -> dict:
     """Invoice screen options from Vansale Settings: line discount shown, what
     the additional discount applies to (ERPNext `apply_discount_on`), and the
@@ -415,15 +556,47 @@ def return_without_invoice_allowed(user: str | None = None) -> bool:
 
 
 def print_formats(user: str | None = None) -> dict:
-    """Print formats the app uses: van → Vansale Settings → the app's own."""
+    """Print formats the app uses: van → Vansale Settings → (Steel Force) the
+    company's desk print format → the app's own.
+
+    Quotation / Sales Order have no app layout: they fall back to the
+    doctype's default print format (Customize Form), else Standard.
+    """
+    from vansale import steelforce
+
+    # Steel Force: what the company's desk prints (Company > Print Formats)
+    # when the van and Vansale Settings choose nothing.
+    company = van_default("Company", user) or frappe.defaults.get_user_default("Company", user or frappe.session.user)
+
+    def company_or(doctype: str, fallback: str) -> str:
+        return steelforce.company_print_format(company, doctype) or fallback
+
     return {
         "invoice": _van_or_global(
-            "invoice_print_format", "invoice_print_format", DEFAULT_INVOICE_PRINT_FORMAT, user
+            "invoice_print_format", "invoice_print_format",
+            company_or("Sales Invoice", DEFAULT_INVOICE_PRINT_FORMAT), user,
         ),
         "receipt": _van_or_global(
-            "receipt_print_format", "receipt_print_format", DEFAULT_RECEIPT_PRINT_FORMAT, user
+            "receipt_print_format", "receipt_print_format",
+            company_or("Payment Entry", DEFAULT_RECEIPT_PRINT_FORMAT), user,
+        ),
+        "quotation": _van_or_global(
+            "quotation_print_format", "quotation_print_format",
+            company_or("Quotation", _desk_print_format("Quotation")), user,
+        ),
+        "sales_order": _van_or_global(
+            "sales_order_print_format", "sales_order_print_format",
+            company_or("Sales Order", _desk_print_format("Sales Order")), user,
         ),
     }
+
+
+def _desk_print_format(doctype: str) -> str:
+    """The doctype's default print format as desk prints it, else Standard."""
+    fmt = frappe.get_meta(doctype).default_print_format
+    if fmt and not frappe.db.get_value("Print Format", fmt, "disabled"):
+        return fmt
+    return "Standard"
 
 
 def print_behaviour(user: str | None = None) -> dict:

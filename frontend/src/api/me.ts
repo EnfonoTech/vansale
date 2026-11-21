@@ -1,12 +1,22 @@
 import { apiCall } from "./client";
 
+/** Print format per document: van → Vansale Settings → the app's own / desk default. */
+export interface PrintFormats {
+  invoice: string;
+  receipt: string;
+  /** Older cached defaults have no quotation / order entry. */
+  quotation?: string;
+  sales_order?: string;
+}
+
 export interface ConfigDefaults {
   user: string;
   full_name: string;
   language: string;
   is_van_user: boolean;
   is_van_manager: boolean;
-  is_system_manager: boolean;
+  /** Administrator, or a user holding the System Manager role. Absent on a server older than this field. */
+  is_system_manager?: boolean;
   roles: string[];
   company: string | null;
   branch: string | null;
@@ -46,7 +56,7 @@ export interface ConfigDefaults {
   /** Returns without an original invoice allowed (setting). */
   return_without_invoice?: boolean;
   /** Print formats chosen in Vansale Settings / the van. */
-  print_formats?: { invoice: string; receipt: string };
+  print_formats?: PrintFormats;
   /** Print button: direct or preview; print after submit; copies. */
   /** pdf_button: missing on sessions from older servers = shown. */
   print?: { direct: boolean; after_submit: boolean; copies: number; pdf_button?: boolean; share_button?: boolean };
@@ -55,7 +65,44 @@ export interface ConfigDefaults {
     name_2: { field: string; label: string } | null;
     cr_number: boolean;
     additional_number: boolean;
+    /** A VAT number needs the CR number and a document photo (Steel Force). */
+    vat_needs_cr_and_document?: boolean;
+    /** Mobile number mandatory (the site bills only customers with a phone). */
+    mobile_required?: boolean;
+    /** B2B (company) customers may be made; false = B2C only (Steel Force: B2B Creator role). */
+    b2b?: boolean;
+    /** Shortest mobile accepted (Steel Force: 10 for a Saudi company's customer; 0 = none).
+     *  Missing on older servers: 10 when the mobile is required. */
+    mobile_min_digits?: number;
+    /** The company's country: the form's default country. */
+    country?: string | null;
   };
+  /** Selling-flow settings (Vansale Settings / van). Missing on older servers = old behaviour. */
+  selling_flow?: SellingFlow;
+  /** Approvals (Permission Manager) are installed on the site. Missing on older servers = off. */
+  approvals?: { enabled: boolean };
+  /** Steel Force "Loyalty" written off at payment, up to `max`; null / missing = not offered.
+   *  on_cash: a cash sale can carry it; on_collection: the collection screen can. A cheque always can. */
+  loyalty?: { max: number; on_cash: boolean; on_collection: boolean } | null;
+  /** sf_trading runs next to the app (Steel Force): its credit / approval rules are checked online. */
+  steelforce?: boolean;
+  /** Price lists a line may be priced from instead of the document's (Steel Force offer lists). */
+  row_price_lists?: string[];
+}
+
+export interface SellingFlow {
+  /** Invoice moves stock out of the salesman's warehouse (van sale); off = order taker. */
+  update_stock: boolean;
+  /** What a submitted quotation becomes in the app. */
+  quotation_next_step: "Sales Order" | "Sales Invoice" | "Both";
+  /** Return reasons the server accepts (the site's own list where it has one). */
+  return_reasons: string[];
+  /** A draft sale may be printed (some sites refuse it until submitted). */
+  draft_sale_print?: boolean;
+  /** Ask for the delivery person (driver) on cash sales. */
+  ask_driver?: boolean;
+  /** Sales Orders carry Cash / Credit on this site (chosen on the order form). */
+  order_payment_type?: boolean;
 }
 
 export function configDefaults() {

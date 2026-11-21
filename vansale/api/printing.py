@@ -26,7 +26,7 @@ from frappe.utils import cint
 
 from vansale.vansale.doctype.vansale_settings.vansale_settings import global_flags
 
-PRINTABLE = ("Sales Invoice", "Payment Entry")
+PRINTABLE = ("Sales Invoice", "Payment Entry", "Quotation", "Sales Order")
 MAX_COPIES = 10
 
 

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from "vue";
+import { useI18n } from "vue-i18n";
 import { useRoute, useRouter } from "vue-router";
 import { useOnline } from "@/app/online";
 import { useSessionStore } from "@/stores/session";
@@ -11,6 +12,7 @@ const router = useRouter();
 const session = useSessionStore();
 const sync = useSyncStore();
 const online = useOnline();
+const { t } = useI18n();
 
 const TITLES: Record<string, string> = {
   dashboard: "Home",
@@ -24,6 +26,18 @@ const TITLES: Record<string, string> = {
   "invoice-new": "New invoice",
   "invoice-detail": "Invoice",
   "invoice-return": "Sales return",
+  leads: "Leads",
+  "lead-new": "New lead",
+  "lead-edit": "Edit lead",
+  "lead-detail": "Lead",
+  quotations: "Quotations",
+  "quotation-new": "New quotation",
+  "quotation-edit": "Edit quotation",
+  "quotation-detail": "Quotation",
+  orders: "Sales orders",
+  "order-new": "New sales order",
+  "order-edit": "Edit sales order",
+  "order-detail": "Sales order",
   returns: "Returns",
   "return-new": "Bulk return",
   payments: "Payments",
@@ -34,6 +48,12 @@ const TITLES: Record<string, string> = {
   "sync-errors": "Sync errors",
   more: "More",
   "print-view": "Print",
+};
+
+/** Screens whose title is translated (the language files), so it is not in `TITLES`. */
+const TRANSLATED_TITLES: Record<string, string> = {
+  approvals: "approvalsInbox.title",
+  "approval-detail": "approvalsInbox.detailTitle",
 };
 
 /**
@@ -51,6 +71,18 @@ const PARENTS: Record<string, (r: RouteLike) => RouteTarget> = {
   customers: () => ({ name: "dashboard" }),
   invoices: () => ({ name: "dashboard" }),
   returns: () => ({ name: "dashboard" }),
+  leads: () => ({ name: "more" }),
+  quotations: () => ({ name: "more" }),
+  orders: () => ({ name: "more" }),
+  "lead-new": () => ({ name: "leads" }),
+  "lead-detail": () => ({ name: "leads" }),
+  "lead-edit": (r) => ({ name: "lead-detail", params: { name: String(r.params?.name ?? "") } }),
+  "quotation-new": () => ({ name: "quotations" }),
+  "quotation-detail": () => ({ name: "quotations" }),
+  "quotation-edit": (r) => ({ name: "quotation-detail", params: { name: String(r.params?.name ?? "") } }),
+  "order-new": () => ({ name: "orders" }),
+  "order-detail": () => ({ name: "orders" }),
+  "order-edit": (r) => ({ name: "order-detail", params: { name: String(r.params?.name ?? "") } }),
   "route-today": () => ({ name: "dashboard" }),
   "van-stock": () => ({ name: "dashboard" }),
   more: () => ({ name: "dashboard" }),
@@ -87,11 +119,16 @@ const PARENTS: Record<string, (r: RouteLike) => RouteTarget> = {
     if (dt === "Sales Invoice" && nm) {
       return { name: "invoice-detail", params: { name: nm } };
     }
+    if (dt === "Quotation" && nm) return { name: "quotation-detail", params: { name: nm } };
+    if (dt === "Sales Order" && nm) return { name: "order-detail", params: { name: nm } };
     return { name: "dashboard" };
   },
 };
 
-const title = computed(() => TITLES[String(route.name ?? "")] ?? "Van Sale");
+const title = computed(() => {
+  const name = String(route.name ?? "");
+  return TRANSLATED_TITLES[name] ? t(TRANSLATED_TITLES[name]) : (TITLES[name] ?? "Van Sale");
+});
 
 const subtitle = computed(() => {
   if (!session.defaults) return "";
@@ -113,10 +150,14 @@ const showBack = computed(() => {
     "invoice-new",
     "invoice-detail",
     "invoice-return",
+    "lead-new", "lead-detail", "lead-edit",
+    "quotation-new", "quotation-detail", "quotation-edit",
+    "order-new", "order-detail", "order-edit",
     "return-new",
     "payment-new",
     "sync-errors",
     "print-view",
+    "approval-detail",
   ].includes(r);
 });
 
@@ -134,6 +175,13 @@ const syncTone = computed(() => {
 
 function onBack() {
   const rn = String(route.name ?? "");
+  // A detail opened from the inbox goes back to it (and its tab); one opened
+  // from a link, with nothing behind it, goes to the inbox.
+  if (rn === "approval-detail") {
+    if (window.history.state?.back) router.back();
+    else void router.push({ name: "approvals" });
+    return;
+  }
   const parent = PARENTS[rn];
   if (parent) {
     void router.push(parent({ name: rn, params: route.params as Record<string, unknown> }));

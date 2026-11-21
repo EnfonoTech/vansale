@@ -26,6 +26,12 @@ const selected = ref<Set<string>>(new Set());
 const amount = ref<number | "">("");
 const mode = ref<string>("Cash");
 const reference = ref("");
+// The cheque's own date (a post-dated cheque is banked on it) / transfer date.
+// Sent with the reference; the server used the payment date before.
+const referenceDate = ref(
+  // Today on the phone's calendar (toISOString alone is UTC: yesterday before 3am in KSA).
+  new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10),
+);
 const remarks = ref("");
 const busy = ref(false);
 const loadingOutstanding = ref(false);
@@ -131,6 +137,12 @@ function statusTone(status: unknown): string {
 }
 
 const selectedList = computed(() => Array.from(selected.value));
+// Open total of what the payment goes to: the picked invoices, else all.
+const openTotal = computed(() =>
+  invoices.value
+    .filter((r) => !hasPicks.value || selected.value.has(String(r.name)))
+    .reduce((t, r) => t + (Number(r.outstanding_amount) || 0), 0),
+);
 const hasPicks = computed(() => selected.value.size > 0);
 const totalOutstanding = computed(() =>
   invoices.value.reduce((t, r) => t + (Number(r.outstanding_amount) || 0), 0),
@@ -138,22 +150,41 @@ const totalOutstanding = computed(() =>
 
 // Modes posting to a Bank account need a reference number (ERPNext requires No + Date).
 const needsReference = computed(() => Boolean(mops.value.find((m) => m.name === mode.value)?.needs_reference));
+// A branch cheque mode (Steel Force): a post-dated cheque, its number and date required.
+const isCheque = computed(() => Boolean(mops.value.find((m) => m.name === mode.value)?.pdc));
+// Steel Force "Loyalty": written off on the last invoice this payment clears.
+const loyalty = ref<number | null>(null);
+const loyaltyOpen = ref(false);
+const loyaltyAllowed = computed(() => Boolean(session.loyalty?.on_collection) && !advance.value);
+const loyaltyAmount = computed(() => (loyaltyAllowed.value ? Math.max(Number(loyalty.value) || 0, 0) : 0));
 
 async function submit() {
   if (!customer.value) { toasts.warn("Select customer"); return; }
   const n = Number(amount.value);
   if (!Number.isFinite(n) || n <= 0) { toasts.warn("Amount must be positive"); return; }
-  if (needsReference.value && !reference.value.trim()) {
-    toasts.warn(`Enter the reference number for ${mode.value}`);
+  if ((needsReference.value || isCheque.value) && !reference.value.trim()) {
+    toasts.warn(isCheque.value ? "Enter the cheque number" : `Enter the reference number for ${mode.value}`);
+    return;
+  }
+  if (isCheque.value && !referenceDate.value) { toasts.warn("Enter the cheque date"); return; }
+  if (loyaltyAmount.value > 0 && session.loyalty && loyaltyAmount.value > session.loyalty.max + 0.0001) {
+    toasts.warn(`Loyalty can be at most ${fmt(session.loyalty.max)}`);
+    return;
+  }
+  // More than the invoices: the rest would sit as an unallocated advance.
+  const over = !advance.value && invoices.value.length ? n - openTotal.value : 0;
+  if (over > 0.005 && !session.advancePayment) {
+    toasts.warn(`That is ${fmt(over)} more than the ${hasPicks.value ? "picked " : ""}invoices (${fmt(openTotal.value)}). Collect up to that amount.`);
     return;
   }
   const cust = customers.value.find((c) => c.name === customer.value);
   const ok = await confirmSubmit("Save payment?", [
     cust ? customerLabel(cust) : customer.value,
-    `${withCurrency(fmt(n))} · ${mode.value}`,
+    `${withCurrency(fmt(n))} · ${mode.value}${loyaltyAmount.value ? ` · loyalty ${fmt(loyaltyAmount.value)}` : ""}`,
     advance.value
       ? "Advance (not allocated)"
-      : hasPicks.value ? `For ${selectedList.value.length} invoice${selectedList.value.length === 1 ? "" : "s"}` : "Oldest invoices first",
+      : (hasPicks.value ? `For ${selectedList.value.length} invoice${selectedList.value.length === 1 ? "" : "s"}` : "Oldest invoices first")
+        + (over > 0.005 ? ` · ${fmt(over)} stays as advance` : ""),
   ], "Yes, save");
   if (!ok) return;
   busy.value = true;
@@ -163,9 +194,11 @@ async function submit() {
       paid_amount: n,
       mode_of_payment: mode.value as "Cash" | "Bank" | string,
       reference_no: reference.value || undefined,
+      reference_date: reference.value && referenceDate.value ? referenceDate.value : undefined,
       invoice_names: hasPicks.value && !advance.value ? selectedList.value : undefined,
       remarks: remarks.value || undefined,
       advance: advance.value ? 1 : undefined,
+      write_off_amount: loyaltyAmount.value > 0 ? loyaltyAmount.value : undefined,
     });
     toasts.success(
       res.queued
@@ -321,6 +354,29 @@ async function submit() {
         <span class="label">Reference {{ needsReference ? "(required)" : "(optional)" }}</span>
         <input v-model="reference" placeholder="Cheque / transaction no." />
       </label>
+      <label v-if="needsReference || isCheque || reference.trim()" class="field">
+        <span class="label">{{ isCheque ? "Cheque date" : "Cheque / transfer date" }}</span>
+        <input v-model="referenceDate" type="date" />
+      </label>
+      <template v-if="loyaltyAllowed">
+        <button v-if="!loyaltyOpen && !loyaltyAmount" type="button" class="link-btn loyalty-add" @click="loyaltyOpen = true">
+          <Icon name="plus" :size="14" /> Loyalty <span class="muted">(up to {{ fmt(session.loyalty?.max ?? 0) }})</span>
+        </button>
+        <div v-else class="loyalty-row">
+          <span class="loyalty-label">
+            <span>Loyalty</span>
+            <span class="muted xsmall">up to {{ fmt(session.loyalty?.max ?? 0) }}</span>
+          </span>
+          <input type="number" min="0" step="any" inputmode="decimal" v-model.number="loyalty"
+                 v-decimals="session.currencyPrecision" placeholder="0" aria-label="Loyalty" />
+          <button type="button" class="icon-only small" aria-label="Remove loyalty" @click="loyalty = null; loyaltyOpen = false">
+            <Icon name="x" :size="14" />
+          </button>
+        </div>
+        <p v-if="loyaltyAmount > 0 && Number(amount) > 0" class="muted xsmall loyalty-note">
+          Clears {{ fmt(Number(amount) + loyaltyAmount) }} on the invoices: {{ fmt(Number(amount)) }} paid + {{ fmt(loyaltyAmount) }} loyalty.
+        </p>
+      </template>
       <label class="field">
         <span class="label">Notes (optional)</span>
         <textarea v-model="remarks" rows="2" />
@@ -335,6 +391,16 @@ async function submit() {
 </template>
 
 <style scoped>
+.loyalty-add { all: unset; cursor: pointer; color: var(--primary); font-weight: 600; font-size: var(--text-sm); align-self: flex-start; }
+.loyalty-row {
+  display: flex; align-items: center; gap: 0.5rem;
+  padding: 0.45rem 0.45rem 0.45rem 0.75rem; border-radius: var(--radius-sm); background: var(--surface-muted);
+}
+.loyalty-label { flex: 1; min-width: 0; display: flex; flex-direction: column; font-size: var(--text-sm); font-weight: 500; }
+.loyalty-row input { flex: none; width: 7.5rem; text-align: end; background: var(--surface); }
+.loyalty-row input { appearance: textfield; -moz-appearance: textfield; }
+.loyalty-row input::-webkit-inner-spin-button, .loyalty-row input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+.loyalty-note { margin: 0; }
 .field { display: flex; flex-direction: column; gap: 0.3rem; }
 .label { font-size: var(--text-sm); color: var(--text-muted); font-weight: 500; }
 .seg { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; }

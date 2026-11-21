@@ -46,16 +46,36 @@ def upload(
     content_base64
         Pure base64 (no data-URL prefix).
     attach_to_doctype / attach_to_name
-        Optional — links the File to a parent doc.
+        Optional — links the File to a parent doc. Both are needed, and the
+        user must have write permission on that document.
     is_private
         1 → stored under ``/private/files/`` (recommended for signatures).
     """
+    if attach_to_doctype or attach_to_name:
+        if not (attach_to_doctype and attach_to_name):
+            frappe.throw(_("Give both the document type and the document name to attach to"))
+        if not frappe.has_permission(attach_to_doctype, "write", doc=attach_to_name):
+            frappe.throw(_("You cannot attach files to this document"), frappe.PermissionError)
+    return _save_file(filename, content_base64, attach_to_doctype, attach_to_name, is_private)
+
+
+def _save_file(
+    filename: str,
+    content_base64: str,
+    attach_to_doctype: str | None = None,
+    attach_to_name: str | None = None,
+    is_private: int = 0,
+) -> dict:
+    """Decode and store the blob as a File (the user's own File permissions
+    apply). Not an endpoint: a caller attaching to a document makes its own
+    permission check first (`upload` asks for write; the approvals' `attach`
+    asks for an open approval the user may act on)."""
     if not content_base64:
         frappe.throw(_("File content required"))
     try:
         raw = base64.b64decode(content_base64, validate=True)
-    except (binascii.Error, ValueError) as exc:
-        frappe.throw(_("Invalid base64 payload: {0}").format(str(exc)))
+    except (binascii.Error, ValueError):
+        frappe.throw(_("Invalid base64 payload"))
 
     doc: File = frappe.get_doc(
         {

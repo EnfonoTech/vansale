@@ -10,6 +10,7 @@ dynamic = ["version"]
 dependencies = [
     "bcrypt>=4.0.0",
     "python-dateutil>=2.8",
+    "pywebpush>=1.14",
 ]
 
 # System packages Chromium needs for "PDF same as browser print"

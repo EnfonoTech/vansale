@@ -11,6 +11,7 @@
 import { defineStore } from "pinia";
 import { isOnline } from "@/app/online";
 import type { ConfigDefaults } from "@/api/me";
+import { clearApprovalsCache } from "@/features/approvals/cache";
 
 const LS_KEY = "vansale.session";
 const PIN_WINDOW_MS = 2 * 60 * 60 * 1000; // 2 hours
@@ -81,6 +82,33 @@ export const useSessionStore = defineStore("session", {
     defaultCompany: (s) => s.defaults?.company ?? null,
     currency: (s) => s.defaults?.currency ?? null,
     isVanUser: (s) => Boolean(s.defaults?.is_van_user),
+    /**
+     * The app has its van screens (Home, Sales, Customers, Stock or Route):
+     * the user is a Van User or a Van Manager, a System Manager (or
+     * Administrator), or has a van assigned (`van_code`). A salesman set up
+     * with a van but without either role still sells from it, so the van alone
+     * counts: the role flags are not the only way in. An administrator had the
+     * van screens before approvals existed and keeps them. Anyone else, on a
+     * site with approvals, gets the approvals-only shell and no van endpoint
+     * is called for them.
+     *
+     * While the settings have not loaded (`defaults` is null) the answer is
+     * yes, like the other getters for unloaded settings, so the nav does not
+     * flicker and nobody is moved by a guess. Code that must not call a van
+     * endpoint before it knows (App.vue's cache warm-up) checks `defaults`
+     * itself as well.
+     */
+    hasVanShell: (s) =>
+      s.defaults == null
+        ? true
+        : Boolean(
+            s.defaults.is_van_user ||
+              s.defaults.is_van_manager ||
+              s.defaults.is_system_manager ||
+              s.defaults.van_code,
+          ),
+    /** Approvals (Permission Manager) are on for this site; off on older servers. */
+    approvalsEnabled: (s) => s.defaults?.approvals?.enabled === true,
     requireLocation: (s) => Boolean(s.defaults?.require_location),
     /**
      * Route planning is opt-out per van. Defaults to true while `defaults`
@@ -107,6 +135,12 @@ export const useSessionStore = defineStore("session", {
     showPdfButton: (s) => s.defaults?.print?.pdf_button !== false,
     showShareButton: (s) => s.defaults?.print?.share_button !== false,
     customerForm: (s) => s.defaults?.customer_form ?? null,
+    /** Steel Force loyalty (write-off at payment); null = not offered. */
+    loyalty: (s) => s.defaults?.loyalty ?? null,
+    /** Steel Force site (sf_trading's rules run on every save). */
+    steelforce: (s) => s.defaults?.steelforce === true,
+    /** Lists a line may be priced from (offer lists); empty = no choice per line. */
+    rowPriceLists: (s): string[] => s.defaults?.row_price_lists ?? [],
     splitPayment: (s) => Boolean(s.defaults?.split_payment),
     advancePayment: (s) => Boolean(s.defaults?.advance_payment),
     lineDiscount: (s) => s.defaults?.invoice_options?.line_discount !== false,
@@ -115,6 +149,15 @@ export const useSessionStore = defineStore("session", {
     paymentDelete: (s) => s.defaults?.payment_delete !== false,
     confirmSubmit: (s) => s.defaults?.confirm_submit === true,
     returnWithoutInvoice: (s) => Boolean(s.defaults?.return_without_invoice),
+    /** Invoice moves stock (van sale). On unless the server says otherwise. */
+    updateStock: (s) => s.defaults?.selling_flow?.update_stock !== false,
+    quotationNextStep: (s) => s.defaults?.selling_flow?.quotation_next_step ?? "Sales Order",
+    askDriver: (s) => s.defaults?.selling_flow?.ask_driver === true,
+    orderPaymentType: (s) => s.defaults?.selling_flow?.order_payment_type === true,
+    /** Draft sales may be printed; on unless the server says the site refuses it. */
+    draftSalePrint: (s) => s.defaults?.selling_flow?.draft_sale_print !== false,
+    /** Server's return reasons; null = use the app's built-in list. */
+    returnReasons: (s) => (s.defaults?.selling_flow?.return_reasons?.length ? s.defaults.selling_flow.return_reasons : null),
   },
   actions: {
     setLogin(payload: { user: string; fullName: string; email: string; language?: string }) {
@@ -171,6 +214,8 @@ export const useSessionStore = defineStore("session", {
       persist(this.$state);
     },
     logout() {
+      // The saved approvals inbox is the user's own: it goes with them.
+      clearApprovalsCache();
       this.$patch(initial());
       persist(this.$state);
     },

@@ -36,6 +36,8 @@
   "column_break_pricing",
   "default_customer_group",
   "default_territory",
+  "section_break_selling_flow",
+  "update_stock_mode",
   "section_break_payments",
   "cash_sale_posting_mode",
   "cash_payment_entry_status_mode",
@@ -49,6 +51,8 @@
   "section_break_printing",
   "invoice_print_format",
   "receipt_print_format",
+  "quotation_print_format",
+  "sales_order_print_format",
   "column_break_printing",
   "direct_print_mode",
   "print_after_submit_mode",
@@ -308,6 +312,18 @@
    "options": "Print Format"
   },
   {
+   "fieldname": "quotation_print_format",
+   "fieldtype": "Link",
+   "label": "Quotation print format",
+   "options": "Print Format"
+  },
+  {
+   "fieldname": "sales_order_print_format",
+   "fieldtype": "Link",
+   "label": "Sales Order print format",
+   "options": "Print Format"
+  },
+  {
    "fieldname": "column_break_printing",
    "fieldtype": "Column Break"
   },
@@ -341,11 +357,23 @@
    "fieldtype": "Int",
    "label": "Copies (0 = global)",
    "non_negative": 1
+  },
+  {
+   "fieldname": "section_break_selling_flow",
+   "fieldtype": "Section Break",
+   "label": "Selling flow"
+  },
+  {
+   "fieldname": "update_stock_mode",
+   "fieldtype": "Select",
+   "label": "Invoice updates stock",
+   "options": "Follow Global\nEnabled\nDisabled",
+   "default": "Follow Global"
   }
  ],
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-10-09 13:10:00.000000",
+ "modified": "2026-11-18 12:00:00.000000",
  "modified_by": "Administrator",
  "module": "Vansale",
  "name": "Vansale Configuration",

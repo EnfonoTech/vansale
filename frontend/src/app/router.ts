@@ -16,10 +16,13 @@
  * Guards:
  *   - Unauthenticated → /login
  *   - Authenticated but stale PIN → /pin (unlock mode)
+ *   - Signed in without the van app (not a Van User or Van Manager) → every van
+ *     screen, Home included, is /approvals: no van screen, no van endpoint
  */
 import { createRouter, createWebHashHistory, createWebHistory } from "vue-router";
 import type { RouteRecordRaw } from "vue-router";
 import { useSessionStore } from "@/stores/session";
+import { approvalsOnly, routeAllowedWithoutVan } from "@/features/approvals/inbox";
 import { isNative, needsSiteSetup } from "./platform";
 
 const WEB_BASE = import.meta.env.DEV ? "/" : "/vansale/";
@@ -148,6 +151,90 @@ const routes: RouteRecordRaw[] = [
     props: true,
   },
   {
+    path: "/quotations",
+    name: "quotations",
+    component: () => import("@/views/SellingListView.vue"),
+    meta: { requiresAuth: true, requiresPin: true },
+    props: () => ({ kind: "quotation" }),
+  },
+  {
+    path: "/quotation/new",
+    name: "quotation-new",
+    component: () => import("@/views/SellingFormView.vue"),
+    meta: { requiresAuth: true, requiresPin: true, wide: true },
+    props: () => ({ kind: "quotation" }),
+  },
+  {
+    path: "/quotation/:name",
+    name: "quotation-detail",
+    component: () => import("@/views/SellingDetailView.vue"),
+    meta: { requiresAuth: true, requiresPin: true },
+    props: (route) => ({ kind: "quotation", name: String(route.params.name) }),
+  },
+  {
+    path: "/quotation/:name/edit",
+    name: "quotation-edit",
+    component: () => import("@/views/SellingFormView.vue"),
+    meta: { requiresAuth: true, requiresPin: true, wide: true },
+    props: (route) => ({ kind: "quotation", name: String(route.params.name) }),
+  },
+  {
+    path: "/orders",
+    name: "orders",
+    component: () => import("@/views/SellingListView.vue"),
+    meta: { requiresAuth: true, requiresPin: true },
+    props: () => ({ kind: "order" }),
+  },
+  {
+    path: "/order/new",
+    name: "order-new",
+    component: () => import("@/views/SellingFormView.vue"),
+    meta: { requiresAuth: true, requiresPin: true, wide: true },
+    props: () => ({ kind: "order" }),
+  },
+  {
+    path: "/order/:name",
+    name: "order-detail",
+    component: () => import("@/views/SellingDetailView.vue"),
+    meta: { requiresAuth: true, requiresPin: true },
+    props: (route) => ({ kind: "order", name: String(route.params.name) }),
+  },
+  {
+    path: "/order/:name/edit",
+    name: "order-edit",
+    component: () => import("@/views/SellingFormView.vue"),
+    meta: { requiresAuth: true, requiresPin: true, wide: true },
+    props: (route) => ({ kind: "order", name: String(route.params.name) }),
+  },
+  {
+    path: "/leads",
+    name: "leads",
+    component: () => import("@/views/LeadListView.vue"),
+    meta: { requiresAuth: true, requiresPin: true },
+    props: false,
+  },
+  {
+    path: "/lead/new",
+    name: "lead-new",
+    component: () => import("@/views/LeadFormView.vue"),
+    meta: { requiresAuth: true, requiresPin: true },
+    props: false,
+  },
+  {
+    path: "/lead/:name",
+    name: "lead-detail",
+    component: () => import("@/views/LeadDetailView.vue"),
+    meta: { requiresAuth: true, requiresPin: true },
+    props: true,
+  },
+  {
+    path: "/lead/:name/edit",
+    name: "lead-edit",
+    component: () => import("@/views/LeadFormView.vue"),
+    meta: { requiresAuth: true, requiresPin: true },
+    props: true,
+  },
+  {
     path: "/route",
     name: "route-today",
     component: () => import("@/views/RouteTodayView.vue"),
@@ -175,6 +262,19 @@ const routes: RouteRecordRaw[] = [
     component: () => import("@/views/EditQueueEntryView.vue"),
     meta: { requiresAuth: true, requiresPin: true },
     props: true,
+  },
+  {
+    path: "/approvals",
+    name: "approvals",
+    component: () => import("@/views/ApprovalsView.vue"),
+    meta: { requiresAuth: true, requiresPin: true },
+  },
+  {
+    path: "/approvals/:doctype/:name",
+    name: "approval-detail",
+    component: () => import("@/views/ApprovalDetailView.vue"),
+    meta: { requiresAuth: true, requiresPin: true },
+    props: (route) => ({ doctype: String(route.params.doctype), name: String(route.params.name) }),
   },
   {
     path: "/more",
@@ -223,6 +323,13 @@ router.beforeEach((to) => {
   // history entry cannot resurrect a hidden module.
   if (to.name === "route-today" && session.defaults && !session.routeEnabled) {
     return { name: "dashboard", replace: true };
+  }
+  // A user without the van app has no van screen to show: they read van
+  // endpoints. Their app is Approvals and More, and a stale history entry or a
+  // deep link to any other screen lands on Approvals. Decided only once the
+  // user's settings are known, so a van user is never sent away by a guess.
+  if (approvalsOnly(session) && !routeAllowedWithoutVan(to.name)) {
+    return { name: "approvals", replace: true };
   }
   return true;
 });

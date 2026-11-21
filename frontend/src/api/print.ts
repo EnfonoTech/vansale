@@ -20,17 +20,19 @@ import { apiBase } from "@/app/platform";
 import { getCredentials, NetworkError, saveBlobToDevice } from "@/app/frappe";
 import { hasNativePrint, printPdfNative } from "@/app/native-print";
 import type { Router } from "vue-router";
+import type { PrintFormats } from "@/api/me";
 
 export const DEFAULT_SI_PRINT_FORMAT = "Vansale Tax Invoice";
 export const DEFAULT_PE_PRINT_FORMAT = "Vansale Payment Receipt";
 
 /** Print format for a doctype: the one chosen in Vansale Settings / the van
  *  (thermal or A4), else the app's own. */
-export function defaultPrintFormat(
-  doctype: string,
-  configured?: { invoice: string; receipt: string } | null,
-): string {
+export function defaultPrintFormat(doctype: string, configured?: PrintFormats | null): string {
   if (doctype === "Payment Entry") return configured?.receipt || DEFAULT_PE_PRINT_FORMAT;
+  // No app layout for these: the one set in the app, else the server's
+  // fallback (desk's default print format, else Standard).
+  if (doctype === "Quotation") return configured?.quotation || "Standard";
+  if (doctype === "Sales Order") return configured?.sales_order || "Standard";
   return configured?.invoice || DEFAULT_SI_PRINT_FORMAT;
 }
 
@@ -269,7 +271,7 @@ export async function openPrint(
   router: Router,
   doctype: string,
   name: string,
-  formats: { invoice: string; receipt: string } | null,
+  formats: PrintFormats | null,
   behaviour: PrintBehaviour | null,
 ): Promise<void> {
   if (behaviour?.direct) {

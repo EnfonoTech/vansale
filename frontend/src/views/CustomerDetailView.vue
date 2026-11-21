@@ -10,6 +10,7 @@ import { useRouteVisitStore } from "@/stores/routeVisit";
 import { useToastStore } from "@/stores/toasts";
 import Icon from "@/components/Icon.vue";
 import SarSymbol from "@/components/SarSymbol.vue";
+import CreditPanel from "@/components/CreditPanel.vue";
 
 const route = useRoute();
 const router = useRouter();
@@ -19,6 +20,8 @@ const toasts = useToastStore();
 
 const customer = ref<CustomerDetail | null>(null);
 const breakdown = computed(() => customer.value?.outstanding_breakdown ?? null);
+// Credit limit / used / overdue (+ Steel Force approval and credit days).
+const credit = computed(() => customer.value?.credit ?? null);
 const invoices = ref<Array<Record<string, unknown>>>([]);
 const loading = ref(false);
 const err = ref("");
@@ -71,6 +74,12 @@ function fmt(n: unknown): string {
 
 function newInvoice() {
   void router.push({ name: "invoice-new", query: { customer: customerName } });
+}
+function newQuotation() {
+  void router.push({ name: "quotation-new", query: { customer: customerName } });
+}
+function newOrder() {
+  void router.push({ name: "order-new", query: { customer: customerName } });
 }
 function newPayment() {
   void router.push({ name: "payment-new", query: { customer: customerName } });
@@ -169,7 +178,7 @@ async function onEndVisit() {
           </div>
           <button type="button" class="link-btn" @click="editContact">
             <Icon name="edit" :size="14" />
-            {{ customer.mobile_no || customer.email_id ? "Edit contact" : "Add phone / email" }}
+            {{ customer.mobile_no || customer.email_id ? "Contact & documents" : "Add phone / email / document" }}
           </button>
         </div>
       </section>
@@ -196,6 +205,9 @@ async function onEndVisit() {
           <strong class="tabular"><SarSymbol :code="session.currency" />{{ fmt(breakdown.total) }}</strong>
         </div>
       </section>
+      <section v-if="credit" class="card">
+        <CreditPanel :status="credit" />
+      </section>
       <p v-if="(customer.pending ?? 0) > 0" class="muted xsmall pending-note">
         <SarSymbol :code="session.currency" />{{ fmt(customer.pending ?? 0) }} collected, awaiting office approval
       </p>
@@ -209,6 +221,12 @@ async function onEndVisit() {
         </button>
         <button class="action-btn ghost" @click="printStatement">
           <Icon name="receipt" :size="18" /> Statement
+        </button>
+        <button class="action-btn ghost" @click="newQuotation">
+          <Icon name="receipt" :size="18" /> Quote
+        </button>
+        <button class="action-btn ghost" @click="newOrder">
+          <Icon name="bag" :size="18" /> Order
         </button>
       </section>
 
@@ -295,7 +313,7 @@ async function onEndVisit() {
 .outstanding[data-positive="true"] { background: var(--warning-soft); color: var(--warning); }
 .outstanding strong { font-size: var(--text-xl); font-variant-numeric: tabular-nums; }
 
-.actions-row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0.5rem; }
+.actions-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.5rem; }
 .action-btn { min-height: 3rem; font-size: var(--text-sm); padding: 0 0.4rem; }
 .action-btn.success { background: var(--success); }
 .action-btn.ghost { background: var(--surface-muted); color: var(--text); }

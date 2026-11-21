@@ -160,6 +160,7 @@ const totalCount = computed(() => rows.value.length);
           <span class="content">
             <strong class="name">{{ customerLabel(c) }}</strong>
             <span v-if="c.secondary_name" class="name-2">{{ c.secondary_name }}</span>
+            <span v-if="c.not_assigned" class="pill" data-tone="info">Not your customer</span>
             <!-- Details only; the customer ID shows only when it differs from the
                  name (on sites naming customers by name it just repeated it). -->
             <span v-if="metaParts(c).length" class="meta">

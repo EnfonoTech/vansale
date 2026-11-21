@@ -32,6 +32,7 @@ import { vDecimals } from "@/components/decimals";
 import { revealOnFocus } from "@/components/reveal";
 import { inputValue } from "@/components/liveInput";
 import { confirmSubmit, withCurrency } from "@/stores/confirm";
+import { precheckBeforeSubmit } from "@/api/precheck";
 
 const router = useRouter();
 const session = useSessionStore();
@@ -54,6 +55,8 @@ const customer = ref("");
 const items = ref<ItemRow[]>([]);
 const itemSearch = ref("");
 const lines = ref<Line[]>([]);
+// The site's own reasons when the server sends them (e.g. a reason master), else the app's list.
+const reasons = computed<string[]>(() => session.returnReasons ?? [...RETURN_REASONS]);
 const reason = ref("");
 const note = ref("");
 const busy = ref(false);
@@ -91,9 +94,13 @@ const refund = ref<RefundState>({ on: false, mode: "", amount: null, reference: 
 // Blank = the full credit; otherwise a partial refund, never more than the credit.
 function refundAmountError(): string | null {
   const a = refund.value.amount;
-  if (!refund.value.on || !totals.value?.refundable || a == null) return null;
+  if (!refund.value.on || !totals.value?.refundable) return null;
+  // No mode to pay with: refusing is better than silently keeping it as credit.
+  if (!refund.value.mode) return "No payment mode to refund with — choose \"Keep as credit\", or ask the office";
+  if (a == null) return null;
   if (!(a > 0)) return "Refund amount must be more than 0";
-  if (a > totals.value.grand_total + 0.005) return "Refund amount can't be more than the credit";
+  const max = totals.value.refund_max ?? totals.value.grand_total;
+  if (a > max + 0.005) return `Refund can be at most ${max.toFixed(2)} (the rest clears what the invoice still owes)`;
   return null;
 }
 function refundPayload() {
@@ -219,6 +226,12 @@ async function submit() {
   }
   const refundErr = refundAmountError();
   if (refundErr) { toasts.warn(refundErr); return; }
+  // Steel Force refuses a return for a credit customer whose documents are
+  // missing; say so before the return is sent.
+  busy.value = true;
+  const go = await precheckBeforeSubmit("Sales Invoice", customer.value, undefined, [], { isReturn: true });
+  busy.value = false;
+  if (!go) return;
   const cust = customers.value.find((c) => c.name === customer.value);
   const ok = await confirmSubmit("Submit return?", [
     cust ? customerLabel(cust) : customer.value,
@@ -239,6 +252,17 @@ async function submit() {
       refund: refundPayload(),
       discount_amount: discountValue() || undefined,
     });
+    if (res.needs_approval) {
+      // Steel Force return approval: kept as a draft, refund planned; it is
+      // posted when approved. Send it from its approval screen.
+      toasts.warn(`Return ${res.name} saved — it needs approval before it is posted. Send it for approval.`, 7000);
+      void router.replace(
+        session.approvalsEnabled
+          ? { name: "approval-detail", params: { doctype: "Sales Invoice", name: res.name } }
+          : { name: "invoice-detail", params: { name: res.name } },
+      );
+      return;
+    }
     toasts.success(`Credit Note ${res.name} · ${session.currency} ${money(Math.abs(res.grand_total))}`);
     const autoprint = session.printBehaviour?.after_submit ? { autoprint: "1" } : undefined;
     void router.replace({ name: "invoice-detail", params: { name: res.name }, query: autoprint });
@@ -379,7 +403,7 @@ onMounted(async () => {
       <span class="label">Reason *</span>
       <div class="reasons">
         <button
-          v-for="r in RETURN_REASONS"
+          v-for="r in reasons"
           :key="r"
           type="button"
           class="reason-chip"

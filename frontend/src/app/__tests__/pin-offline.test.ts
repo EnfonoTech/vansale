@@ -3,7 +3,7 @@
  * never stored in clear, and repeated wrong PINs stop offline unlock.
  */
 import { beforeEach, describe, expect, it } from "vitest";
-import { canUnlockOffline, forgetPin, rememberPin, verifyPinOffline } from "@/app/pin-offline";
+import { canUnlockOffline, forgetPin, forgetPinOfOthers, rememberPin, verifyPinOffline } from "@/app/pin-offline";
 
 const USER = "driver@example.com";
 
@@ -40,6 +40,25 @@ describe("offline PIN unlock", () => {
   it("is cleared on logout", async () => {
     await rememberPin(USER, "4821");
     forgetPin();
+    expect(canUnlockOffline(USER)).toBe(false);
+  });
+
+  it("is kept when the same user signs in again with the password", async () => {
+    await rememberPin(USER, "4821");
+    forgetPinOfOthers(USER);
+    expect(canUnlockOffline(USER)).toBe(true);
+    expect(await verifyPinOffline(USER, "4821")).toBe(true);
+  });
+
+  it("is dropped when another user signs in", async () => {
+    await rememberPin(USER, "4821");
+    forgetPinOfOthers("other@example.com");
+    expect(canUnlockOffline(USER)).toBe(false);
+    expect(window.localStorage.getItem("vansale.pinVerifier")).toBeNull();
+  });
+
+  it("does nothing when no PIN was stored", () => {
+    expect(() => forgetPinOfOthers(USER)).not.toThrow();
     expect(canUnlockOffline(USER)).toBe(false);
   });
 });

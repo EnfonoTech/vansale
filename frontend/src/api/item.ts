@@ -12,6 +12,8 @@ export interface ItemRow {
   standard_rate?: number;
   image?: string;
   stock_qty?: number;
+  /** 0 for a service / non-stock item (no stock to run out of). */
+  is_stock_item?: number;
   /** Set when the item sells in another unit than its stock unit. */
   sales_uom?: string | null;
   sales_cf?: number | null;
@@ -21,6 +23,8 @@ export interface ItemUom {
   uom: string;
   conversion_factor: number;
   price_list_rate: number;
+  /** Lowest rate the site accepts for this UOM (e.g. Steel Force's minimum price); absent = no rule. */
+  min_rate?: number;
 }
 
 export interface ItemDetail extends ItemRow {
@@ -59,6 +63,7 @@ export interface PriceForResult {
   uom: string | null;
   price_list: string | null;
   price_list_rate: number;
+  min_rate?: number | null;
 }
 
 /**
@@ -223,11 +228,17 @@ async function _writeDetail(doc: ItemDetail, customer?: string): Promise<void> {
   await tx.done;
 }
 
-export async function priceFor(itemCode: string, customer?: string, uom?: string): Promise<PriceForResult> {
+export async function priceFor(
+  itemCode: string,
+  customer?: string,
+  uom?: string,
+  priceList?: string | null,
+): Promise<PriceForResult> {
   const qs = new URLSearchParams();
   qs.set("item_code", itemCode);
   if (customer) qs.set("customer", customer);
   if (uom) qs.set("uom", uom);
+  if (priceList) qs.set("price_list", priceList);
 
   const fetchFromCache = async (): Promise<PriceForResult> => {
     const d = await db();
@@ -243,11 +254,16 @@ export async function priceFor(itemCode: string, customer?: string, uom?: string
     };
   };
 
-  if (!isOnline()) return await fetchFromCache();
+  // A line's own list is priced on the server only: the cache holds the
+  // document list's prices, which would be the wrong price for it.
+  if (!isOnline()) {
+    if (priceList) throw new NetworkError("Offline: the price list's prices need a connection");
+    return await fetchFromCache();
+  }
   try {
     return await apiCall<PriceForResult>("GET", `vansale.api.item.price_for?${qs.toString()}`);
   } catch (err) {
-    if (err instanceof NetworkError) return await fetchFromCache();
+    if (err instanceof NetworkError && !priceList) return await fetchFromCache();
     throw err;
   }
 }
@@ -264,4 +280,69 @@ export async function refreshCache(warehouse?: string): Promise<ItemRow[]> {
 export async function fromCache(): Promise<CachedItem[]> {
   const d = await db();
   return await d.getAll("item_cache");
+}
+
+
+// ─── Selling help on a line: last price and stock ──────────────────────────
+
+/** One past sale of an item. */
+export interface PastSale {
+  rate: number;
+  uom: string | null;
+  qty: number;
+  conversion_factor: number;
+  posting_date: string;
+  invoice: string;
+  customer: string;
+  customer_name: string;
+}
+
+export interface WarehouseStock {
+  warehouse: string;
+  warehouse_name: string;
+  /** Stock unit. */
+  qty: number;
+  /** The salesman's own warehouse (listed first). */
+  own: boolean;
+}
+
+export interface ItemInsight {
+  item_code: string;
+  stock_uom: string | null;
+  sales_uom: string | null;
+  sales_cf: number | null;
+  is_stock_item: number;
+  /** The cost centre (branch) the sales are limited to; null = the whole company. */
+  sales_scope: string | null;
+  /** Last sales of the item to this customer. */
+  to_customer: PastSale[];
+  /** Its recent sales to other customers (a year back). */
+  recent: PastSale[];
+  warehouses: WarehouseStock[];
+}
+
+export interface StockLevel {
+  /** Stock unit. */
+  qty: number;
+  is_stock_item: number;
+}
+
+/** Item → the last sale of it to this customer. Online only. */
+export function lastSales(customer: string, itemCodes: string[]): Promise<Record<string, PastSale>> {
+  const qs = new URLSearchParams({ customer, item_codes: JSON.stringify(itemCodes) });
+  return apiCall<Record<string, PastSale>>("GET", `vansale.api.item.last_sales?${qs.toString()}`);
+}
+
+/** Item → stock in the salesman's warehouse. Online only. */
+export function stockLevels(itemCodes: string[], warehouse?: string): Promise<Record<string, StockLevel>> {
+  const qs = new URLSearchParams({ item_codes: JSON.stringify(itemCodes) });
+  if (warehouse) qs.set("warehouse", warehouse);
+  return apiCall<Record<string, StockLevel>>("GET", `vansale.api.item.stock_levels?${qs.toString()}`);
+}
+
+/** One item on tap: its sales to this customer and others, and its stock everywhere. */
+export function itemInsight(itemCode: string, customer?: string): Promise<ItemInsight> {
+  const qs = new URLSearchParams({ item_code: itemCode });
+  if (customer) qs.set("customer", customer);
+  return apiCall<ItemInsight>("GET", `vansale.api.item.insight?${qs.toString()}`);
 }

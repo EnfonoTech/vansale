@@ -16,6 +16,8 @@ export interface InvoiceItem {
   uom?: string;
   conversion_factor?: number;
   warehouse?: string;
+  /** The line's own price list (Steel Force offer list); missing = the document's. */
+  price_list?: string | null;
 }
 
 export interface InvoicePayload {
@@ -25,18 +27,31 @@ export interface InvoicePayload {
   remarks?: string;
   update_stock?: 0 | 1;
   submit?: 0 | 1;
-  payment_type?: "cash" | "credit";
+  payment_type?: "cash" | "credit" | "cheque";
   mode_of_payment?: string;
   /** Split cash payment (setting): a row without amount takes what's left. */
   payments?: PaymentRow[];
   discount_amount?: number;
   apply_discount_on?: "Grand Total" | "Net Total";
+  /** Cash sale left for the delivery person to collect (needs `driver`). */
+  collect_later?: 0 | 1;
+  /** payment_type "cheque": the post-dated cheque's number and date. */
+  cheque_no?: string;
+  cheque_date?: string;
+  /** Part of the sale paid by the cheque (missing = all), and how the rest is paid now. */
+  cheque_amount?: number;
+  /** Delivery person on a cash sale (sites that ask for it). */
+  driver?: string;
+  /** Steel Force "Loyalty": written off when the customer pays. */
+  write_off_amount?: number;
 }
 
 export interface PaymentRow {
   mode_of_payment: string;
   amount?: number | null;
   reference_no?: string | null;
+  /** Cheque date (post-dated cheque sale). */
+  reference_date?: string | null;
 }
 
 export interface SavedInvoice {
@@ -111,6 +126,8 @@ export interface InvoiceDetailItem {
   item_name: string;
   qty: number;
   rate: number;
+  /** After the invoice's additional discount, tax left out (ERPNext). */
+  net_rate?: number;
   price_list_rate: number;
   discount_percentage: number;
   discount_amount: number;
@@ -118,6 +135,8 @@ export interface InvoiceDetailItem {
   uom: string | null;
   conversion_factor?: number;
   stock_uom?: string | null;
+  /** The line's own price list (Steel Force offer list), if it has one. */
+  price_list?: string | null;
   warehouse: string | null;
 }
 
@@ -140,8 +159,19 @@ export interface InvoiceDetail {
   is_return: number;
   /** 1 = cash (POS) invoice. Absent on servers older than this field. */
   is_pos?: number;
+  /** The order this invoice was made from (it already counts against the credit limit). */
+  sales_order?: string | null;
+  /** Delivery person on a cash sale (Steel Force). */
+  driver?: string | null;
+  driver_name?: string | null;
+  /** Advance already paid (e.g. on the order the invoice was made from). */
+  total_advance?: number;
+  /** Steel Force "Loyalty" chosen on a draft. */
+  write_off_amount?: number;
+  /** Steel Force return window for this sale; missing / null = none. */
+  return_window?: { blocked: boolean; past_window: boolean; days: number; age: number | null; can_override: boolean } | null;
   /** Cash or credit, whichever way the cash sale is posted (POS or Payment Entry). */
-  payment_type?: "cash" | "credit";
+  payment_type?: "cash" | "credit" | "cheque";
   mode_of_payment?: string | null;
   payments?: PaymentRow[];
   grand_total: number;
@@ -191,7 +221,9 @@ export async function submitDraft(name: string, modeOfPayment?: string): Promise
  * (Frappe enforces this server-side). Uses `frappe.client.delete`.
  */
 export async function deleteDraft(name: string): Promise<void> {
-  await apiCall("POST", "frappe.client.delete", {
+  // The app's own endpoint: a Van User has no delete right on Sales Invoice
+  // (frappe.client.delete always failed); it deletes his own draft only.
+  await apiCall("POST", "vansale.api.selling.delete_draft", {
     doctype: "Sales Invoice",
     name,
   });
@@ -206,10 +238,16 @@ export interface UpdateDraftPayload {
   discount_amount?: number;
   apply_discount_on?: "Grand Total" | "Net Total";
   submit?: 0 | 1;
-  payment_type?: "cash" | "credit";
+  payment_type?: "cash" | "credit" | "cheque";
   mode_of_payment?: string;
   payments?: PaymentRow[];
   warehouse?: string;
+  collect_later?: 0 | 1;
+  cheque_no?: string;
+  cheque_date?: string;
+  cheque_amount?: number;
+  write_off_amount?: number;
+  driver?: string;
 }
 
 /**
@@ -281,16 +319,17 @@ export interface ReturnPayload {
 
 export interface SavedReturn extends SavedInvoice {
   is_return: number;
+  /** Steel Force: saved as a draft (refund planned) for its return approval to submit. */
+  needs_approval?: boolean;
 }
 
 /** Create a Sales Return (Credit Note) against a submitted invoice.
  *  Offline path not supported — returns require server-side stock validation. */
 export async function returnAgainst(payload: ReturnPayload): Promise<SavedReturn> {
   const clientId = genUuid();
-  const clientTs = new Date().toISOString();
+  // Online: no time sent, the server dates it (a phone clock can't move it).
   const res = await apiCall<SavedReturn>("POST", "vansale.api.invoice.return_against", {
     client_id: clientId,
-    posting_ts: clientTs,
     ...payload,
   });
   const sync = useSyncStore();
@@ -306,9 +345,10 @@ export async function save(payload: InvoicePayload): Promise<SavedInvoice> {
 
   if (isOnline()) {
     try {
+      // Online: no time sent, the server dates it. The queued copy below
+      // keeps the time of the sale (the server accepts it within limits).
       const res = await apiCall<SavedInvoice>("POST", "vansale.api.invoice.save", {
         client_id: clientId,
-        posting_ts: clientTs,
         ...payload,
       });
       const sync = useSyncStore();
@@ -361,7 +401,7 @@ export async function returnWithoutInvoice(payload: {
   const res = await apiCall<SavedReturn & { references?: string[] }>(
     "POST",
     "vansale.api.sales_return.save_without_invoice",
-    { client_id: clientId, posting_ts: new Date().toISOString(), submit: 1, ...payload },
+    { client_id: clientId, submit: 1, ...payload },
   );
   void useSyncStore().refresh();
   return { ...res, clientId };
@@ -380,6 +420,8 @@ export interface ReturnTotals {
   grand_total: number;
   /** Credit keeps its own balance → can be refunded now (bulk, or a paid invoice). */
   refundable?: boolean;
+  /** What can be paid back: the credit less what the invoice still owes. */
+  refund_max?: number;
   original_outstanding?: number | null;
 }
 
@@ -423,7 +465,6 @@ export async function refundCreditNote(payload: {
 }): Promise<{ payment_entry: string; docstatus?: number; idempotent_replay?: boolean }> {
   return apiCall("POST", "vansale.api.sales_return.refund", {
     client_id: genUuid(),
-    posting_ts: new Date().toISOString(),
     ...payload,
   });
 }
