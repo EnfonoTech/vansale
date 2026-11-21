@@ -420,11 +420,17 @@ def list_mine(limit: int = 50, search: Optional[str] = None) -> list[dict]:
     # Settings "Office roles", default System / Van Manager) see all.
     # Computed up front because get_list's or_filters are AND-ed with
     # filters; search stays an AND-layer over that set.
-    if not is_office_user(default_roles={"System Manager", "Van Manager"}):
-        allowed = _sales_person_customers(current_user_sales_person())
-        if not allowed:
+    office = is_office_user(default_roles={"System Manager", "Van Manager"})
+    own = None if office else _sales_person_customers(current_user_sales_person())
+    # Setting "Customers a salesman finds" = "Own list, search all": a search
+    # reaches every customer the desk lets him see (company / branch access,
+    # sf_trading's rule) — a branch customer nobody assigned to him can still
+    # be sold to, as on the desk. The list itself stays his own customers.
+    search_all = bool(search) and _search_all_customers()
+    if own is not None and not search_all:
+        if not own:
             return []
-        filters["name"] = ["in", list(allowed)]
+        filters["name"] = ["in", list(own)]
 
     name_2, vat, title = customer_name_2_field(), _vat_field(), _title_field()
     fields = _LIST_FIELDS + [f for f in {name_2, vat, title} if f]
@@ -466,7 +472,15 @@ def list_mine(limit: int = 50, search: Optional[str] = None) -> list[dict]:
         r["customer_name_2"] = r.get(name_2) if name_2 else None
         r["vat_number"] = (r.get(vat) if vat else None) or r.get("tax_id")
         r["display_name"], r["secondary_name"] = _display_names(r)
+        # Found by the wider search, not one of his own customers.
+        r["not_assigned"] = own is not None and r.name not in own
     return rows
+
+
+def _search_all_customers() -> bool:
+    from vansale.vansale.doctype.vansale_settings.vansale_settings import global_flags
+
+    return global_flags().get("customer_scope") == "Own list, search all"
 
 
 @frappe.whitelist(methods=["POST"])
@@ -529,12 +543,16 @@ def save_address(
 
 
 @frappe.whitelist(methods=["POST"])
-def save_contact(customer: str, mobile_no: str | None = None, email_id: str | None = None) -> dict:
-    """Set the customer's mobile / email.
+def save_contact(
+    customer: str, mobile_no: str | None = None, email_id: str | None = None, phone_2: str | None = None
+) -> dict:
+    """Set the customer's mobile / email, and a second phone number.
 
     In ERPNext these live on the customer's primary Contact (Customer.mobile_no
     and email_id only copy it), so update that Contact, or create one and make
-    it primary when the customer has none.
+    it primary when the customer has none. `phone_2` (None = leave as is,
+    "" = remove) is a second number on that Contact: Steel Force bills a
+    credit customer only with two numbers on file.
     """
     check_read("Customer", customer)
     cust = frappe.get_doc("Customer", customer)
@@ -564,6 +582,15 @@ def save_contact(customer: str, mobile_no: str | None = None, email_id: str | No
             contact.add_email(email_id, is_primary=1)
     else:
         contact.set("email_ids", [e for e in contact.email_ids if not e.is_primary])
+    if phone_2 is not None:
+        phone_2 = phone_2.strip()
+        other = next((p for p in contact.phone_nos if not p.is_primary_mobile_no), None)
+        if phone_2 and other:
+            other.phone = phone_2
+        elif phone_2:
+            contact.add_phone(phone_2, is_primary_phone=1)
+        elif other:
+            contact.phone_nos.remove(other)
     contact.save()
 
     # Customer copies the primary contact's mobile / email (fetch_from).
@@ -572,7 +599,36 @@ def save_contact(customer: str, mobile_no: str | None = None, email_id: str | No
         customer,
         {"customer_primary_contact": contact.name, "mobile_no": mobile_no or None, "email_id": email_id or None},
     )
-    return {"contact": contact.name, "mobile_no": mobile_no, "email_id": email_id}
+    return {"contact": contact.name, "mobile_no": mobile_no, "email_id": email_id, "phone_2": _second_phone(contact.name)}
+
+
+def _second_phone(contact: str | None) -> str | None:
+    """The primary Contact's other number (not its mobile), if any."""
+    if not contact:
+        return None
+    return frappe.db.get_value(
+        "Contact Phone", {"parent": contact, "parenttype": "Contact", "is_primary_mobile_no": 0}, "phone",
+        order_by="idx asc",
+    )
+
+
+@frappe.whitelist(methods=["POST"])
+def attach_document(customer: str, attachment: dict, document_type: str | None = None) -> dict:
+    """A photo / PDF of a customer document (CR, VAT certificate, ID …),
+    attached to the Customer (private). Steel Force bills a credit customer only
+    with a document on file, and wants a VAT customer's certificate on its VAT
+    Certificate row; the salesman can add it from the van. The Customer itself
+    is not saved, so an approved customer is not sent back for approval."""
+    check_read("Customer", customer)
+    frappe.has_permission("Customer", "write", customer, throw=True)
+    if not attachment:
+        frappe.throw(_("Choose a file"))
+    file_url = _attach_document(customer, attachment)
+    vat = _vat_field()
+    if vat and frappe.db.get_value("Customer", customer, vat):
+        steelforce.link_vat_document(customer, file_url)
+    frappe.db.commit()
+    return {"file_url": file_url}
 
 
 @frappe.whitelist(methods=["GET"])
@@ -615,6 +671,8 @@ def detail(name: str) -> dict:
         "territory": doc.territory,
         "mobile_no": doc.mobile_no,
         "email_id": doc.email_id,
+        "phone_2": _second_phone(doc.customer_primary_contact),
+        "documents": frappe.db.count("File", {"attached_to_doctype": "Customer", "attached_to_name": doc.name}),
         "tax_id": doc.tax_id,
         "default_currency": doc.default_currency,
         "addresses": addresses,

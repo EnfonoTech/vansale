@@ -14,7 +14,12 @@ export interface PrecheckLine {
   item_code: string;
   item_name?: string;
   rate: number;
+  /** The rate after the invoice's additional discount, tax left out (ERPNext
+   *  `net_rate`): what the minimum price is checked on. Missing = `rate`. */
+  net_rate?: number;
   conversion_factor?: number;
+  /** The line's own price list: its minimum applies. */
+  price_list?: string | null;
 }
 
 export interface PrecheckResult {
@@ -27,6 +32,8 @@ export interface PrecheckResult {
 export interface PrecheckCredit {
   amount?: number;
   fromOrder?: boolean;
+  /** A return (credit note): only the customer gates that also refuse a return. */
+  isReturn?: boolean;
 }
 
 export function precheck(
@@ -43,6 +50,7 @@ export function precheck(
     lines,
     amount: credit.amount ?? 0,
     from_order: credit.fromOrder ? 1 : 0,
+    is_return: credit.isReturn ? 1 : 0,
   });
 }
 

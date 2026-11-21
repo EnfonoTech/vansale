@@ -55,6 +55,7 @@
   "section_break_customer",
   "customer_name_2_field",
   "cr_number_field",
+  "customer_scope",
   "section_break_help",
   "help_html"
  ],
@@ -346,6 +347,13 @@
    "label": "CR number field"
   },
   {
+   "default": "Own customers",
+   "fieldname": "customer_scope",
+   "fieldtype": "Select",
+   "label": "Customers a salesman finds",
+   "options": "Own customers\nOwn list, search all"
+  },
+  {
    "fieldname": "credit_needs_limit",
    "fieldtype": "Check",
    "label": "Credit sale only for customers with a credit limit",
@@ -361,7 +369,7 @@
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-11-18 12:00:00.000000",
+ "modified": "2026-11-21 12:00:00.000000",
  "modified_by": "Administrator",
  "module": "Vansale",
  "name": "Vansale Settings",

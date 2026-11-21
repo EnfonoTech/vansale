@@ -50,6 +50,30 @@ def record_outbox(
     doc.save(ignore_permissions=True)
 
 
+_DELETABLE = ("Sales Invoice", "Quotation", "Sales Order")
+
+
+@frappe.whitelist(methods=["POST"])
+def delete_draft(doctype: str, name: str) -> dict:
+    """Delete a draft invoice / quotation / order: the salesman's own (an
+    office user any). A Van User has no delete right on Sales Invoice, and a
+    plain delete right on Quotation / Sales Order would let him delete other
+    salesmen's drafts; this endpoint does it with the owner check instead."""
+    from vansale.api.me import is_office_user
+
+    if doctype not in _DELETABLE:
+        frappe.throw(_("Cannot delete a {0} here").format(doctype))
+    doc = frappe.get_doc(doctype, name)
+    if cint(doc.docstatus) != 0:
+        frappe.throw(_("Only a draft can be deleted"))
+    office = is_office_user(default_roles={"System Manager", "Van Manager"})
+    if doc.owner != frappe.session.user and not office:
+        frappe.throw(_("You can only delete your own drafts"), frappe.PermissionError)
+    frappe.delete_doc(doctype, name, ignore_permissions=True)
+    frappe.db.commit()
+    return {"deleted": True, "name": name}
+
+
 def own_draft(doctype: str, name: str, action: str):
     """Load a draft the user may change: theirs, or one they hold the permission for."""
     if not name:
@@ -117,6 +141,7 @@ def line_rows(doc) -> list[dict]:
             "amount": flt(i.amount),
             "warehouse": i.get("warehouse"),
             "delivered_qty": flt(i.get("delivered_qty")),
+            "price_list": i.get("custom_price_list"),
         }
         for i in doc.items
     ]

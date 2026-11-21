@@ -45,6 +45,7 @@ function onChangePin() {
  * names across sites. Credentials are per-site too, so this always logs out.
  */
 async function onChangeSite() {
+  await sync.refresh();
   if (sync.pending > 0) {
     await confirm.ask({
       title: "Sync first",
@@ -123,7 +124,9 @@ const initials = computed(() => {
 
 async function onLogout() {
   // Same guard as changing server: queued sales would otherwise drain under
-  // the next user's login and post as that user.
+  // the next user's login and post as that user. Counted from the queue
+  // itself (the badge count is 0 after a cold start until it refreshes).
+  await sync.refresh();
   if (sync.pending > 0) {
     await confirm.ask({
       title: "Sync first",

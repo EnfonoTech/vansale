@@ -7,6 +7,8 @@ import Icon from "@/components/Icon.vue";
 import ListSearch from "@/components/ListSearch.vue";
 import SarSymbol from "@/components/SarSymbol.vue";
 import CustomerName from "@/components/CustomerName.vue";
+import { currentUser, getAllEntries } from "@/offline/queue";
+import type { QueuedInvoice } from "@/offline/db";
 
 const router = useRouter();
 const session = useSessionStore();
@@ -22,6 +24,21 @@ watch(search, () => {
 });
 
 const CACHE_KEY = "vansale.invoices.v1";
+
+// Sales saved offline and not yet on the server: shown above the list, so a
+// salesman doesn't think the sale was lost (and make it again).
+const queued = ref<QueuedInvoice[]>([]);
+async function loadQueued() {
+  try {
+    const me = currentUser();
+    queued.value = (await getAllEntries<QueuedInvoice>("invoice_queue"))
+      .filter((e) => e.status !== "dismissed" && (!e.owner || !me || e.owner === me))
+      .sort((a, b) => b.createdAt - a.createdAt);
+  } catch {
+    queued.value = [];
+  }
+}
+const queuedLines = (e: QueuedInvoice) => ((e.payload.items as unknown[]) ?? []).length;
 
 async function load() {
   err.value = "";
@@ -52,7 +69,10 @@ async function load() {
   }
 }
 
-onMounted(load);
+onMounted(() => {
+  void loadQueued();
+  void load();
+});
 
 function fmt(n: unknown): string {
   const num = typeof n === "number" ? n : Number(n) || 0;
@@ -82,6 +102,25 @@ function tone(status: unknown): string {
 
     <p v-if="err" class="error">{{ err }}</p>
 
+    <ul v-if="queued.length && !search.trim()" class="list">
+      <li
+        v-for="q in queued"
+        :key="q.clientId"
+        class="item queued"
+        role="button"
+        tabindex="0"
+        @click="router.push({ name: 'sync-errors' })"
+        @keyup.enter="router.push({ name: 'sync-errors' })"
+      >
+        <div class="body">
+          <strong>{{ q.customerName || q.payload.customer }}</strong>
+          <span class="muted xsmall">Saved offline · {{ new Date(q.createdAt).toLocaleString() }} · {{ queuedLines(q) }} line{{ queuedLines(q) === 1 ? "" : "s" }}</span>
+        </div>
+        <div class="right">
+          <span class="pill" :data-tone="q.lastError ? 'danger' : 'info'">{{ q.lastError ? "Not sent" : "Waiting to send" }}</span>
+        </div>
+      </li>
+    </ul>
     <div v-if="loading && rows.length === 0" class="stack">
       <div class="skeleton" style="height:3.25rem" />
       <div class="skeleton" style="height:3.25rem" />
@@ -122,6 +161,7 @@ function tone(status: unknown): string {
 </template>
 
 <style scoped>
+.queued { border-inline-start: 3px solid var(--info, var(--primary)); }
 .toolbar { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0.5rem; align-items: center; }
 .new-btn { height: 2.75rem; min-height: 0; padding: 0 0.95rem; white-space: nowrap; }
 

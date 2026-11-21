@@ -195,6 +195,173 @@ def copy_to_return(doc, original) -> None:
             doc.set(field, original.get(field))
 
 
+def _sees_every_item() -> bool:
+    user = frappe.session.user
+    return user == "Administrator" or "System Manager" in frappe.get_roles(user)
+
+
+def company_items(company: Optional[str]) -> Optional[set]:
+    """Steel Force: the items of `company` (an Item Default row for it), the
+    ones sf_trading shows a branch user; None = no limit (other sites, a
+    System Manager)."""
+    if not is_active() or not company or _sees_every_item():
+        return None
+    try:
+        from sf_trading.company_items import item_codes_for_companies
+    except ImportError:
+        return None
+    return set(item_codes_for_companies([company]))
+
+
+def item_in_company(item_code: str, company: Optional[str]) -> bool:
+    """Steel Force: the item belongs to `company` (see company_items)."""
+    if not is_active() or not company or _sees_every_item():
+        return True
+    if frappe.db.exists("Item Default", {"parent": item_code, "parenttype": "Item", "company": company}):
+        return True
+    return bool(frappe.db.get_value("Item", item_code, "is_fixed_asset"))
+
+
+def branch_selling_list(price_list: Optional[str]) -> Optional[str]:
+    """Steel Force: the selling price list a document of the van's branch is
+    priced from. sf_trading allows only the branch's own lists (Branch
+    Configuration) and refuses any other on save, so a list outside that set
+    is replaced by the branch's default, as its form does. Unchanged
+    elsewhere, or where the branch names no lists."""
+    if not is_active():
+        return price_list
+    from vansale.api.me import van_default
+
+    branch = van_default("Branch")
+    if not branch:
+        return price_list
+    try:
+        from sf_trading.branch_price_list import allowed_price_lists, default_price_list
+    except ImportError:
+        return price_list
+    allowed = allowed_price_lists(branch, "selling")
+    if not allowed or price_list in allowed:
+        return price_list
+    return default_price_list(branch, "selling") or price_list
+
+
+def row_price_lists() -> list[str]:
+    """Steel Force: the selling price lists a line may name for itself (an
+    offer list next to the branch's default, sf_trading's per-row Price List,
+    `custom_price_list` on Quotation / Sales Order / Sales Invoice items).
+    The branch's own lists, when it has more than one; else none."""
+    if not is_active() or not frappe.get_meta("Sales Invoice Item").has_field("custom_price_list"):
+        return []
+    from vansale.api.me import van_default
+
+    branch = van_default("Branch")
+    if not branch:
+        return []
+    try:
+        from sf_trading.branch_price_list import allowed_price_lists, default_price_list
+    except ImportError:
+        return []
+    allowed = list(allowed_price_lists(branch, "selling") or [])
+    if len(allowed) < 2:
+        return []
+    default = default_price_list(branch, "selling")
+    return sorted(allowed, key=lambda name: (name != default, name))
+
+
+def row_price_list(price_list: Optional[str]) -> Optional[str]:
+    """A line's own price list, checked: one of `row_price_lists()`, else refused."""
+    price_list = (price_list or "").strip()
+    if not price_list:
+        return None
+    if price_list not in row_price_lists():
+        frappe.throw(frappe._("Price list {0} is not one of your branch's lists").format(price_list))
+    return price_list
+
+
+def branch_prices(rows: list, name_of=lambda row: row[0]) -> list:
+    """Steel Force: Item Price rows as a document of the van's branch sees
+    them (sf_trading's `visible`): prices limited to other branches dropped,
+    the branch's own ahead of the general ones. Unchanged elsewhere."""
+    if not is_active() or not rows:
+        return rows
+    try:
+        from sf_trading.item_price_branch import table_ready, visible
+    except ImportError:
+        return rows
+    if not table_ready():
+        return rows
+    from vansale.api.me import van_default
+
+    return visible(rows, van_default("Branch"), name_of=name_of)
+
+
+def company_print_format(company: Optional[str], doctype: str) -> Optional[str]:
+    """Steel Force: the print format the company's desk prints `doctype` with
+    (Company > Print Formats, sf_trading), when set and enabled; None else."""
+    if not is_active() or not company or not frappe.db.table_exists("Company Print Format"):
+        return None
+    fmt = frappe.db.get_value(
+        "Company Print Format",
+        {"parent": company, "parenttype": "Company", "document_type": doctype},
+        "print_format",
+    )
+    if fmt and not frappe.db.get_value("Print Format", fmt, "disabled"):
+        return fmt
+    return None
+
+
+def return_needs_approval(doc) -> bool:
+    """Steel Force: a return sf_trading lets through only by its approval chain
+    (Return Approval on, and over the limit when limited by amount)."""
+    if not is_active():
+        return False
+    try:
+        from sf_trading.sales_return import needs_approval
+    except ImportError:
+        return False
+    return bool(needs_approval(doc))
+
+
+def plan_refund(doc, refund: Optional[dict]) -> None:
+    """Steel Force: a return waiting for approval cannot be paid yet (ERPNext
+    refuses a Payment Entry against a draft), so the refund the salesman
+    agreed is kept on the return as sf_trading's plan, and paid when the
+    approval submits it — as the desk does."""
+    if not refund or not refund.get("mode_of_payment"):
+        return
+    from frappe import _
+    from frappe.utils import flt
+    from sf_trading.planned_payment import refundable_amount, set_planned_payments
+
+    mode = refund["mode_of_payment"]
+    allowed = branch_payment_modes(doc.company, is_return=1)
+    if allowed is not None and mode not in allowed:
+        frappe.throw(_("Mode of Payment {0} is not used for refunds at your branch").format(mode))
+    amount = flt(refund.get("amount")) or flt(refundable_amount(doc))
+    set_planned_payments(doc.name, [{"mode_of_payment": mode, "amount": amount}])
+    doc.reload()
+
+
+def return_window(invoice) -> Optional[dict]:
+    """Steel Force's return window for a submitted sale (sf_trading's own
+    `window_state`): {blocked, past_window, days, age, can_override}, or None
+    where there is no window (other sites, the switch off, a return)."""
+    if not is_active() or invoice.get("is_return") or int(invoice.get("docstatus") or 0) != 1:
+        return None
+    try:
+        from sf_trading.sales_return import window_enabled, window_state
+    except ImportError:
+        return None
+    try:
+        if not window_enabled():
+            return None
+        state = window_state("Sales Invoice", invoice.name)
+    except Exception:
+        frappe.log_error(title="vansale: return window")
+        return None
+    return {k: state.get(k) for k in ("blocked", "past_window", "days", "age", "can_override")}
+
+
 # ─── Quotation → Sales Invoice ────────────────────────────────────────────────
 
 def invoice_from_quotation(quotation_name: str, customer: str):
@@ -396,7 +563,7 @@ _SF_PAYMENT_MODE = {"cash": "Cash", "credit": "Credit", "cheque": "Cheque"}
 
 
 def precheck(
-    doctype: str, customer: str, payment_type: Optional[str], lines: list[dict], amount: float = 0
+    doctype: str, customer: str, payment_type: Optional[str], lines: list[dict], amount: float = 0, is_return: int = 0
 ) -> dict:
     """sf_trading's own refusals for a sale that is about to be submitted,
     run without saving anything: customer gates (contact, credit documents,
@@ -416,9 +583,20 @@ def precheck(
         header = {"doctype": doctype, "customer": customer, "company": company, "__islocal": 1}
         if mode:
             header["custom_payment_mode"] = mode
+        if is_return:
+            # sf_trading's gates read it: some let a return through, the
+            # credit-documents and phone gates do not.
+            header["is_return"] = 1
         alert = get_party_alert(doctype, frappe.as_json(header)) or {}
         out["problems"].extend(_plain(p) for p in alert.get("problems") or [])
         out["warnings"].extend(_plain(h) for h in alert.get("hints") or [])
+    if is_return:
+        # A return uses no credit and is not priced against the minimum.
+        return out
+    if doctype == "Sales Order":
+        limit = _order_limit_refusal(customer, company, mode)
+        if limit:
+            out["problems"].append(limit)
 
     # Credit and cheque count against the limits (sf_trading.credit_limit).
     extras = credit_extras(customer, company) if mode in ("Credit", "Cheque") else {}
@@ -441,22 +619,67 @@ def precheck(
 
     warehouse = van_default("Warehouse")
     branch = van_default("Branch")
-    price_list = lines[0].get("price_list") if lines else None
     from vansale.api.me import current_user_van_price_list
 
-    price_list = price_list or current_user_van_price_list() or frappe.db.get_single_value(
-        "Selling Settings", "selling_price_list"
+    price_list = branch_selling_list(
+        current_user_van_price_list() or frappe.db.get_single_value("Selling Settings", "selling_price_list")
     )
+    row_lists = set(row_price_lists())
     for line in lines or []:
-        floor = min_rate(line.get("item_code"), float(line.get("conversion_factor") or 1), price_list, warehouse, branch)
+        # A line priced from its own list (an offer list) is held to that list's minimum.
+        own = line.get("price_list")
+        line_list = own if own and own in row_lists else price_list
+        floor = min_rate(line.get("item_code"), float(line.get("conversion_factor") or 1), line_list, warehouse, branch)
         rate = float(line.get("rate") or 0)
-        if floor and rate + 0.0001 < floor:
-            out["problems"].append(
-                frappe._("{0}: rate {1} is below the minimum {2}.").format(
-                    line.get("item_name") or line.get("item_code"), rate, round(floor, 2)
+        # sf_trading checks ERPNext's net rate: after the document's
+        # additional discount, tax left out.
+        net = float(line["net_rate"]) if line.get("net_rate") is not None else rate
+        if floor and net + 0.0001 < floor:
+            name = line.get("item_name") or line.get("item_code")
+            if net + 0.0001 < rate:
+                out["problems"].append(
+                    frappe._("{0}: rate {1} comes to {2} net of the invoice discount and tax, below the minimum {3}.").format(
+                        name, rate, round(net, 2), round(floor, 2)
+                    )
                 )
-            )
+            else:
+                out["problems"].append(
+                    frappe._("{0}: rate {1} is below the minimum {2}.").format(name, rate, round(floor, 2))
+                )
     return out
+
+
+def _order_limit_refusal(customer: str, company: str, mode: Optional[str]) -> Optional[str]:
+    """sf_trading's Sales Order cash limits (customer's and salesman's
+    payment days, cash limit, branch cash limit), asked ahead without saving:
+    its own validator on the order as the app would make it. The text it
+    refuses with, or None."""
+    try:
+        from sf_trading.sales_order_limits import validate_sales_order_limits
+    except ImportError:
+        return None
+    from vansale.api.me import current_user_sales_person, van_default
+
+    order = frappe._dict(
+        doctype="Sales Order",
+        company=company,
+        customer=customer,
+        custom_sales_person=current_user_sales_person(),
+        branch=van_default("Branch"),
+        custom_payment_mode=mode,
+        transaction_date=frappe.utils.nowdate(),
+    )
+    messages = list(frappe.local.message_log)
+    try:
+        validate_sales_order_limits(order)
+    except frappe.ValidationError as refusal:
+        return _plain(refusal) or None
+    except Exception:
+        frappe.log_error(title="vansale: order limit pre-check")
+    finally:
+        # The refusal also queued a popup; this was only a question.
+        frappe.local.message_log = messages
+    return None
 
 
 def _plain(text) -> str:
@@ -493,41 +716,185 @@ def cheque_modes() -> list[str]:
     return branch_payment_modes(_user_company(), is_pdc=1) or []
 
 
-def collect_invoice(inv, rows: list[dict], entry_status: str) -> Optional[list[str]]:
+def loyalty_config(company: Optional[str]) -> Optional[dict]:
+    """Steel Force "Loyalty": a small amount written off when the customer
+    pays (sf_trading's write-off on its payment function), up to the
+    company's Max Payment Write Off. {"max": ...}, or None where it is not
+    set up (other sites, no Write Off Account / no maximum)."""
+    if not is_active() or not company:
+        return None
+    try:
+        from sf_trading.api import sales_invoice_payment  # noqa: F401
+    except ImportError:
+        return None
+    meta = frappe.get_meta("Company")
+    if not meta.has_field("custom_max_payment_write_off"):
+        return None
+    row = frappe.db.get_value("Company", company, ["write_off_account", "custom_max_payment_write_off"], as_dict=True)
+    if not row or not row.write_off_account or float(row.custom_max_payment_write_off or 0) <= 0:
+        return None
+    return {"max": float(row.custom_max_payment_write_off)}
+
+
+def loyalty_problem(customer: str, company: str, amount: float, orders=()) -> Optional[str]:
+    """Why sf_trading would refuse this loyalty, asked before anything is
+    saved (its own checks: the company maximum, loyalty already given on the
+    orders this sale bills, an unapplied order advance that carried loyalty).
+    None = fine."""
+    from frappe import _
+
+    amount = float(amount or 0)
+    if amount <= 0:
+        return None
+    config = loyalty_config(company)
+    if not config:
+        return _("Loyalty is not set up for {0}").format(company)
+    if amount - config["max"] > 0.0001:
+        return _("Loyalty {0} is more than the company limit of {1}").format(amount, config["max"])
+    from sf_trading.api.sales_invoice_payment import loyalty_already_given, unapplied_order_advance
+
+    orders = [o for o in orders or [] if o]
+    if orders:
+        already = loyalty_already_given(frappe._dict(items=[frappe._dict(sales_order=o) for o in orders]))
+        if already["amount"] > 0.0001:
+            return _("Loyalty of {0} was already given on {1}").format(already["amount"], ", ".join(already["orders"]))
+    unapplied = unapplied_order_advance(customer, company)
+    if unapplied["loyalty"] > 0.0001:
+        return _("{0} holds an unapplied advance from {1} that already carried loyalty").format(
+            customer, ", ".join(unapplied["orders"])
+        )
+    return None
+
+
+def collect_invoice(inv, rows: list[dict], entry_status: str, write_off: float = 0):
     """Payment Entries for a submitted sale the way the Steel Force desk makes
     them: sf_trading's `create_pos_payments_for_invoice` (one entry per mode,
-    cheque number / date for PDC, its write-off and branch rules). Used when the
-    entries are to be submitted at once (sf_trading always submits); returns
-    None to leave the standard path (draft entries, other sites)."""
+    PDC fields for a cheque, its write-off = loyalty, branch rules), the cheque
+    first and the other modes after, the loyalty on the last call — as the
+    desk's cheque dialog does.
+
+    Returns (entries made, rows left for the standard path), or None to leave
+    everything to the standard path (other sites). A cheque always goes
+    through sf_trading (it decides whether the cheque waits in Draft); the
+    other modes only when entries are submitted at once (sf_trading always
+    submits), else they are left for the standard draft path."""
     if not rows or not is_active():
-        return None
-    is_cheque = inv.get(_PAYMENT_MODE_FIELD) == "Cheque"
-    if entry_status != "Submit" and not is_cheque:
         return None
     try:
         from sf_trading.api.sales_invoice_payment import create_pos_payments_for_invoice
     except ImportError:
         return None
-    remaining = float(inv.outstanding_amount or 0)
-    payments = []
-    for row in rows:
-        amount = min(float(row["amount"]) if row.get("amount") is not None else remaining, remaining)
-        if amount <= 0:
-            continue
-        payments.append({"mode_of_payment": row["mode_of_payment"], "amount": amount})
-        remaining -= amount
-    if not payments:
-        return []
-    first = rows[0]
-    names = create_pos_payments_for_invoice(
-        inv.name,
-        payments,
-        cheque_date=first.get("reference_date") if is_cheque else None,
-        cheque_no=first.get("reference_no") if is_cheque else None,
-        posting_date=str(inv.posting_date),
-    )
-    return list(names or [])
+    cheque = [r for r in rows if r.get("reference_date")]
+    others = [r for r in rows if not r.get("reference_date")]
+    if entry_status != "Submit" and not cheque:
+        return None
+    write_off = float(write_off or 0)
+    due = float(inv.outstanding_amount or 0) - write_off
 
+    def take(group: list[dict]) -> list[dict]:
+        nonlocal due
+        out = []
+        for row in group:
+            amount = min(float(row["amount"]) if row.get("amount") is not None else due, due)
+            if amount <= 0:
+                continue
+            out.append({"mode_of_payment": row["mode_of_payment"], "amount": amount})
+            due -= amount
+        return out
+
+    cheque_payments = take(cheque)
+    other_payments = take(others) if entry_status == "Submit" else []
+    left = [] if entry_status == "Submit" else others
+    names: list[str] = []
+    if cheque_payments:
+        names += create_pos_payments_for_invoice(
+            inv.name,
+            cheque_payments,
+            cheque_date=cheque[0]["reference_date"],
+            cheque_no=cheque[0].get("reference_no"),
+            posting_date=str(inv.posting_date),
+            write_off_amount=0 if other_payments else write_off,
+        ) or []
+    if other_payments:
+        names += create_pos_payments_for_invoice(
+            inv.name, other_payments, posting_date=str(inv.posting_date), write_off_amount=write_off
+        ) or []
+    return names, left
+
+
+def collect_customer(
+    invoices: list[dict],
+    amount: float,
+    mode: str,
+    reference_no: Optional[str],
+    reference_date,
+    write_off: float = 0,
+    posting_date=None,
+) -> Optional[list[str]]:
+    """A collection from the customer screen, the Steel Force desk way: the
+    amount paid oldest-first over `invoices` (already this company's, their
+    outstanding less drafts), one sf_trading `create_pos_payments_for_invoice`
+    call per invoice — a cheque mode as a post-dated cheque (number and date;
+    sf_trading may keep it in Draft), the loyalty on the last invoice paid.
+
+    Returns the entries made, or None on other sites (standard path). Money
+    beyond the invoices is refused: sf_trading refuses a receipt that names
+    no invoice (its voucher gate) and never overpays one."""
+    if not is_active():
+        return None
+    try:
+        from sf_trading.api.sales_invoice_payment import create_pos_payments_for_invoice
+    except ImportError:
+        return None
+    from frappe import _
+    from frappe.utils import flt
+
+    is_cheque = mode in cheque_modes()
+    if is_cheque and not ((reference_no or "").strip() and reference_date):
+        frappe.throw(_("Enter the cheque number and date"))
+    plan = []
+    left = flt(amount)
+    for inv in invoices:
+        if left <= 0.005:
+            break
+        due = flt(inv.get("outstanding_amount"))
+        if due <= 0.005:
+            continue
+        pay = min(left, due)
+        plan.append([inv["name"], pay, due])
+        left -= pay
+    if not plan:
+        frappe.throw(_("Nothing is open to collect: pick an invoice, or the customer owes nothing"))
+    if left > 0.005:
+        from frappe.utils import fmt_money
+
+        frappe.throw(
+            _("{0} is more than the open invoices ({1}); collect up to that amount").format(
+                fmt_money(flt(amount)), fmt_money(flt(amount) - left)
+            )
+        )
+    write_off = flt(write_off)
+    if write_off:
+        last = plan[-1]
+        if last[1] + write_off - last[2] > 0.0001:
+            from frappe.utils import fmt_money
+
+            frappe.throw(
+                _("Loyalty {0} is more than what is left on {1} after this payment ({2})").format(
+                    write_off, last[0], fmt_money(flt(last[2] - last[1]))
+                )
+            )
+    names: list[str] = []
+    for idx, (invoice, pay, _due) in enumerate(plan):
+        names += create_pos_payments_for_invoice(
+            invoice,
+            [{"mode_of_payment": mode, "amount": pay}],
+            cheque_date=str(reference_date) if is_cheque else None,
+            cheque_no=reference_no.strip() if is_cheque else None,
+            posting_date=str(posting_date) if posting_date else None,
+            write_off_amount=write_off if idx == len(plan) - 1 else 0,
+        ) or []
+    return names
 
 
 # ─── Driver (delivery person) ─────────────────────────────────────────────────

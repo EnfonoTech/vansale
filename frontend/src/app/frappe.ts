@@ -71,13 +71,29 @@ export async function clearCredentials(): Promise<void> {
 export class ApiError extends Error {
   status: number;
   serverMessage?: string;
-  constructor(message: string, status: number, serverMessage?: string) {
+  /** Frappe's exception class (ValidationError, PermissionError, …): the same
+   *  in every language, unlike the message. */
+  excType?: string;
+  constructor(message: string, status: number, serverMessage?: string, excType?: string) {
     super(message);
     this.name = "ApiError";
     this.status = status;
     this.serverMessage = serverMessage;
+    this.excType = excType;
   }
 }
+
+/** The web session ended (Frappe answers as Guest): sign in again. Queued
+ *  work stays and is retried after sign-in. */
+export class SessionExpiredError extends ApiError {
+  constructor() {
+    super("Your session has ended — sign in again", 401, "Your session has ended — sign in again", "SessionExpired");
+    this.name = "SessionExpiredError";
+  }
+}
+
+/** Fired once per expiry so the app can send the user to the sign-in screen. */
+export const SESSION_EXPIRED_EVENT = "vansale:session-expired";
 
 /** Plain "we couldn't reach the server" error — safe to queue + retry. */
 export class NetworkError extends Error {
@@ -289,11 +305,26 @@ async function callOnce<T>(
     return callOnce<T>(method, path, body, true, timeoutMs);
   }
 
+  // The session cookie is no longer valid: Frappe ran the call as Guest and
+  // says so. Every call then failed with a bare 403 and the app looked stuck.
+  const signingIn = /^vansale\.api\.auth\.(login|login_with_pin)\b|^login\b/.test(path);
+  if ((data as { session_expired?: number } | null)?.session_expired && !res.ok && !signingIn) {
+    window.dispatchEvent(new CustomEvent(SESSION_EXPIRED_EVENT));
+    throw new SessionExpiredError();
+  }
+
+  // A proxy answering while the server restarts / deploys: nothing was
+  // processed, so it is a network failure (queue and retry), not a refusal.
+  if (res.status === 502 || res.status === 503 || res.status === 504) {
+    throw new NetworkError(`Server unavailable (HTTP ${res.status})`);
+  }
+
   if (!res.ok) {
     // serverMessage only when the server said something readable, so a
     // screen's own wording ("Incorrect email or password") is used otherwise.
     const serverMsg = parseServerError(data);
-    throw new ApiError(serverMsg ?? `HTTP ${res.status}`, res.status, serverMsg);
+    const excType = (data as { exc_type?: string } | null)?.exc_type;
+    throw new ApiError(serverMsg ?? `HTTP ${res.status}`, res.status, serverMsg, excType);
   }
 
   const wrapped = data as { message?: T } | null;

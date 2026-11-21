@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { CreditStatus } from "@/api/customer";
-import { creditImpact, creditRefusal, usedShare } from "../credit";
+import { creditImpact, creditRefusal, saleBlock, usedShare } from "../credit";
 
 function status(over: Partial<CreditStatus> = {}): CreditStatus {
   return {
@@ -71,5 +71,21 @@ describe("usedShare", () => {
     expect(usedShare(1200, 5000)).toBeCloseTo(0.24);
     expect(usedShare(9000, 5000)).toBe(1);
     expect(usedShare(100, 0)).toBe(0);
+  });
+});
+
+describe("saleBlock (Steel Force)", () => {
+  const online = { online: true, steelforce: true };
+  it("blocks any sale to a customer waiting for approval", () => {
+    const s = status({ approval: { covered: true, status: "Draft", approved: false, missing: [] } });
+    expect(saleBlock(s, "cash", online)).toMatch(/waiting for approval/);
+    expect(saleBlock(status({ approval: { covered: true, status: "Approved", approved: true, missing: [] } }), "cash", online)).toBeNull();
+  });
+  it("blocks credit and cheque offline on Steel Force only", () => {
+    expect(saleBlock(status(), "credit", { online: false, steelforce: true })).toMatch(/need a connection/);
+    expect(saleBlock(status(), "cheque", { online: false, steelforce: true })).toMatch(/need a connection/);
+    expect(saleBlock(status(), "cash", { online: false, steelforce: true })).toBeNull();
+    expect(saleBlock(status(), "credit", { online: false, steelforce: false })).toBeNull();
+    expect(saleBlock(status(), "credit", online)).toBeNull();
   });
 });

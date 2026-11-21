@@ -41,3 +41,41 @@ export function requestCancellation(
 ): Promise<{ workflow_state?: string }> {
   return apiCall("POST", "vansale.steelforce.api.request_cancellation", { doctype, name, reason, details });
 }
+
+/** The salesman's own uncollected cash (Steel Force), with his limits; {} elsewhere. */
+export interface MyCash {
+  holding?: number;
+  cash_limit?: number;
+  payment_days?: number;
+  branch?: string | null;
+  branch_holding?: number;
+  branch_limit?: number;
+  overdue?: { name: string; posting_date: string; outstanding_amount: number } | null;
+}
+export function myCash(): Promise<MyCash> {
+  return apiCall<MyCash>("GET", "vansale.steelforce.api.my_cash");
+}
+
+/** Steel Force: taking money on a submitted order (sf_trading's own state). */
+export interface OrderPaymentState {
+  enabled: boolean;
+  balance?: number;
+  advance_paid?: number;
+  modes?: string[];
+  cheque_modes?: string[];
+  /** Loyalty limit (0 = none); loyalty only when it closes the order. */
+  max_write_off?: number;
+}
+export function orderPaymentState(salesOrder: string): Promise<OrderPaymentState> {
+  return apiCall<OrderPaymentState>("GET", `vansale.steelforce.api.order_payment_state?sales_order=${encodeURIComponent(salesOrder)}`);
+}
+export function collectOrder(payload: {
+  sales_order: string;
+  mode_of_payment: string;
+  amount: number;
+  cheque_no?: string;
+  cheque_date?: string;
+  write_off_amount?: number;
+}): Promise<{ payment_entries: string[] }> {
+  return apiCall("POST", "vansale.steelforce.api.collect_order", payload);
+}

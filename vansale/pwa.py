@@ -6,7 +6,8 @@ at /sw.js (POS Awesome on Badria); registering that one made the phone see
 POS Awesome's manifest, and Van Sale had none, so it could not be installed.
 
   /vansale/manifest.webmanifest  name, icons, start URL, standalone display
-  /vansale/sw.js                 service worker (no caching, shows approval pushes, see SW_JS)
+  /vansale/sw.js                 service worker (offline start, shows approval pushes, see SW_JS)
+  /vansale/shell-files.json      the built app's files, for the worker to keep (offline start)
   /vansale/icon-<size>.png       Vansale Settings "App icon", else the default
 """
 
@@ -25,9 +26,30 @@ DEFAULT_NAME = "Van Sale"
 DEFAULT_THEME = "#2563eb"
 BACKGROUND = "#f8fafc"
 
-# No caching on purpose: the app keeps its offline data in IndexedDB, and a
-# cached app shell outlives a rebuild (old JS chunk names 404). Navigations
-# go to the network, with a short message when there is none.
+# Offline start: the app keeps its data in IndexedDB, and the worker keeps the
+# built app files so the app opens (and every screen loads) without a
+# connection. The page is fetched first (always the newest online; the last
+# one offline). Built files carry a hash in their name, so a kept copy never
+# goes stale; each build is kept in a cache of its own and older ones are
+# dropped (a cached page of an old build used to 404 on its JS chunks).
+def _shell_files() -> dict:
+    """The built app's files under /assets/vansale/spa/ (offline start), and
+    a version that changes with every build (a hash of the file names, which
+    carry content hashes)."""
+    import hashlib
+    import os
+
+    root = frappe.get_app_path("vansale", "public", "spa")
+    files = []
+    for folder, _dirs, names in os.walk(os.path.join(root, "assets")):
+        for n in names:
+            rel = os.path.relpath(os.path.join(folder, n), root).replace(os.sep, "/")
+            files.append(f"/assets/vansale/spa/{rel}")
+    files.sort()
+    version = hashlib.sha1("\n".join(files).encode()).hexdigest()[:12]
+    return {"version": version, "files": files}
+
+
 SW_JS = """/* Van Sale service worker: makes the web app installable. */
 const OFFLINE_HTML = '<!doctype html><meta charset="utf-8">' +
   '<meta name="viewport" content="width=device-width,initial-scale=1">' +
@@ -35,14 +57,63 @@ const OFFLINE_HTML = '<!doctype html><meta charset="utf-8">' +
   '<h2>No connection</h2><p>Connect to the internet and try again.</p></body>';
 
 self.addEventListener("install", () => self.skipWaiting());
+
+const SHELL_URL = "/vansale";
+const PAGE_CACHE = "vansale-page";
+const FILES_PREFIX = "vansale-files-";
+
+/* Keep every file of the current build (listed by the server), then drop the
+   caches of older builds. A file that fails is tried again on the next visit. */
+async function keepAppFiles() {
+  const res = await fetch("/vansale/shell-files.json", { cache: "no-store" });
+  if (!res.ok) return;
+  const list = await res.json();
+  const name = FILES_PREFIX + list.version;
+  const cache = await caches.open(name);
+  for (const file of list.files || []) {
+    if (await cache.match(file)) continue;
+    try {
+      await cache.add(file);
+    } catch (e) {
+      /* next visit */
+    }
+  }
+  for (const key of await caches.keys()) {
+    if (key.startsWith(FILES_PREFIX) && key !== name) await caches.delete(key);
+  }
+}
+self.addEventListener("install", (event) => event.waitUntil(keepAppFiles().catch(() => {})));
 self.addEventListener("activate", (event) => event.waitUntil(self.clients.claim()));
 self.addEventListener("fetch", (event) => {
   if (event.request.mode !== "navigate") return;
   event.respondWith(
-    fetch(event.request).catch(
-      () => new Response(OFFLINE_HTML, { headers: { "Content-Type": "text/html; charset=utf-8" } }),
-    ),
+    fetch(event.request)
+      .then((res) => {
+        if (res.ok) {
+          // The newest page is kept for an offline start, and the build's files with it.
+          const copy = res.clone();
+          event.waitUntil(
+            caches.open(PAGE_CACHE).then((c) => c.put(SHELL_URL, copy)).then(keepAppFiles).catch(() => {}),
+          );
+        }
+        return res;
+      })
+      .catch(() =>
+        caches.match(SHELL_URL).then(
+          (kept) => kept || new Response(OFFLINE_HTML, { headers: { "Content-Type": "text/html; charset=utf-8" } }),
+        ),
+      ),
   );
+});
+
+/* The app's built files: from the kept copy when there is one (offline, and
+   a screen not opened yet), else the network. */
+self.addEventListener("fetch", (event) => {
+  const req = event.request;
+  if (req.method !== "GET") return;
+  const url = new URL(req.url);
+  if (url.origin !== self.location.origin || !url.pathname.startsWith("/assets/vansale/spa/")) return;
+  event.respondWith(caches.match(req).then((kept) => kept || fetch(req)));
 });
 
 /* Web Push for approvals (vansale/steelforce/approvals_push.py). The payload
@@ -219,7 +290,9 @@ class VansalePWARenderer:
 
     def can_render(self) -> bool:
         p = self.path
-        return p in (f"{SCOPE}/manifest.webmanifest", f"{SCOPE}/sw.js") or bool(_ICON_RE.match(p))
+        return p in (f"{SCOPE}/manifest.webmanifest", f"{SCOPE}/sw.js", f"{SCOPE}/shell-files.json") or bool(
+            _ICON_RE.match(p)
+        )
 
     def render(self) -> Response:
         p = self.path
@@ -227,6 +300,12 @@ class VansalePWARenderer:
             return Response(
                 json.dumps(_manifest()),
                 content_type="application/manifest+json",
+                headers={"Cache-Control": "no-cache"},
+            )
+        if p.endswith("shell-files.json"):
+            return Response(
+                json.dumps(_shell_files()),
+                content_type="application/json",
                 headers={"Cache-Control": "no-cache"},
             )
         if p.endswith("sw.js"):

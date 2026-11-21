@@ -46,9 +46,14 @@ def _user_van_warehouse() -> Optional[str]:
     for each assigned user. Fallback to Frappe's per-user defaults for
     admin accounts that haven't been added to a Vansale Configuration.
     """
+    from vansale.api.me import van_default
+
     user = frappe.session.user
+    # The van's warehouse first, as sales use it: a Branch Configuration
+    # elsewhere may reset the user's default Warehouse permission.
     return (
-        frappe.db.get_value(
+        van_default("Warehouse", user)
+        or frappe.db.get_value(
             "User Permission",
             {"user": user, "allow": "Warehouse", "is_default": 1},
             "for_value",
@@ -74,7 +79,7 @@ def my_warehouse() -> dict:
 
 
 @frappe.whitelist(methods=["GET"])
-def list_stock(warehouse: Optional[str] = None, limit: int = 500) -> dict:
+def list_stock(warehouse: Optional[str] = None, limit: int = 5000) -> dict:
     wh = warehouse or _user_van_warehouse()
     if not wh:
         frappe.throw(_("No van warehouse set. Assign one on your Sales Person profile."))
@@ -83,7 +88,9 @@ def list_stock(warehouse: Optional[str] = None, limit: int = 500) -> dict:
 
     # Quantities from Vansale Settings "Stock figures from" (Bin / Stock Ledger).
     stock = warehouse_stock(wh)
-    in_stock = [code for code, st in stock.items() if st["qty"] > 0]
+    # Every item the van has held, sold-out ones too (the "Out" count read 0
+    # because only items in stock were listed).
+    in_stock = list(stock)
     rows = (
         frappe.db.sql(
             """

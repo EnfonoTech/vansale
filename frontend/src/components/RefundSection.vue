@@ -31,7 +31,7 @@ const needsReference = (mode: string) => Boolean(mops.value.find((m) => m.name =
 // Like the sale's payment: the full credit by default (follows the total
 // until edited); less = partial refund, the rest stays as customer credit.
 const amountModel = computed<number | string>({
-  get: () => (state.value.amount == null ? props.totals?.grand_total ?? 0 : state.value.amount),
+  get: () => (state.value.amount == null ? props.totals?.refund_max ?? props.totals?.grand_total ?? 0 : state.value.amount),
   set: (v) => {
     const n = Number(v);
     state.value.amount = (v as unknown) === "" || !Number.isFinite(n) ? null : n;
@@ -43,7 +43,7 @@ const remaining = computed(() =>
 
 onMounted(async () => {
   try {
-    mops.value = await modesOfPayment();
+    mops.value = await modesOfPayment(true);
   } catch {
     mops.value = [];
   }
@@ -63,6 +63,13 @@ onMounted(async () => {
     </p>
     <template v-else>
       <span class="label">Refund</span>
+      <p v-if="(totals.original_outstanding ?? 0) > 0 && totals.refund_max != null" class="muted xsmall" style="margin:0">
+        <SarSymbol :code="currency" />{{ money(totals.original_outstanding ?? 0) }} of this credit clears what the invoice
+        still owes; up to <SarSymbol :code="currency" />{{ money(totals.refund_max) }} can be paid back.
+      </p>
+      <p v-if="state.on && !mops.length" class="bad-note xsmall" style="margin:0">
+        No payment mode to refund with here — keep it as credit, or ask the office.
+      </p>
       <!-- Same toggle as the sale's Cash / Credit. -->
       <div class="seg">
         <button type="button" class="seg-btn" :data-active="state.on" @click="state.on = true">
@@ -100,6 +107,7 @@ onMounted(async () => {
 </template>
 
 <style scoped>
+.bad-note { color: var(--danger); }
 .label { font-size: var(--text-sm); color: var(--text-muted); font-weight: 500; }
 .seg { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; }
 .seg-btn {

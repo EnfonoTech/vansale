@@ -31,6 +31,9 @@ _HELPERS = {
     "print_behaviour": {},
     "customer_form_config": {},
     "selling_flow": {},
+    "loyalty_settings": None,
+    "steelforce_rules_active": False,
+    "row_price_lists": [],
 }
 
 

@@ -42,6 +42,8 @@ export interface SellingLine {
   price_list_rate?: number;
   uom?: string;
   conversion_factor?: number;
+  /** The line's own price list (Steel Force offer list); missing = the document's. */
+  price_list?: string | null;
 }
 
 export interface SellingRow {
@@ -80,8 +82,10 @@ export interface SellingDetail {
   valid_till?: string | null;
   delivery_date?: string | null;
   warehouse?: string | null;
-  /** Order: "cash" / "credit" where the site keeps it on the order. */
+  /** Order: "cash" / "credit" / "cheque" where the site keeps it on the order. */
   payment_type?: "cash" | "credit" | "cheque" | null;
+  /** Order: delivery person of a cash order (Steel Force). */
+  driver?: string | null;
   status: string;
   docstatus: number;
   per_delivered?: number;
@@ -114,8 +118,10 @@ export interface SellingPayload {
   discount_amount?: number;
   warehouse?: string;
   submit?: 0 | 1;
-  /** Order: cash / credit (sites that keep it on the order). */
-  payment_type?: "cash" | "credit";
+  /** Order: cash / credit / cheque (sites that keep it on the order). */
+  payment_type?: "cash" | "credit" | "cheque";
+  /** Order: delivery person of a cash order (Steel Force). */
+  driver?: string;
 }
 
 export interface SellingSaved {
@@ -155,12 +161,14 @@ function body(kind: SellingKind, p: SellingPayload): Record<string, unknown> {
   };
   return kind === "quotation"
     ? { ...common, party: p.party, quotation_to: p.quotation_to ?? "Customer", valid_till: p.date }
-    : { ...common, customer: p.party, delivery_date: p.date, warehouse: p.warehouse, payment_type: p.payment_type };
+    : { ...common, customer: p.party, delivery_date: p.date, warehouse: p.warehouse, payment_type: p.payment_type, driver: p.driver };
 }
 
-export async function saveDoc(kind: SellingKind, p: SellingPayload): Promise<SellingSaved> {
+/** `clientId`: the form's own id, kept across retries so a save that timed
+ *  out and is tapped again returns the first document instead of a second. */
+export async function saveDoc(kind: SellingKind, p: SellingPayload, clientId?: string): Promise<SellingSaved> {
   return apiCall<SellingSaved>("POST", path(kind, "save"), {
-    client_id: genUuid(),
+    client_id: clientId || genUuid(),
     posting_ts: new Date().toISOString(),
     ...body(kind, p),
   });
@@ -179,7 +187,8 @@ export async function submitDoc(kind: SellingKind, name: string): Promise<Sellin
 }
 
 export async function deleteDoc(kind: SellingKind, name: string): Promise<void> {
-  await apiCall("POST", "frappe.client.delete", { doctype: KIND[kind].doctype, name });
+  // Own drafts only (office users any), checked on the server.
+  await apiCall("POST", "vansale.api.selling.delete_draft", { doctype: KIND[kind].doctype, name });
 }
 
 /** As the desk's "Set as Lost": the site's Lost Reasons (at least one when it keeps a list) and a detail. */
@@ -195,9 +204,10 @@ export function quotationLostReasons(): Promise<string[]> {
 export async function quotationToOrder(
   name: string,
   deliveryDate?: string,
+  clientId?: string,
 ): Promise<{ name: string; customer: string; converted_customer?: string | null }> {
   return apiCall("POST", "vansale.api.quotation.make_order", {
-    client_id: genUuid(),
+    client_id: clientId || genUuid(),
     name,
     delivery_date: deliveryDate,
   });
@@ -207,11 +217,12 @@ export async function quotationToOrder(
  *  A lead's quotation converts the lead into a customer first. */
 export async function quotationToInvoice(
   name: string,
+  clientId?: string,
 ): Promise<{ name: string; customer: string; converted_customer?: string | null }> {
-  return apiCall("POST", "vansale.api.quotation.make_invoice", { client_id: genUuid(), name });
+  return apiCall("POST", "vansale.api.quotation.make_invoice", { client_id: clientId || genUuid(), name });
 }
 
 /** Sales Order → draft Sales Invoice, finished in the invoice form. */
-export async function orderToInvoice(name: string): Promise<{ name: string }> {
-  return apiCall("POST", "vansale.api.sales_order.make_invoice", { client_id: genUuid(), name });
+export async function orderToInvoice(name: string, clientId?: string): Promise<{ name: string }> {
+  return apiCall("POST", "vansale.api.sales_order.make_invoice", { client_id: clientId || genUuid(), name });
 }

@@ -27,10 +27,12 @@ _LIST_FIELDS = [
 ]
 
 
-def _set_payment_type(doc, payment_type: Optional[str]) -> None:
-    """Cash / credit on the order, on sites that keep it there (Steel Force:
-    `custom_payment_mode`, which its credit-overdue and cash-limit checks read).
-    A credit order gets the same credit-limit rule as a credit invoice."""
+def _set_payment_type(doc, payment_type: Optional[str], driver: Optional[str] = None) -> None:
+    """Cash / credit / cheque on the order, on sites that keep it there (Steel
+    Force: `custom_payment_mode`, which its credit-overdue and cash-limit checks
+    read), and the delivery person of a cash order (sf_trading clears it on any
+    other). A credit or cheque order gets the same credit-limit rule as a
+    credit invoice."""
     from vansale.api.precheck import check_credit_allowed
 
     pay_type = (payment_type or "").lower()
@@ -38,7 +40,10 @@ def _set_payment_type(doc, payment_type: Optional[str]) -> None:
         return
     if pay_type in ("credit", "cheque"):
         check_credit_allowed(doc.customer, doc.company)
+    if pay_type == "cheque" and not steelforce.cheque_modes():
+        frappe.throw(_("Cheque sales are not set up for your branch"))
     steelforce.set_payment_mode(doc, pay_type)
+    steelforce.set_driver(doc, driver, pay_type)
 
 
 def _fill(doc, items, delivery_date, remarks, discount_amount, warehouse) -> None:
@@ -75,7 +80,8 @@ def save(
     discount_amount: Optional[float] = None,
     submit: int = 0,
     posting_ts: Optional[str] = None,
-    payment_type: Optional[str] = None,  # "cash" / "credit" (sites with a payment mode on orders)
+    payment_type: Optional[str] = None,  # "cash" / "credit" / "cheque" (sites with a payment mode on orders)
+    driver: Optional[str] = None,  # delivery person of a cash order (Steel Force)
 ) -> dict:
     if not client_id:
         frappe.throw(_("client_id is required"))
@@ -100,7 +106,7 @@ def save(
     if template:
         doc.taxes_and_charges = template
     _fill(doc, items, delivery_date, remarks, discount_amount, warehouse or _get_default_warehouse(company))
-    _set_payment_type(doc, payment_type)
+    _set_payment_type(doc, payment_type, driver)
     doc.insert()
     if cint(submit):
         doc.submit()
@@ -122,12 +128,13 @@ def update_draft(
     discount_amount: Optional[float] = None,
     submit: int = 0,
     payment_type: Optional[str] = None,
+    driver: Optional[str] = None,
 ) -> dict:
     if not items:
         frappe.throw(_("At least one item is required"))
     doc = selling.own_draft("Sales Order", name, "edit")
     _fill(doc, items, delivery_date, remarks, discount_amount, warehouse or doc.set_warehouse)
-    _set_payment_type(doc, payment_type)
+    _set_payment_type(doc, payment_type, driver)
     doc.flags.ignore_version = True
     doc.save()
     if cint(submit):
@@ -193,6 +200,7 @@ def detail(name: str) -> dict:
         "remarks": doc.terms,
         "warehouse": doc.set_warehouse,
         "payment_type": steelforce.payment_type_of(doc),
+        "driver": steelforce.driver_of(doc),
         **selling.totals(doc),
         "items": selling.line_rows(doc),
         "taxes": selling.tax_rows(doc),
@@ -217,6 +225,24 @@ def make_invoice(client_id: str, name: str) -> dict:
     existing = claim(client_id, "invoice", "Sales Invoice")
     if existing:
         return {"name": existing, "idempotent_replay": True}
+    # A draft invoice of this order is already waiting: open that one, not a
+    # second draft billing the same lines (each tap used to make another).
+    waiting = frappe.db.sql(
+        """SELECT DISTINCT si.name FROM `tabSales Invoice` si
+           JOIN `tabSales Invoice Item` sii ON sii.parent = si.name
+           WHERE si.docstatus = 0 AND sii.sales_order = %s ORDER BY si.creation DESC LIMIT 1""",
+        (order.name,),
+    )
+    if waiting:
+        draft = frappe.get_doc("Sales Invoice", waiting[0][0])
+        return {
+            "name": draft.name,
+            "grand_total": flt(draft.grand_total),
+            "status": draft.status,
+            "docstatus": cint(draft.docstatus),
+            "idempotent_replay": False,
+            "existing_draft": True,
+        }
 
     from erpnext.selling.doctype.sales_order.sales_order import make_sales_invoice
 

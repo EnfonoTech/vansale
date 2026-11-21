@@ -29,7 +29,7 @@ import { modesOfPayment, type ModeOfPayment } from "@/api/payment";
 import { ApiError } from "@/app/frappe";
 import { useSessionStore } from "@/stores/session";
 import { useToastStore } from "@/stores/toasts";
-import { computeTaxTotals } from "@/features/van/tax";
+import { computeTaxTotals, netRateFactor } from "@/features/van/tax";
 import Icon from "@/components/Icon.vue";
 import { stockLabel } from "@/features/van/stock";
 import SarSymbol from "@/components/SarSymbol.vue";
@@ -39,11 +39,12 @@ import { revealOnFocus } from "@/components/reveal";
 import { inputValue } from "@/components/liveInput";
 import { confirmSubmit, withCurrency } from "@/stores/confirm";
 import { precheckBeforeSubmit } from "@/api/precheck";
+import { isOnline } from "@/app/online";
 import { drivers as listDrivers, type DriverRow } from "@/api/steelforce";
 import CreditPanel from "@/components/CreditPanel.vue";
 import LineInsight from "@/components/LineInsight.vue";
 import { useLineInsight } from "@/features/van/lineInsight";
-import { creditRefusal, useCreditStatus, type PayType } from "@/features/van/credit";
+import { creditRefusal, useCreditStatus, type PayType, saleBlock } from "@/features/van/credit";
 
 const router = useRouter();
 const route = useRoute();
@@ -69,6 +70,13 @@ function effectiveRate(l: Line): number {
   const disc = session.lineDiscount ? Number(l.discount_percentage) || 0 : 0;
   return (Number(l.rate) || 0) * (1 - disc / 100);
 }
+/** A saved line's rate before its discount %, for the form's own discount math. */
+function rateBeforeDiscount(rate: number, pct: number | undefined, listRate: number | undefined): number {
+  const d = session.lineDiscount ? Number(pct) || 0 : 0;
+  if (d <= 0) return Number(rate) || 0;
+  if (d >= 100) return Number(listRate) || 0;
+  return roundRate((Number(rate) || 0) / (1 - d / 100));
+}
 const belowMin = (l: Line) => Boolean(l.min_rate) && effectiveRate(l) + 0.0001 < (l.min_rate ?? 0);
 
 const customers = ref<CustomerRow[]>([]);
@@ -91,7 +99,20 @@ const mops = ref<ModeOfPayment[]>([]);
 const chequeMops = ref<ModeOfPayment[]>([]);
 const chequeMode = ref("");
 const chequeNo = ref("");
-const chequeDate = ref(new Date().toISOString().slice(0, 10));
+// Today on the phone's calendar (toISOString alone is UTC: yesterday before 3am in KSA).
+const chequeDate = ref(new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10));
+// The cheque's amount (blank = all of it, or what the other modes leave) and,
+// as in a split cash sale, other modes paying the rest now — the desk's cheque
+// dialog takes cheque and other modes together.
+const chequeAmount = ref<number | null>(null);
+const chequeExtra = ref<PayRow[]>([]);
+// Steel Force "Loyalty": a small amount written off when the customer pays
+// (up to the company's maximum), on a sale paid now.
+const loyalty = ref<number | null>(null);
+const loyaltyOpen = ref(false);
+// Advance already paid on the order this invoice bills (ERPNext applies it to
+// the invoice): the customer is not asked for it again.
+const orderAdvance = ref(0);
 // Delivery person on a cash sale ("Ask for the delivery person" setting).
 const driverList = ref<DriverRow[]>([]);
 const driver = ref("");
@@ -130,7 +151,7 @@ const { status: credit, loading: creditLoading } = useCreditStatus(customer);
 const fromOrder = ref(false);
 const refusalFor = (t: PayType) => creditRefusal(credit.value, t);
 function pickPayment(t: PayType) {
-  const why = refusalFor(t);
+  const why = refusalFor(t) || (t !== "cash" ? saleBlock(null, t, { online: isOnline(), steelforce: session.steelforce }) : null);
   if (why && paymentType.value !== t) {
     toasts.warn(why);
     return;
@@ -159,7 +180,7 @@ function fillRest(i: number) {
   const row = payRows.value[i];
   if (row.amount != null && (row.amount as unknown) !== "" && Number(row.amount) !== 0) return;
   const others = payRows.value.reduce((s, r, j) => s + (j !== i ? Number(r.amount) || 0 : 0), 0);
-  row.amount = round(Math.max(grandTotal.value - others, 0));
+  row.amount = round(Math.max(toPay.value - others, 0));
 }
 
 const discountAmount = ref<number | null>(null);
@@ -274,26 +295,82 @@ const totals = computed(() =>
 const taxTotal = computed(() => totals.value.tax);
 const grandTotal = computed(() => totals.value.grand);
 
+// Loyalty is offered where it rides on the Payment Entry sf_trading makes: a
+// cheque, or a cash sale paid now when the site posts cash that way.
+const loyaltyAllowed = computed(() => {
+  const l = session.loyalty;
+  if (!l) return false;
+  if (paymentType.value === "cheque") return true;
+  return paymentType.value === "cash" && !collectLater.value && l.on_cash;
+});
+const loyaltyAmount = computed(() => (loyaltyAllowed.value ? Math.max(Number(loyalty.value) || 0, 0) : 0));
+// What the customer pays: the total less the order's advance and the loyalty.
+const toPay = computed(() => round(Math.max(grandTotal.value - orderAdvance.value, 0) - loyaltyAmount.value));
+// The rest of a part-cheque sale is paid now in a cash / bank mode, not another cheque.
+const restMops = computed(() => mops.value.filter((m) => !m.pdc));
+// Cheque sale amounts: the cheque first, then the other modes. The first blank
+// amount takes what is left (the cheque, while it is blank); other blanks are 0.
+const isBlank = (v: unknown) => v == null || v === "";
+const chequeRestAt = computed(() => [chequeAmount.value, ...chequeExtra.value.map((r) => r.amount)].findIndex(isBlank));
+const chequeLines = computed(() => {
+  const raw = [chequeAmount.value, ...chequeExtra.value.map((r) => r.amount)];
+  const given = raw.reduce<number>((t, v) => t + (isBlank(v) ? 0 : Number(v) || 0), 0);
+  return raw.map((v, i) =>
+    isBlank(v) ? (i === chequeRestAt.value ? round(Math.max(toPay.value - given, 0)) : 0) : Number(v) || 0,
+  );
+});
+const chequePart = computed(() => chequeLines.value[0] ?? 0);
+const chequePaid = computed(() => round(chequeLines.value.reduce((t, n) => t + n, 0)));
+// > 0: still to pay; < 0: more than the amount to pay.
+const chequeShort = computed(() => round(toPay.value - chequePaid.value));
+// A blank amount shows what it will take (the rest), greyed; tapping it fills
+// that in, as "Tap for rest" on a split cash sale.
+const chequeHint = (i: number) => (i === chequeRestAt.value ? money(chequeLines.value[i] ?? 0) : "Tap for rest");
+function fillChequeRest(i: number) {
+  const raw = [chequeAmount.value, ...chequeExtra.value.map((r) => r.amount)];
+  if (!isBlank(raw[i]) && Number(raw[i]) !== 0) return;
+  const others = raw.reduce<number>((t, v, j) => t + (j !== i && !isBlank(v) ? Number(v) || 0 : 0), 0);
+  const rest = round(Math.max(toPay.value - others, 0));
+  if (rest <= 0) return;
+  if (i === 0) chequeAmount.value = rest;
+  else chequeExtra.value[i - 1].amount = rest;
+}
+// One other mode always (the desk allows cheque + cash); more with "Split payment".
+const canAddChequeRow = computed(() => restMops.value.length > 0 && (!chequeExtra.value.length || session.splitPayment));
+function addChequeRow() {
+  const used = new Set(chequeExtra.value.map((r) => r.mode));
+  const free = restMops.value.filter((m) => !used.has(m.name));
+  // Cash first, as on a cash sale; then the next mode not used yet.
+  const next = free.find((m) => m.type === "Cash") ?? free[0] ?? restMops.value[0];
+  if (next) chequeExtra.value.push({ mode: next.name, amount: null, reference: "" });
+}
+// The other modes of a cheque sale, with their worked-out amounts (none at 0).
+function chequeRestRows() {
+  return chequeExtra.value
+    .map((r, i) => ({ mode_of_payment: r.mode, amount: chequeLines.value[i + 1] ?? 0, reference_no: r.reference || null }))
+    .filter((r) => r.amount > 0.005);
+}
+
 // Split payment summary: entered amounts, plus one blank row taking the rest.
 const splitPaid = computed(() => {
   const given = payRows.value.reduce((s, r) => s + (r.amount != null ? Number(r.amount) || 0 : 0), 0);
   const blank = payRows.value.some((r) => r.amount == null || (r.amount as unknown) === "");
-  return round(blank ? Math.max(grandTotal.value, given) : given);
+  return round(blank ? Math.max(toPay.value, given) : given);
 });
-const splitCredit = computed(() => round(grandTotal.value - splitPaid.value));
+const splitCredit = computed(() => round(toPay.value - splitPaid.value));
 
 // Single mode (split off): amount next to the mode, the full total by default
 // (follows the total until the driver edits it); less = rest on credit.
 const singleAmount = ref<number | null>(null);
 const singleAmountModel = computed<number | string>({
-  get: () => (singleAmount.value == null ? round(grandTotal.value) : singleAmount.value),
+  get: () => (singleAmount.value == null ? toPay.value : singleAmount.value),
   set: (v) => {
     const n = Number(v);
     singleAmount.value = (v as unknown) === "" || !Number.isFinite(n) ? null : n;
   },
 });
 const singleCredit = computed(() =>
-  singleAmount.value == null ? 0 : round(Math.max(grandTotal.value - singleAmount.value, 0)),
+  singleAmount.value == null ? 0 : round(Math.max(toPay.value - singleAmount.value, 0)),
 );
 const netOfTax = computed(() => totals.value.netOfTax);
 
@@ -327,7 +404,7 @@ watch(customer, async (newCustomer) => {
   }
   for (const l of lines.value) {
     try {
-      const p = await priceFor(l.item_code, newCustomer, l.uom);
+      const p = await priceFor(l.item_code, newCustomer, l.uom, l.price_list);
       l.min_rate = p.min_rate ?? undefined;
       if (p.price_list_rate) {
         l.price_list_rate = roundRate(p.price_list_rate);
@@ -373,6 +450,8 @@ async function loadAll() {
   items.value = await listItems(undefined, warehouse.value || undefined, 300, session.updateStock);
   if (isEditMode.value) {
     await prefillFromDraft(editName.value);
+  } else if (route.query.restore === "1") {
+    restoreCart();
   }
 }
 
@@ -397,7 +476,19 @@ async function prefillFromDraft(name: string) {
       chequeMode.value = doc.mode_of_payment || chequeMode.value;
       chequeNo.value = doc.payments?.[0]?.reference_no || "";
       chequeDate.value = doc.payments?.[0]?.reference_date || chequeDate.value;
+      // A part cheque: its amount, and the modes paying the rest.
+      const rest = doc.payments?.slice(1) ?? [];
+      if (rest.length && doc.payments?.[0]?.amount != null) {
+        chequeAmount.value = Number(doc.payments[0].amount);
+        chequeExtra.value = rest.map((p) => ({
+          mode: p.mode_of_payment,
+          amount: p.amount ?? null,
+          reference: p.reference_no ?? "",
+        }));
+      }
     }
+    loyalty.value = doc.write_off_amount || null;
+    orderAdvance.value = Number(doc.total_advance) || 0;
     // A cash draft with a delivery person and no payment stored is left for them to collect.
     driver.value = paymentType.value === "cash" ? doc.driver || "" : "";
     driverCollects.value = !doc.is_pos && !doc.payments?.length;
@@ -406,7 +497,7 @@ async function prefillFromDraft(name: string) {
         && Math.abs(Number(doc.payments[0].amount) - Number(doc.grand_total)) > 0.005) {
       singleAmount.value = Number(doc.payments[0].amount);
     }
-    if (doc.payments?.length) {
+    if (doc.payments?.length && paymentType.value === "cash") {
       payRows.value = doc.payments.map((p) => ({
         mode: p.mode_of_payment,
         amount: p.amount ?? null,
@@ -419,7 +510,10 @@ async function prefillFromDraft(name: string) {
       item_code: it.item_code,
       item_name: it.item_name,
       qty: it.qty,
-      rate: it.rate,
+      // ERPNext's rate is already after the line discount; the form applies
+      // the discount % to `rate`, so start from the rate before it (a desk /
+      // pricing-rule draft was discounted twice and under-billed).
+      rate: rateBeforeDiscount(it.rate, it.discount_percentage, it.price_list_rate),
       price_list_rate: it.price_list_rate,
       discount_percentage: it.discount_percentage,
       discount_amount: it.discount_amount,
@@ -428,6 +522,7 @@ async function prefillFromDraft(name: string) {
       // Carton line move a single piece of stock.
       conversion_factor: it.conversion_factor ?? 1,
       warehouse: it.warehouse ?? undefined,
+      price_list: it.price_list ?? null,
       uoms: it.uom
         ? [{ uom: it.uom, conversion_factor: it.conversion_factor ?? 1, price_list_rate: it.price_list_rate }]
         : [],
@@ -446,7 +541,7 @@ async function loadDraftMinRates() {
   await Promise.all(
     lines.value.map(async (l) => {
       try {
-        const p = await priceFor(l.item_code, customer.value || undefined, l.uom);
+        const p = await priceFor(l.item_code, customer.value || undefined, l.uom, l.price_list);
         l.min_rate = p.min_rate ?? undefined;
       } catch {
         /* offline: the server still checks on save */
@@ -510,7 +605,9 @@ function recalc(l: Line) {
   const qty = Number(l.qty) || 0;
   const rate = Number(l.rate) || 0;
   const disc = session.lineDiscount ? Number(l.discount_percentage) || 0 : 0;
-  const net = qty * rate * (1 - disc / 100);
+  // ERPNext rounds the discounted rate to the rate precision before the
+  // amount; doing the same keeps the preview (and a "rest" payment) exact.
+  const net = qty * roundRate(rate * (1 - disc / 100));
   l.amount = round(Math.max(0, net));
 }
 
@@ -578,7 +675,8 @@ async function addLine(item: ItemRow) {
 
 async function onUomChange(l: Line) {
   if (!l.uoms) return;
-  const chosen = l.uoms.find((u) => u.uom === l.uom);
+  // The UOM choices carry the document list's prices; a line on its own list asks the server.
+  const chosen = l.price_list ? undefined : l.uoms.find((u) => u.uom === l.uom);
   if (chosen) {
     l.conversion_factor = chosen.conversion_factor;
     l.price_list_rate = roundRate(chosen.price_list_rate);
@@ -586,7 +684,7 @@ async function onUomChange(l: Line) {
     l.min_rate = chosen.min_rate;
   } else {
     try {
-      const p = await priceFor(l.item_code, customer.value || undefined, l.uom);
+      const p = await priceFor(l.item_code, customer.value || undefined, l.uom, l.price_list);
       l.price_list_rate = roundRate(p.price_list_rate);
       l.rate = roundRate(p.price_list_rate);
       l.min_rate = p.min_rate ?? undefined;
@@ -595,6 +693,25 @@ async function onUomChange(l: Line) {
     }
   }
   recalc(l);
+}
+
+/** Steel Force: price a line from another of the branch's lists (an offer
+ *  list), as the desk's per-row Price List. A list without a price for the
+ *  item leaves the rate as it is; its minimum still applies. */
+async function onPriceListChange(l: Line) {
+  try {
+    const p = await priceFor(l.item_code, customer.value || undefined, l.uom, l.price_list);
+    l.min_rate = p.min_rate ?? undefined;
+    if (p.price_list_rate) {
+      l.price_list_rate = roundRate(p.price_list_rate);
+      l.rate = roundRate(p.price_list_rate);
+    } else {
+      toasts.warn(`${l.item_name || l.item_code} has no price in ${l.price_list || "the default list"}`);
+    }
+    recalc(l);
+  } catch (e) {
+    toasts.warn(e instanceof Error ? e.message : String(e));
+  }
 }
 
 function removeLine(idx: number) {
@@ -607,8 +724,27 @@ async function doSave(submit: 0 | 1) {
   if (lines.value.length === 0) { toasts.warn("Add at least one item"); return; }
   const zeroQty = lines.value.find((l) => !(Number(l.qty) > 0));
   if (zeroQty) { toasts.warn(`Enter a quantity for ${zeroQty.item_name || zeroQty.item_code}`); return; }
+  {
+    // Steel Force: a customer awaiting approval, or credit / cheque offline.
+    const blocked = submit === 1
+      ? saleBlock(credit.value, paymentType.value, { online: isOnline(), steelforce: session.steelforce })
+      : null;
+    if (blocked) { toasts.warn(blocked, 6000); return; }
+  }
   if (paymentType.value === "cheque" && (!chequeNo.value.trim() || !chequeDate.value)) {
     toasts.warn("Enter the cheque number and date");
+    return;
+  }
+  if (paymentType.value === "cheque") {
+    if (chequePart.value <= 0.005) { toasts.warn("Enter the cheque amount"); return; }
+    if (chequeShort.value < -0.005) { toasts.warn("Payments are more than the amount to pay"); return; }
+    if (chequeShort.value > 0.005) {
+      toasts.warn(`${money(chequeShort.value)} is not paid yet: add a payment mode for it`);
+      return;
+    }
+  }
+  if (loyaltyAmount.value > 0 && session.loyalty && loyaltyAmount.value > session.loyalty.max + 0.0001) {
+    toasts.warn(`Loyalty can be at most ${money(session.loyalty.max)}`);
     return;
   }
   const low = lines.value.find(belowMin);
@@ -621,7 +757,7 @@ async function doSave(submit: 0 | 1) {
     if (splitCredit.value < -0.005) { toasts.warn("Payments are more than the invoice total"); return; }
   } else if (paymentType.value === "cash" && !collectLater.value && singleAmount.value != null) {
     if (singleAmount.value <= 0) { toasts.warn("Enter the amount paid, or choose Credit"); return; }
-    if (singleAmount.value > grandTotal.value + 0.005) { toasts.warn("Amount is more than the invoice total"); return; }
+    if (singleAmount.value > toPay.value + 0.005) { toasts.warn("Amount is more than the amount to pay"); return; }
   }
   if (paymentType.value === "cash" && pickedDriver.value?.blocked) {
     toasts.warn(`${pickedDriver.value.full_name} can't take a cash sale: ${pickedDriver.value.blocked}`);
@@ -640,7 +776,10 @@ async function doSave(submit: 0 | 1) {
         item_code: l.item_code,
         item_name: l.item_name,
         rate: effectiveRate(l),
+        // The minimum price is checked after the invoice discount (sf_trading).
+        net_rate: effectiveRate(l) * netRateFactor(netTotal.value, totals.value),
         conversion_factor: l.conversion_factor,
+        price_list: l.price_list || null,
       })),
       { amount: unpaidPart.value, fromOrder: fromOrder.value },
     );
@@ -649,12 +788,20 @@ async function doSave(submit: 0 | 1) {
       ? splitPaid.value
       : paymentType.value === "cash" && !collectLater.value ? singleAmount.value ?? grandTotal.value : 0;
     const pay = paymentType.value === "cheque"
-      ? `Cheque ${chequeNo.value} · ${chequeDate.value}`
+      ? [
+          `Cheque ${chequeNo.value} · ${chequeDate.value}`,
+          chequeRestRows().length
+            ? [`${money(chequePart.value)} cheque`, ...chequeRestRows().map((r) => `${money(r.amount)} ${r.mode_of_payment}`)].join(" + ")
+            : "",
+          loyaltyAmount.value ? `loyalty ${money(loyaltyAmount.value)}` : "",
+        ].filter(Boolean).join(" · ")
       : collectLater.value
       ? `Cash · ${driverName.value} collects on delivery`
       : paid <= 0.005
       ? "Credit"
-      : paid >= grandTotal.value - 0.005 ? "Paid in full" : `Paid ${money(paid)} · rest on credit`;
+      : paid >= toPay.value - 0.005
+      ? `Paid in full${loyaltyAmount.value ? ` · loyalty ${money(loyaltyAmount.value)}` : ""}`
+      : `Paid ${money(paid)} · rest on credit`;
     const ok = await confirmSubmit(isEditMode.value ? "Submit this invoice?" : "Submit invoice?", [
       selectedCustomer.value ? customerLabel(selectedCustomer.value) : customer.value,
       `${lines.value.length} item${lines.value.length === 1 ? "" : "s"} · ${withCurrency(money(grandTotal.value))}`,
@@ -681,7 +828,7 @@ async function doSave(submit: 0 | 1) {
         const listRate = Number(l.price_list_rate) || 0;
         const baseRate = Number(l.rate) || listRate;
         const linePct = session.lineDiscount ? Math.max(0, Math.min(100, Number(l.discount_percentage) || 0)) : 0;
-        const effectiveRate = Math.max(0, baseRate * (1 - linePct / 100));
+        const effectiveRate = roundRate(Math.max(0, baseRate * (1 - linePct / 100)));
         return {
           item_code: l.item_code,
           item_name: l.item_name,
@@ -698,6 +845,7 @@ async function doSave(submit: 0 | 1) {
           uom: l.uom,
           conversion_factor: l.conversion_factor,
           warehouse: l.warehouse,
+          price_list: l.price_list || undefined,
         };
       }),
       remarks: remarks.value || undefined,
@@ -711,8 +859,12 @@ async function doSave(submit: 0 | 1) {
           : paymentType.value === "cash" && !collectLater.value ? modeOfPayment.value : undefined,
       cheque_no: paymentType.value === "cheque" ? chequeNo.value.trim() : undefined,
       cheque_date: paymentType.value === "cheque" ? chequeDate.value : undefined,
+      cheque_amount: paymentType.value === "cheque" && chequeRestRows().length ? chequePart.value : undefined,
+      write_off_amount: loyaltyAmount.value > 0 ? loyaltyAmount.value : undefined,
       driver: session.askDriver && paymentType.value === "cash" ? driver.value : undefined,
-      payments: useSplit.value
+      payments: paymentType.value === "cheque"
+        ? chequeRestRows().length ? chequeRestRows() : undefined
+        : useSplit.value
         ? payRows.value.map((r) => ({
             mode_of_payment: r.mode,
             amount: r.amount == null || (r.amount as unknown) === "" ? null : Number(r.amount),
@@ -745,6 +897,8 @@ async function doSave(submit: 0 | 1) {
           collect_later: payload.collect_later,
           cheque_no: payload.cheque_no,
           cheque_date: payload.cheque_date,
+          cheque_amount: payload.cheque_amount,
+          write_off_amount: payload.write_off_amount,
           driver: payload.driver,
           discount_amount: payload.discount_amount,
           apply_discount_on: payload.apply_discount_on,
@@ -780,8 +934,36 @@ async function doSave(submit: 0 | 1) {
   }
 }
 
+// "New customer" in the middle of a sale: the cart is kept and put back when
+// the form opens again with the new customer (it used to be lost).
+const CART_KEY = "vansale.invoice.cart";
 function newCustomerClick() {
+  if (lines.value.length) {
+    try {
+      sessionStorage.setItem(CART_KEY, JSON.stringify({
+        at: Date.now(),
+        lines: lines.value,
+        paymentType: paymentType.value,
+        discountAmount: discountAmount.value,
+        remarks: remarks.value,
+      }));
+    } catch { /* storage full / blocked: the cart is simply not kept */ }
+  }
   router.push({ name: "customer-new", query: { redirect: "invoice" } });
+}
+function restoreCart() {
+  try {
+    const raw = sessionStorage.getItem(CART_KEY);
+    sessionStorage.removeItem(CART_KEY);
+    if (!raw) return;
+    const saved = JSON.parse(raw) as { at: number; lines: Line[]; paymentType?: typeof paymentType.value; discountAmount?: number | null; remarks?: string };
+    if (!saved.lines?.length || Date.now() - saved.at > 2 * 3600_000) return;
+    lines.value = saved.lines;
+    if (saved.paymentType) paymentType.value = saved.paymentType;
+    discountAmount.value = saved.discountAmount ?? null;
+    remarks.value = saved.remarks ?? "";
+    toasts.info("Your cart was kept for the new customer");
+  } catch { /* a stale or broken copy is ignored */ }
 }
 
 onMounted(loadAll);
@@ -856,27 +1038,66 @@ onMounted(loadAll);
         :payment="paymentType"
         :adds="unpaidPart"
       />
-      <div v-if="paymentType === 'cheque'" class="cheque-grid">
-        <label class="field">
-          <span class="tiny">Cheque mode</span>
-          <select v-model="chequeMode">
-            <option v-for="m in chequeMops" :key="m.name" :value="m.name">{{ m.name }}</option>
-            <option v-if="!chequeMops.length && chequeMode" :value="chequeMode">{{ chequeMode }}</option>
-          </select>
-        </label>
-        <label class="field">
-          <span class="tiny">Cheque no.</span>
-          <input type="text" v-model="chequeNo" inputmode="numeric" />
-        </label>
-        <label class="field">
-          <span class="tiny">Cheque date</span>
-          <input type="date" v-model="chequeDate" />
-        </label>
+      <div v-if="paymentType === 'cheque'" class="cheque-card">
+        <div class="cheque-head">
+          <span class="cheque-title"><Icon name="receipt" :size="16" /> Cheque</span>
+          <span v-if="chequeDaysAhead > 0" class="pill" data-tone="info">
+            Post-dated · banked in {{ chequeDaysAhead }} day{{ chequeDaysAhead === 1 ? "" : "s" }}
+          </span>
+          <span v-else class="pill" data-tone="success">Dated today</span>
+        </div>
+        <div class="cheque-fields">
+          <label class="field">
+            <span class="tiny">Cheque no. *</span>
+            <input type="text" v-model="chequeNo" inputmode="numeric" placeholder="e.g. 004512"
+                   :class="{ missing: !chequeNo.trim() }" />
+          </label>
+          <label class="field">
+            <span class="tiny">Cheque date</span>
+            <input type="date" v-model="chequeDate" />
+          </label>
+        </div>
+        <!-- Same as a split cash sale: the cheque, then other modes for the rest. -->
+        <div class="pay-rows">
+          <div class="pay-row">
+            <select v-if="chequeMops.length > 1" v-model="chequeMode" aria-label="Cheque mode">
+              <option v-for="m in chequeMops" :key="m.name" :value="m.name">{{ m.name }}</option>
+            </select>
+            <span v-else class="mode-fixed"><Icon name="receipt" :size="14" /> {{ chequeMode || "Cheque" }}</span>
+            <input type="number" min="0" step="any" inputmode="decimal" v-model.number="chequeAmount"
+                   v-decimals="session.currencyPrecision" :placeholder="chequeHint(0)" aria-label="Cheque amount"
+                   @focus="fillChequeRest(0)" />
+            <!-- Keeps the amounts in one column with the rows that have a remove button. -->
+            <button v-if="chequeExtra.length" class="icon-only small rm-space" type="button" tabindex="-1" aria-hidden="true">
+              <Icon name="x" :size="16" />
+            </button>
+          </div>
+          <div v-for="(r, i) in chequeExtra" :key="i" class="pay-row">
+            <select v-model="r.mode">
+              <option v-for="m in restMops" :key="m.name" :value="m.name">{{ m.name }}</option>
+            </select>
+            <input type="number" min="0" step="any" inputmode="decimal" v-model.number="r.amount"
+                   v-decimals="session.currencyPrecision" :placeholder="chequeHint(i + 1)" @focus="fillChequeRest(i + 1)" />
+            <button class="icon-only small" type="button" @click="chequeExtra.splice(i, 1)" aria-label="Remove">
+              <Icon name="x" :size="16" />
+            </button>
+            <input v-if="needsReference(r.mode)" class="pay-ref" type="text" v-model="r.reference"
+                   placeholder="Reference no. (optional)" />
+          </div>
+          <button v-if="canAddChequeRow" type="button" class="link-btn" @click="addChequeRow">
+            <Icon name="plus" :size="14" /> Add payment mode
+          </button>
+          <div v-if="chequeExtra.length" class="tot-row small">
+            <span>Paid</span>
+            <span class="tabular"><SarSymbol :code="session.currency" />{{ money(chequePaid) }}</span>
+          </div>
+          <div v-if="Math.abs(chequeShort) > 0.005" class="tot-row small short">
+            <span>{{ chequeShort > 0 ? "Not paid yet" : "More than the amount to pay" }}</span>
+            <span class="tabular"><SarSymbol :code="session.currency" />{{ money(Math.abs(chequeShort)) }}</span>
+          </div>
+        </div>
+        <p v-if="chequeDaysAhead > 0" class="muted xsmall hint">Until it can be banked, it counts as credit.</p>
       </div>
-      <p v-if="paymentType === 'cheque' && chequeDaysAhead > 0" class="muted small later-note">
-        <span class="pill" data-tone="info">Post-dated</span>
-        Can be banked in {{ chequeDaysAhead }} day{{ chequeDaysAhead === 1 ? "" : "s" }}; until then it counts as credit.
-      </p>
       <!-- Only when the branch has delivery persons: an empty picker is just noise. -->
       <label v-if="session.askDriver && paymentType === 'cash' && driverList.length" class="field">
         <span class="tiny">Delivery person</span>
@@ -949,6 +1170,42 @@ onMounted(loadAll);
           <span class="tabular"><SarSymbol :code="session.currency" />{{ money(singleCredit) }}</span>
         </div>
       </div>
+      <!-- Steel Force loyalty: a small amount written off when the customer pays
+           now. Tucked behind a link until it is wanted. -->
+      <template v-if="loyaltyAllowed">
+        <button v-if="!loyaltyOpen && !loyaltyAmount" type="button" class="link-btn loyalty-add" @click="loyaltyOpen = true">
+          <Icon name="plus" :size="14" /> Loyalty <span class="muted">(up to {{ money(session.loyalty?.max ?? 0) }})</span>
+        </button>
+        <div v-else class="loyalty-row">
+          <span class="loyalty-label">
+            <span>Loyalty</span>
+            <span class="muted xsmall">up to <SarSymbol :code="session.currency" />{{ money(session.loyalty?.max ?? 0) }}</span>
+          </span>
+          <input type="number" min="0" step="any" inputmode="decimal" v-model.number="loyalty"
+                 v-decimals="session.currencyPrecision" :placeholder="money(0)" aria-label="Loyalty" />
+          <button type="button" class="icon-only small" aria-label="Remove loyalty" @click="loyalty = null; loyaltyOpen = false">
+            <Icon name="x" :size="14" />
+          </button>
+        </div>
+      </template>
+      <div v-if="loyaltyAmount > 0 || orderAdvance > 0" class="pay-summary">
+        <div class="pay-sum small muted">
+          <span>Invoice total</span>
+          <span class="tabular"><SarSymbol :code="session.currency" />{{ money(grandTotal) }}</span>
+        </div>
+        <div v-if="orderAdvance > 0" class="pay-sum small muted">
+          <span>Advance paid on the order</span>
+          <span class="tabular">−<SarSymbol :code="session.currency" />{{ money(orderAdvance) }}</span>
+        </div>
+        <div v-if="loyaltyAmount > 0" class="pay-sum small muted">
+          <span>Loyalty</span>
+          <span class="tabular">−<SarSymbol :code="session.currency" />{{ money(loyaltyAmount) }}</span>
+        </div>
+        <div class="pay-sum pay-due">
+          <span>Customer pays</span>
+          <strong class="tabular"><SarSymbol :code="session.currency" />{{ money(toPay) }}</strong>
+        </div>
+      </div>
     </section>
 
     <!-- Lines -->
@@ -1000,6 +1257,13 @@ onMounted(loadAll);
                      v-model.number="l.discount_percentage" @input="recalc(l)" />
             </label>
           </div>
+          <label v-if="session.rowPriceLists.length > 1" class="row-pl">
+            <span class="tiny">Price list</span>
+            <select v-model="l.price_list" @change="onPriceListChange(l)">
+              <option :value="null">Usual list</option>
+              <option v-for="pl in session.rowPriceLists" :key="pl" :value="pl">{{ pl }}</option>
+            </select>
+          </label>
           <LineInsight :item-code="l.item_code" :customer="customer" :uom="l.uom"
                        :conversion-factor="l.conversion_factor" :last="insight.lastSale(l.item_code)"
                        :short="insight.shortage(l)" @use="(r: number) => usePrice(l, r)" />
@@ -1124,6 +1388,7 @@ onMounted(loadAll);
 .pay-row { display: grid; grid-template-columns: 1fr 7rem auto; gap: 0.4rem; align-items: center; }
 .pay-ref { grid-column: 1 / -1; }
 .pay-rows .tot-row { display: flex; justify-content: space-between; align-items: center; }
+.pay-sum { display: flex; justify-content: space-between; align-items: center; }
 .seg-btn {
   all: unset; cursor: pointer;
   padding: 0.55rem 0.75rem; border-radius: var(--radius-sm);
@@ -1137,8 +1402,40 @@ onMounted(loadAll);
 .seg-btn[data-blocked="true"][data-active="true"] { background: var(--danger); }
 .seg-small .seg-btn { min-height: 2.25rem; font-size: var(--text-sm); }
 .below-min { border-color: var(--danger); color: var(--danger); }
-.cheque-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0.5rem; }
-@media (max-width: 420px) { .cheque-grid { grid-template-columns: 1fr 1fr; } }
+/* Cheque: one card — the cheque's details, then (part cheque) a receipt-like split. */
+.cheque-card {
+  display: flex; flex-direction: column; gap: 0.6rem;
+  padding: 0.75rem; border-radius: var(--radius);
+  background: var(--surface-muted); border: 1px solid var(--border);
+}
+.cheque-head { display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+.cheque-title { display: inline-flex; align-items: center; gap: 0.35rem; font-weight: 600; }
+.cheque-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; }
+.cheque-card input, .cheque-card select { background: var(--surface); }
+/* The cheque row's mode when the branch has one cheque mode: shown, not picked. */
+.mode-fixed {
+  display: flex; align-items: center; gap: 0.35rem; min-width: 0;
+  padding: 0.65rem 0.8rem; border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--surface-sunk); color: var(--text-muted); font-weight: 500;
+}
+.rm-space { visibility: hidden; }
+.pay-rows .short { color: var(--danger); font-weight: 600; }
+.missing { border-color: var(--warning); }
+.hint { margin: 0; }
+.loyalty-add { align-self: flex-start; }
+.loyalty-row {
+  display: flex; align-items: center; gap: 0.5rem;
+  padding: 0.45rem 0.45rem 0.45rem 0.75rem; border-radius: var(--radius-sm); background: var(--surface-muted);
+}
+.loyalty-label { flex: 1; min-width: 0; display: flex; flex-direction: column; font-size: var(--text-sm); font-weight: 500; }
+.loyalty-row input { flex: none; width: 7.5rem; text-align: end; background: var(--surface); }
+.loyalty-row input { appearance: textfield; -moz-appearance: textfield; }
+.loyalty-row input::-webkit-inner-spin-button, .loyalty-row input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+.pay-summary {
+  display: flex; flex-direction: column; gap: 0.25rem;
+  padding: 0.6rem 0.7rem; border-radius: var(--radius-sm); background: var(--surface-muted);
+}
+.pay-due { font-size: var(--text-base); border-top: 1px solid var(--border-strong); padding-top: 0.3rem; }
 .min-low { color: var(--danger); font-weight: 600; }
 .later-note, .driver-cash { margin: 0; }
 .bad-note { margin: 0; color: var(--danger); }
@@ -1152,6 +1449,8 @@ onMounted(loadAll);
 .line-grid { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 0.4rem; align-items: end; margin-top: 0.3rem; }
 .line-grid.no-disc { grid-template-columns: 1fr 1fr 1fr; }
 .line-grid label { display: flex; flex-direction: column; gap: 0.15rem; }
+.row-pl { display: grid; grid-template-columns: auto 1fr; gap: 0.5rem; align-items: center; }
+.row-pl select { padding: 0.4rem 0.55rem; font-size: var(--text-sm); }
 .line-grid input, .line-grid select { padding: 0.45rem 0.55rem; font-size: var(--text-sm); }
 .tiny { font-size: 0.65rem; color: var(--text-faint); text-transform: uppercase; letter-spacing: 0.06em; font-weight: 600; }
 .line-foot { display: flex; justify-content: space-between; align-items: center; padding-top: 0.25rem; border-top: 1px dashed var(--border-soft, rgba(0,0,0,.08)); }

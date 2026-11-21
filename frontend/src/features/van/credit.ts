@@ -23,6 +23,28 @@ export function creditRefusal(s: CreditStatus | null | undefined, payment: PayTy
   return null;
 }
 
+/**
+ * Why this sale can't go ahead at all, checked before anything is sent (it
+ * also holds offline, on the saved credit status):
+ *  - Steel Force: a customer waiting for approval gets no sale, cash included;
+ *  - Steel Force: credit and cheque need a connection — sf_trading's credit
+ *    rules can only be checked online, and a refusal at sync loses the sale.
+ */
+export function saleBlock(
+  s: CreditStatus | null | undefined,
+  payment: PayType | undefined,
+  opts: { online: boolean; steelforce: boolean },
+): string | null {
+  const a = s?.approval;
+  if (a?.covered && !a.approved) {
+    return `Customer waiting for approval (${a.status || "Draft"}) — no sale until it is approved.`;
+  }
+  if (opts.steelforce && !opts.online && (payment === "credit" || payment === "cheque")) {
+    return "Credit and cheque sales need a connection here: the credit rules are checked online. Sell for cash, or wait for the network.";
+  }
+  return null;
+}
+
 export interface CreditImpact {
   /** This sale counts against the limit (credit / cheque / unpaid part of cash). */
   counts: boolean;

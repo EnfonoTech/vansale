@@ -56,6 +56,13 @@ def check_item_allowed(item_code: str) -> None:
     groups = permitted_item_groups()
     if groups is not None and frappe.db.get_value("Item", item_code, "item_group") not in groups:
         frappe.throw(_("You are not permitted to sell item {0}").format(item_code), frappe.PermissionError)
+    # Steel Force: only the company's items (sf_trading hides the rest from branch users).
+    from vansale import steelforce
+    from vansale.api.invoice import _user_company
+
+    company = _user_company()
+    if not steelforce.item_in_company(item_code, company):
+        frappe.throw(_("Item {0} is not set up for {1}").format(item_code, company), frappe.PermissionError)
 
 
 def warehouse_stock(warehouse: str, item_codes: list[str] | None = None) -> dict[str, dict]:
@@ -165,6 +172,16 @@ def list_mine(
         if not groups:
             return []
         filters["item_group"] = ["in", list(groups)]
+    # Steel Force: only the company's items, as sf_trading shows branch users.
+    from vansale import steelforce
+    from vansale.api.invoice import _user_company
+
+    company_codes = steelforce.company_items(_user_company())
+    if company_codes is not None:
+        names = company_codes & set(filters["name"][1]) if "name" in filters else company_codes
+        if not names:
+            return []
+        filters["name"] = ["in", list(names)]
     rows = frappe.get_all(
         "Item",
         filters=filters,
@@ -231,19 +248,26 @@ def _customer_price_list(customer: Optional[str]) -> Optional[str]:
     if customer:
         cust_pl = frappe.db.get_value("Customer", customer, "default_price_list")
         if cust_pl:
-            return cust_pl
+            return _branch_list(cust_pl)
 
     van_pl = current_user_van_price_list()
     if van_pl:
-        return van_pl
+        return _branch_list(van_pl)
 
     if customer:
         cg = frappe.db.get_value("Customer", customer, "customer_group")
         if cg:
             cg_pl = frappe.db.get_value("Customer Group", cg, "default_price_list")
             if cg_pl:
-                return cg_pl
-    return frappe.db.get_single_value("Selling Settings", "selling_price_list")
+                return _branch_list(cg_pl)
+    return _branch_list(frappe.db.get_single_value("Selling Settings", "selling_price_list"))
+
+
+def _branch_list(price_list: Optional[str]) -> Optional[str]:
+    """Steel Force: a list the van's branch may use (else its default)."""
+    from vansale import steelforce
+
+    return steelforce.branch_selling_list(price_list)
 
 
 def _item_price(
@@ -257,7 +281,7 @@ def _item_price(
     """
     rows = frappe.db.sql(
         """
-        SELECT price_list_rate FROM `tabItem Price`
+        SELECT name, price_list_rate FROM `tabItem Price`
         WHERE item_code = %(item_code)s
           AND price_list = %(price_list)s
           AND selling = 1
@@ -266,7 +290,7 @@ def _item_price(
           AND IFNULL(valid_from, '1900-01-01') <= %(today)s
           AND IFNULL(valid_upto, '2999-12-31') >= %(today)s
         ORDER BY valid_from DESC, modified DESC
-        LIMIT 1
+        LIMIT 20
         """,
         {
             "item_code": item_code,
@@ -277,7 +301,12 @@ def _item_price(
             "today": nowdate(),
         },
     )
-    return flt(rows[0][0]) if rows else None
+    # Steel Force: prices limited to other branches are not this van's; the
+    # branch's own price comes before the general one (sf_trading's rule).
+    from vansale import steelforce
+
+    rows = steelforce.branch_prices(list(rows))
+    return flt(rows[0][1]) if rows else None
 
 
 def _fetch_price(
@@ -357,14 +386,19 @@ def detail(item_code: str, customer: Optional[str] = None) -> dict:
 
 
 @frappe.whitelist(methods=["GET"])
-def price_for(item_code: str, customer: Optional[str] = None, uom: Optional[str] = None) -> dict:
-    """Light-weight price lookup used when the user changes UOM on a line."""
+def price_for(
+    item_code: str, customer: Optional[str] = None, uom: Optional[str] = None, price_list: Optional[str] = None
+) -> dict:
+    """Light-weight price lookup used when the user changes UOM on a line, or
+    prices a line from its own list (`price_list`, an offer list of the branch)."""
+    from vansale import steelforce
+
     if not item_code:
         frappe.throw(_("Item code required"))
     doc = frappe.get_doc("Item", item_code)
     uom = uom or doc.stock_uom
     conv = dict(_item_uoms(doc)).get(uom, 1.0)
-    price_list = _customer_price_list(customer)
+    price_list = steelforce.row_price_list(price_list) or _customer_price_list(customer)
     rate, is_customer = _fetch_price(item_code, price_list, uom, doc.stock_uom, conv, customer)
     row = {"uom": uom, "conversion_factor": conv}
     _add_min_rates(item_code, [row], price_list)

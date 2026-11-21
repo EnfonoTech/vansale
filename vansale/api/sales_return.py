@@ -10,11 +10,11 @@ from typing import Any, Optional
 
 import frappe
 from frappe import _
-from frappe.utils import flt
+from frappe.utils import cint, flt
 
 from vansale.api.access import check_read, readable_doc
 from vansale.api.outbox import claim
-from vansale.api.datetime_util import naive_site_to_utc_iso, parse_client_ts
+from vansale.api.datetime_util import document_datetime, naive_site_to_utc_iso, parse_client_ts
 
 # Structured return reasons. Mirrors the `custom_return_reason` Select options
 # shipped in `fixtures/custom_field.json` — keep the two in step.
@@ -278,7 +278,18 @@ def build_return_against(original, items: list[dict[str, Any]], posting=None, di
     doc.posting_time = posting.strftime("%H:%M:%S")
     append_return_rows(doc, original, items)
     _carry_invoice_discount(doc, original, discount_amount)
-    sp = current_user_sales_person()
+    # The original sale's sales team, as the desk's return copies it, so the
+    # credit note nets off against the same salesmen's targets / commission
+    # (the header sales person is copied too, in _return_defaults). Only a
+    # sale with no sales team gets the salesman doing the return.
+    team = [r for r in (original.get("sales_team") or []) if r.sales_person]
+    for row in team:
+        doc.append("sales_team", {
+            "sales_person": row.sales_person,
+            "allocated_percentage": row.allocated_percentage,
+            "commission_rate": row.get("commission_rate"),
+        })
+    sp = None if team else current_user_sales_person()
     if sp:
         doc.append("sales_team", {"sales_person": sp, "allocated_percentage": 100})
     _return_defaults(doc, original)
@@ -368,6 +379,64 @@ def refund_owed(cn) -> float:
     return max(owed - drafts, 0.0)
 
 
+def submit_or_hold(doc, refund: Optional[dict]) -> tuple[Optional[str], bool]:
+    """Submit the return and pay its refund — or, where Steel Force's return
+    approval covers it, keep it as a draft with the refund planned on it, for
+    the approval to submit (the app never submits a document under approval).
+    Returns (refund Payment Entry, held for approval)."""
+    from vansale import steelforce
+
+    if steelforce.return_needs_approval(doc):
+        steelforce.plan_refund(doc, refund)
+        return None, True
+    doc.submit()
+    _settle_against_original(doc)
+    return refund_credit_note(doc, refund), False
+
+
+def _settle_against_original(cn) -> None:
+    """A return larger than what its invoice still owes keeps its own balance
+    (ERPNext). The part the invoice still owes is settled against it now — the
+    entry the office would make in Payment Reconciliation — so the invoice is
+    no longer shown as due and only the rest can be refunded (invoice 100, 70
+    paid, return 50: the 30 due is cleared and 20 is refundable, not 50)."""
+    if not cn.get("return_against") or not cint(cn.get("update_outstanding_for_self")):
+        return
+    owed = flt(frappe.db.get_value("Sales Invoice", cn.return_against, "outstanding_amount"))
+    credit = abs(flt(cn.outstanding_amount))
+    amount = min(owed, credit)
+    if amount <= 0.005:
+        return
+    from erpnext.accounts.doctype.payment_reconciliation.payment_reconciliation import reconcile_dr_cr_note
+
+    entry = frappe._dict(
+        voucher_type="Sales Invoice",
+        voucher_no=cn.name,
+        against_voucher_type="Sales Invoice",
+        against_voucher=cn.return_against,
+        account=cn.debit_to,
+        party_type="Customer",
+        party=cn.customer,
+        dr_or_cr="credit_in_account_currency",
+        allocated_amount=amount,
+        unadjusted_amount=credit,
+        currency=cn.currency,
+        exchange_rate=flt(cn.conversion_rate) or 1,
+        cost_center=cn.get("cost_center"),
+        difference_amount=0,
+        debit_or_credit_note_posting_date=cn.posting_date,
+    )
+    # A system entry, as ERPNext's own reconciliation makes it; the salesman
+    # holds no Journal Entry right.
+    user = frappe.session.user
+    frappe.set_user("Administrator")
+    try:
+        reconcile_dr_cr_note([entry], cn.company)
+    finally:
+        frappe.set_user(user)
+    cn.reload()
+
+
 def refund_credit_note(cn, refund: Optional[dict]) -> Optional[str]:
     """Pay the customer back for a credit note (Payment Entry "Pay"), at the
     return or later; submitted or a draft per the cash-sale / refund status."""
@@ -384,6 +453,12 @@ def refund_credit_note(cn, refund: Optional[dict]) -> Optional[str]:
         frappe.throw(_("Refund ({0}) is more than the credit ({1})").format(amount, owed))
     mode = refund["mode_of_payment"]
     check_mode_allowed(mode)
+    # Steel Force: only the branch's modes marked for returns (the desk's refund picker).
+    from vansale import steelforce
+
+    return_modes = steelforce.branch_payment_modes(cn.company, is_return=1)
+    if return_modes is not None and mode not in return_modes:
+        frappe.throw(_("Mode of Payment {0} is not used for refunds at your branch").format(mode))
     _receivable, account = _resolve_accounts(cn.company, mode)
 
     pe = get_payment_entry("Sales Invoice", cn.name)
@@ -482,16 +557,16 @@ def save(
         }
 
     original = readable_doc("Sales Invoice", original_invoice)
-    posting = parse_client_ts(posting_ts) if posting_ts else frappe.utils.now_datetime()
+    posting = document_datetime(posting_ts)
     doc = build_return_against(original, items, posting, discount_amount)
     _set_reason(doc, reason_option, reason_text, note)
     doc.custom_client_id = client_id
 
     doc.insert(ignore_permissions=False)
     refund_entry = None
+    held = False
     if submit:
-        doc.submit()
-        refund_entry = refund_credit_note(doc, refund)
+        refund_entry, held = submit_or_hold(doc, refund)
 
     _record_outbox(client_id, doc.name, posting_ts, {
         "original_invoice": original_invoice,
@@ -506,8 +581,11 @@ def save(
         "name": doc.name,
         "grand_total": float(doc.grand_total or 0),
         "status": doc.status,
+        "docstatus": int(doc.docstatus or 0),
         "modified": naive_site_to_utc_iso(doc.modified),
         "idempotent_replay": False,
+        # Steel Force: saved as a draft for its return approval to submit.
+        "needs_approval": held,
     }
 
 
@@ -687,15 +765,15 @@ def save_without_invoice(
         return {"name": doc.name, "grand_total": float(doc.grand_total or 0), "status": doc.status,
                 "idempotent_replay": True}
 
-    posting = parse_client_ts(posting_ts) if posting_ts else frappe.utils.now_datetime()
+    posting = document_datetime(posting_ts)
     doc = build_bulk_return(customer, items, references, posting, discount_amount=discount_amount)
     _set_reason(doc, reason_option, reason_text, note)
     doc.custom_client_id = client_id
     doc.insert(ignore_permissions=False)
     refund_entry = None
+    held = False
     if submit:
-        doc.submit()
-        refund_entry = refund_credit_note(doc, refund)
+        refund_entry, held = submit_or_hold(doc, refund)
 
     refs = [r.sales_invoice for r in doc.get(ZATCA_REFERENCES_FIELD) or []]
     _record_outbox(client_id, doc.name, posting_ts, {
@@ -715,6 +793,7 @@ def save_without_invoice(
         "refund_entry": refund_entry,
         "modified": naive_site_to_utc_iso(doc.modified),
         "idempotent_replay": False,
+        "needs_approval": held,
     }
 
 
@@ -775,6 +854,14 @@ def preview(
         "tax": abs(flt(doc.total_taxes_and_charges)),
         "grand_total": abs(flt(doc.rounded_total) or flt(doc.grand_total)),
         "refundable": refundable,
+        # What can be paid back: the credit less what the invoice still owes
+        # (that part is settled against the invoice on submit).
+        "refund_max": max(
+            abs(flt(doc.rounded_total) or flt(doc.grand_total))
+            - (max(flt(frappe.db.get_value("Sales Invoice", original_invoice, "outstanding_amount")), 0.0)
+               if original_invoice and refundable else 0.0),
+            0.0,
+        ),
         "original_outstanding": (
             flt(frappe.db.get_value("Sales Invoice", original_invoice, "outstanding_amount"))
             if original_invoice else None

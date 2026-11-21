@@ -81,6 +81,13 @@ export interface ConfigDefaults {
   selling_flow?: SellingFlow;
   /** Approvals (Permission Manager) are installed on the site. Missing on older servers = off. */
   approvals?: { enabled: boolean };
+  /** Steel Force "Loyalty" written off at payment, up to `max`; null / missing = not offered.
+   *  on_cash: a cash sale can carry it; on_collection: the collection screen can. A cheque always can. */
+  loyalty?: { max: number; on_cash: boolean; on_collection: boolean } | null;
+  /** sf_trading runs next to the app (Steel Force): its credit / approval rules are checked online. */
+  steelforce?: boolean;
+  /** Price lists a line may be priced from instead of the document's (Steel Force offer lists). */
+  row_price_lists?: string[];
 }
 
 export interface SellingFlow {

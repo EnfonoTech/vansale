@@ -83,7 +83,10 @@ def auto_assign_sales_person(doc, method=None) -> None:
         return
     if not sp:
         return
-    existing = [(row.sales_person or "") for row in (doc.sales_team or [])]
-    if sp in existing:
+    # Only a customer with no sales team yet: one entered at the desk (e.g.
+    # another salesman at 100%) is left alone — a second 100% row made
+    # ERPNext refuse the save ("Total contribution percentage should be
+    # equal to 100").
+    if any(row.sales_person for row in (doc.sales_team or [])):
         return
     doc.append("sales_team", {"sales_person": sp, "allocated_percentage": 100})

@@ -78,6 +78,7 @@ async function onSave() {
           <option v-for="t in opts.territories" :key="t" :value="t">{{ t }}</option></select></label>
       <label v-if="isEdit" class="field"><span class="label">Status</span>
         <select v-model="form.status">
+          <option v-if="form.status && !opts.statuses.includes(form.status)" :value="form.status">{{ form.status }}</option>
           <option v-for="s in opts.statuses" :key="s" :value="s">{{ s }}</option></select></label>
       <label class="field"><span class="label">{{ isEdit ? "Add a note" : "Note" }}</span>
         <textarea v-model="form.note" rows="3" /></label>

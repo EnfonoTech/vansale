@@ -16,7 +16,7 @@ from frappe.utils import cint, flt
 from vansale.api.access import check_read, readable_doc
 from vansale.api.me import is_office_user
 from vansale.api.outbox import claim
-from vansale.api.datetime_util import naive_site_to_utc_iso, parse_client_ts
+from vansale.api.datetime_util import document_datetime, naive_site_to_utc_iso, parse_client_ts
 
 
 def _record_outbox(client_id: str, ref_name: str, posting_ts: Optional[str], payload: dict) -> None:
@@ -255,6 +255,7 @@ def save(
     remarks: Optional[str] = None,
     submit: int = 1,
     advance: int = 0,
+    write_off_amount: Optional[float] = None,  # Steel Force "Loyalty" written off at payment
 ) -> dict:
     """
     Allocation rules (PDF §2d):
@@ -298,29 +299,18 @@ def save(
             "idempotent_replay": True,
         }
 
-    company = (
-        frappe.db.get_value(
-            "User Permission",
-            {"user": frappe.session.user, "allow": "Company", "is_default": 1},
-            "for_value",
-        )
-        or frappe.defaults.get_user_default("Company", frappe.session.user)
-        or frappe.db.get_single_value("Global Defaults", "default_company")
-    )
-    posting = parse_client_ts(posting_ts) if posting_ts else frappe.utils.now_datetime()
+    # The van's company first, as the invoices (a branch setup elsewhere may
+    # reset the user's default Company and put the receipt in other books).
+    from vansale.api.invoice import _user_company
+
+    company = _user_company()
+    posting = document_datetime(posting_ts)
     # ERPNext requires Reference No + Date on bank-type modes. The date was
     # never sent, so every bank collection failed; default it to the posting
     # date and ask for the number up front.
     check_mode_allowed(mode_of_payment)
     if not reference_no and _needs_reference(company, mode_of_payment):
         frappe.throw(_("Enter the reference number (transaction / cheque no.) for {0}").format(mode_of_payment))
-    doc = build_payment_entry(
-        company, customer, amount, mode_of_payment, posting.date(),
-        reference_no=reference_no,
-        reference_date=reference_date or (posting.date() if reference_no else None),
-        remarks=remarks,
-    )
-
     # Build the list of invoices to allocate against (FIFO order).
     target_invoices: list[dict] = []
     if advance:
@@ -331,19 +321,21 @@ def save(
             inv = frappe.db.get_value(
                 "Sales Invoice",
                 n,
-                ["name", "grand_total", "outstanding_amount"],
+                ["name", "grand_total", "outstanding_amount", "company"],
                 as_dict=True,
             )
             if inv and float(inv.outstanding_amount or 0) > 0:
+                _same_company(inv, company)
                 target_invoices.append(inv)
     elif invoice_name:
         inv = frappe.db.get_value(
             "Sales Invoice",
             invoice_name,
-            ["name", "grand_total", "outstanding_amount"],
+            ["name", "grand_total", "outstanding_amount", "company"],
             as_dict=True,
         )
         if inv:
+            _same_company(inv, company)
             target_invoices.append(inv)
     else:
         # Auto-FIFO: oldest outstanding invoices first, until amount exhausted.
@@ -351,6 +343,7 @@ def save(
             "Sales Invoice",
             filters={
                 "customer": customer,
+                "company": company,
                 "docstatus": 1,
                 "outstanding_amount": [">", 0],
             },
@@ -362,6 +355,61 @@ def save(
     pending = pending_by_invoice([inv["name"] for inv in target_invoices])
     for inv in target_invoices:
         inv["outstanding_amount"] = max(flt(inv["outstanding_amount"]) - pending.get(inv["name"], 0.0), 0.0)
+
+    # Steel Force: collected the way the desk's Receive Payment does it
+    # (sf_trading's payment function, one entry per invoice: PDC fields and
+    # its Draft hold for a cheque, the loyalty write-off, branch rules).
+    from vansale import steelforce
+    from vansale.api.me import collection_payment_entry_status
+
+    write_off = flt(write_off_amount)
+    if write_off:
+        problem = steelforce.loyalty_problem(customer, company, write_off)
+        if problem:
+            frappe.throw(problem)
+    if submit and not advance and collection_payment_entry_status() == "Submit":
+        names = steelforce.collect_customer(
+            target_invoices, amount, mode_of_payment, reference_no,
+            reference_date or posting.date(), write_off, posting.date(),
+        )
+        if names is not None:
+            _record_outbox(client_id, names[0], posting_ts, {
+                "customer": customer,
+                "amount": amount,
+                "mode_of_payment": mode_of_payment,
+                "invoice_name": invoice_name,
+                "payment_entries": names,
+                "write_off": write_off,
+            })
+            frappe.db.commit()
+            first = frappe.get_doc("Payment Entry", names[0])
+            return {
+                "name": first.name,
+                "paid_amount": amount,
+                "status": first.status,
+                "modified": naive_site_to_utc_iso(first.modified),
+                "idempotent_replay": False,
+                "payment_entries": names,
+            }
+    if write_off:
+        frappe.throw(_("Loyalty is given only on a collection posted at once"))
+    # Paying more than the invoices leaves the rest as an unallocated advance:
+    # only where advances are allowed (the app's confirm says so).
+    if not advance and target_invoices:
+        open_total = sum(flt(inv["outstanding_amount"]) for inv in target_invoices)
+        from vansale.api.me import advance_payment_allowed
+
+        if amount - open_total > 0.005 and not advance_payment_allowed():
+            frappe.throw(
+                _("{0} is more than the invoices ({1}); collect up to that amount").format(amount, open_total)
+            )
+
+    doc = build_payment_entry(
+        company, customer, amount, mode_of_payment, posting.date(),
+        reference_no=reference_no,
+        reference_date=reference_date or (posting.date() if reference_no else None),
+        remarks=remarks,
+    )
     allocate(doc, target_invoices, amount)
     doc.insert(ignore_permissions=False)
     # Collections have their own Draft / Submit setting (default: same as
@@ -389,6 +437,13 @@ def save(
         "modified": naive_site_to_utc_iso(doc.modified),
         "idempotent_replay": False,
     }
+
+
+def _same_company(inv, company: str) -> None:
+    """A receipt pays invoices of its own company only (ERPNext would refuse
+    the reference with a party-account error otherwise)."""
+    if inv.get("company") and inv.company != company:
+        frappe.throw(_("Invoice {0} belongs to {1}, not {2}: collect it there").format(inv.name, inv.company, company))
 
 
 @frappe.whitelist(methods=["GET"])
@@ -478,9 +533,12 @@ def outstanding(customer: str) -> list[dict]:
     # All of the customer's open invoices (any salesman's), but only for a
     # customer this user may read.
     check_read("Customer", customer)
+    from vansale.api.invoice import _user_company
+
+    # This company's invoices only: a receipt cannot pay another company's.
     rows = frappe.get_all(
         "Sales Invoice",
-        filters={"customer": customer, "docstatus": 1, "outstanding_amount": [">", 0]},
+        filters={"customer": customer, "company": _user_company(), "docstatus": 1, "outstanding_amount": [">", 0]},
         fields=["name", "grand_total", "outstanding_amount", "posting_date", "status", "due_date"],
         order_by="posting_date asc",
         ignore_permissions=True,
@@ -543,12 +601,14 @@ def detail(name: str) -> dict:
 
 
 @frappe.whitelist(methods=["GET"])
-def modes_of_payment() -> list[dict]:
+def modes_of_payment(is_return: int = 0) -> list[dict]:
     """Enabled Modes of Payment that have an account for the user's company.
 
     A mode without an account cannot be posted, so offering it only produced
-    a failed sale (or, offline, a stuck sync entry).
+    a failed sale (or, offline, a stuck sync entry). `is_return`: for paying a
+    customer back (Steel Force: the branch's modes marked for returns).
     """
+    is_return = cint(is_return)
     from vansale.api.invoice import _user_company
 
     company = _user_company()
@@ -569,9 +629,10 @@ def modes_of_payment() -> list[dict]:
     # Steel Force: only the branch's modes (sf_trading's Branch Configuration).
     from vansale import steelforce
 
-    branch_modes = steelforce.branch_payment_modes(company)
+    branch_modes = steelforce.branch_payment_modes(company, is_return=is_return)
     if branch_modes is not None:
-        cheque = set(steelforce.cheque_modes())
+        # A refund is paid in the branch's return modes only, never a post-dated cheque.
+        cheque = set() if is_return else set(steelforce.cheque_modes())
         rows = [r for r in rows if r["name"] in branch_modes or r["name"] in cheque]
         for row in rows:
             row["pdc"] = row["name"] in cheque
