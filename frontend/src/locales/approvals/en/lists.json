@@ -23,6 +23,11 @@
       "offlineOld": "You are offline. This list may be out of date.",
       "failedOld": "Could not refresh. Showing the last list loaded."
     },
+    "search": {
+      "placeholder": "Search document, type, person or state",
+      "noMatchTitle": "No match",
+      "noMatchHint": "Nothing in this list matches the search. Check the spelling or clear the search."
+    },
     "mine": {
       "emptyTitle": "Nothing in approval",
       "emptyHint": "Documents you submit for approval show here until they are decided.",

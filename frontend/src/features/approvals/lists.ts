@@ -31,6 +31,19 @@ export function ageKey(days: number, locale: string): AgeKey {
   return category === "zero" ? "other" : category;
 }
 
+// ─── Search ─────────────────────────────────────────────────────────────────
+
+/**
+ * The rows where any of `fields` contains the text, ignoring case. Empty text
+ * keeps every row. Used by My requests, Sent back and History, which hold
+ * their whole list on the phone (the To approve tab has its own filter).
+ */
+export function searchRows<T>(rows: T[], query: string, fields: (keyof T)[]): T[] {
+  const needle = query.trim().toLowerCase();
+  if (!needle) return rows;
+  return rows.filter((row) => fields.some((field) => String(row[field] ?? "").toLowerCase().includes(needle)));
+}
+
 // ─── Bulk sheet ─────────────────────────────────────────────────────────────
 
 export interface Money {

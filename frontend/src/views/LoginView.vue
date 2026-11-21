@@ -1,14 +1,19 @@
 <script setup lang="ts">
 import { ref } from "vue";
-import { useRouter } from "vue-router";
+import { useRoute, useRouter } from "vue-router";
 import { login } from "@/api/auth";
 import { useSessionStore } from "@/stores/session";
 import { ApiError, NetworkError } from "@/app/frappe";
 import { NATIVE_VERSION } from "@/app/native-version";
+import { forgetPin, forgetPinOfOthers } from "@/app/pin-offline";
 import BrandMark from "@/components/BrandMark.vue";
 
 const router = useRouter();
+const route = useRoute();
 const session = useSessionStore();
+
+/** Reached from the PIN screen's "Sign in with password instead": the password stands in for the PIN. */
+const fromPin = route.query.from === "pin";
 
 // Baked in from CUSTOMER_APP_TITLE at build time — the Android launcher
 // label already comes from the same var via strings.xml.
@@ -67,7 +72,12 @@ async function onSubmit() {
     // If the server reports no PIN on file, clear our cached pinVerifiedAt so
     // PinView falls into "setup" mode instead of asking the user to enter a
     // PIN that no longer exists (e.g. after the 1.0.13 PIN-wipe migration).
-    if (!res.has_pin) session.clearPinWindow();
+    if (!res.has_pin) {
+      session.clearPinWindow();
+      forgetPin(); // the server has no PIN any more, so a kept offline hash is stale
+    } else {
+      forgetPinOfOthers(trimmedEmail);
+    }
     session.setHasPin(Boolean(res.has_pin));
     // PIN unlock is configurable (user row → van → global). When the admin
     // turned it off, skip the PIN screen entirely rather than asking the
@@ -78,6 +88,16 @@ async function onSubmit() {
       session.markPinVerified();
       // The PIN screen loads the settings; without it, load them here, or
       // the first screens run on none (no warehouse, no delivery person…).
+      await session.refreshDefaults();
+      await router.replace({ name: "dashboard" });
+      return;
+    }
+    // Chose "Sign in with password instead" on the PIN screen: the password
+    // just proved who this is, so a user who has a PIN is not asked for it
+    // again. A user with no PIN still goes on to set one.
+    if (fromPin && res.has_pin) {
+      session.markPinVerified();
+      // The PIN screen would have loaded the settings: load them here instead.
       await session.refreshDefaults();
       await router.replace({ name: "dashboard" });
       return;

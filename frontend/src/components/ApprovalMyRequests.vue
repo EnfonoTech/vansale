@@ -5,21 +5,31 @@
  * waited. Tapping a row opens the read-only detail. Loads its own data on
  * mount; needs no van setup.
  */
-import { onMounted, watch } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import { useI18n } from "vue-i18n";
 import { useOnline } from "@/app/online";
 import { useApprovalsStore } from "@/stores/approvals";
 import { priorityTone } from "@/features/approvals/format";
-import { ageKey } from "@/features/approvals/lists";
+import { ageKey, searchRows } from "@/features/approvals/lists";
 import type { MyRequestRow } from "@/api/approvals";
 import ApprovalListState from "./ApprovalListState.vue";
 import Icon from "./Icon.vue";
+import ListSearch from "./ListSearch.vue";
 
 const { t, locale } = useI18n();
 const router = useRouter();
 const store = useApprovalsStore();
 const online = useOnline();
+
+const search = ref("");
+const searching = computed(() => search.value.trim() !== "");
+/** The requests that match the search text (all of them when it is empty). */
+const rows = computed<MyRequestRow[]>(() =>
+  searchRows(store.mine, search.value, ["docname", "doctype", "transaction", "state", "holder", "role_id"]),
+);
+/** Rows exist but the search hides them all: say so, rather than "nothing in approval". */
+const noMatch = computed(() => searching.value && store.mine.length > 0 && rows.value.length === 0);
 
 /** More than this many days waiting reads as overdue (the desk's own line). */
 const OVERDUE_DAYS = 30;
@@ -54,50 +64,55 @@ function open(row: MyRequestRow) {
 </script>
 
 <template>
-  <ApprovalListState
-    :loading="store.lists.mine.loading"
-    :error="store.lists.mine.error"
-    :loaded="store.lists.mine.loaded"
-    :count="store.mine.length"
-    :offline="!online"
-    icon="clock"
-    :empty-title="t('approvalsLists.mine.emptyTitle')"
-    :empty-hint="t('approvalsLists.mine.emptyHint')"
-    @retry="reload"
-  >
-    <ul class="rows">
-      <li v-for="row in store.mine" :key="`${row.doctype}/${row.docname}`">
-        <button
-          type="button"
-          class="row"
-          :data-priority="priorityTone(row.priority)"
-          :aria-label="t('approvalsLists.mine.open', { name: row.docname })"
-          @click="open(row)"
-        >
-          <span class="body">
-            <span class="head">
-              <strong class="doc">{{ row.docname }}</strong>
-              <span class="pill" data-tone="info">{{ row.state }}</span>
-            </span>
-            <span class="sub">{{ row.transaction || row.doctype }}</span>
-            <span class="meta">
-              <span v-if="holderText(row)" class="tag">
-                <Icon name="user" :size="12" /> {{ holderText(row) }}
+  <div class="mine">
+    <ListSearch v-model="search" :placeholder="t('approvalsLists.search.placeholder')" />
+
+    <ApprovalListState
+      :loading="store.lists.mine.loading"
+      :error="store.lists.mine.error"
+      :loaded="store.lists.mine.loaded"
+      :count="rows.length"
+      :offline="!online"
+      :icon="noMatch ? 'search' : 'clock'"
+      :empty-title="noMatch ? t('approvalsLists.search.noMatchTitle') : t('approvalsLists.mine.emptyTitle')"
+      :empty-hint="noMatch ? t('approvalsLists.search.noMatchHint') : t('approvalsLists.mine.emptyHint')"
+      @retry="reload"
+    >
+      <ul class="rows">
+        <li v-for="row in rows" :key="`${row.doctype}/${row.docname}`">
+          <button
+            type="button"
+            class="row"
+            :data-priority="priorityTone(row.priority)"
+            :aria-label="t('approvalsLists.mine.open', { name: row.docname })"
+            @click="open(row)"
+          >
+            <span class="body">
+              <span class="head">
+                <strong class="doc">{{ row.docname }}</strong>
+                <span class="pill" data-tone="info">{{ row.state }}</span>
               </span>
-              <span class="tag" :class="{ late: row.days > OVERDUE_DAYS }">
-                <Icon name="clock" :size="12" /> {{ age(row.days) }}
+              <span class="sub">{{ row.transaction || row.doctype }}</span>
+              <span class="meta">
+                <span v-if="holderText(row)" class="tag">
+                  <Icon name="user" :size="12" /> {{ holderText(row) }}
+                </span>
+                <span class="tag" :class="{ late: row.days > OVERDUE_DAYS }">
+                  <Icon name="clock" :size="12" /> {{ age(row.days) }}
+                </span>
+                <span class="tag" :data-priority="priorityTone(row.priority)">{{ priorityText(row) }}</span>
               </span>
-              <span class="tag" :data-priority="priorityTone(row.priority)">{{ priorityText(row) }}</span>
             </span>
-          </span>
-          <Icon name="chevron-right" :size="16" class="go" />
-        </button>
-      </li>
-    </ul>
-  </ApprovalListState>
+            <Icon name="chevron-right" :size="16" class="go" />
+          </button>
+        </li>
+      </ul>
+    </ApprovalListState>
+  </div>
 </template>
 
 <style scoped>
+.mine { display: flex; flex-direction: column; gap: 0.75rem; }
 .rows { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.5rem; }
 
 /* The priority colour bar: Critical dark red, High red, Medium amber, Low green. */

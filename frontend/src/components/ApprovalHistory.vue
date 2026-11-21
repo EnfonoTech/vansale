@@ -9,10 +9,11 @@ import { useRouter } from "vue-router";
 import { useI18n } from "vue-i18n";
 import { useOnline } from "@/app/online";
 import { useApprovalsStore } from "@/stores/approvals";
-import { dateRangeReversed, mergeTransactions, type TransactionOption } from "@/features/approvals/lists";
+import { dateRangeReversed, mergeTransactions, searchRows, type TransactionOption } from "@/features/approvals/lists";
 import type { HistoryRow } from "@/api/approvals";
 import ApprovalListState from "./ApprovalListState.vue";
 import Icon from "./Icon.vue";
+import ListSearch from "./ListSearch.vue";
 
 const { t } = useI18n();
 const router = useRouter();
@@ -33,7 +34,29 @@ const settled = ref(false);
 const reversed = computed(() => dateRangeReversed(from.value, to.value));
 const filtered = computed(() => !!from.value || !!to.value || !!transaction.value);
 /** Rows from an earlier visit may belong to other filters, so they wait for this visit's answer (offline they are all there is). */
-const rows = computed<HistoryRow[]>(() => (settled.value || !online.value ? store.history : []));
+const loadedRows = computed<HistoryRow[]>(() => (settled.value || !online.value ? store.history : []));
+
+/**
+ * The search runs over the rows already on the phone (the latest LIMIT in the
+ * chosen dates and transaction), so it is instant and works offline. For older
+ * documents, narrow the dates.
+ */
+const search = ref("");
+const searching = computed(() => search.value.trim() !== "");
+const rows = computed<HistoryRow[]>(() =>
+  searchRows(loadedRows.value, search.value, [
+    "docname",
+    "doctype",
+    "transaction",
+    "action_state",
+    "current_state",
+    "role",
+    "completed_by",
+    "submitted_by",
+  ]),
+);
+/** Rows exist but the search hides them all: say so, rather than "no history". */
+const noMatch = computed(() => searching.value && loadedRows.value.length > 0 && rows.value.length === 0);
 
 async function reload(): Promise<void> {
   if (reversed.value) return;
@@ -101,15 +124,17 @@ function stateText(row: HistoryRow): string {
     </div>
     <p v-if="reversed" class="error" role="alert">{{ t("approvalsLists.history.rangeReversed") }}</p>
 
+    <ListSearch v-model="search" :placeholder="t('approvalsLists.search.placeholder')" />
+
     <ApprovalListState
       :loading="store.lists.history.loading"
       :error="store.lists.history.error"
       :loaded="settled || store.lists.history.loaded"
       :count="rows.length"
       :offline="!online"
-      icon="receipt"
-      :empty-title="filtered ? t('approvalsLists.history.emptyFilteredTitle') : t('approvalsLists.history.emptyTitle')"
-      :empty-hint="filtered ? t('approvalsLists.history.emptyFilteredHint') : t('approvalsLists.history.emptyHint')"
+      :icon="noMatch ? 'search' : 'receipt'"
+      :empty-title="noMatch ? t('approvalsLists.search.noMatchTitle') : filtered ? t('approvalsLists.history.emptyFilteredTitle') : t('approvalsLists.history.emptyTitle')"
+      :empty-hint="noMatch ? t('approvalsLists.search.noMatchHint') : filtered ? t('approvalsLists.history.emptyFilteredHint') : t('approvalsLists.history.emptyHint')"
       @retry="reload"
     >
       <ul class="rows">
@@ -138,7 +163,7 @@ function stateText(row: HistoryRow): string {
           </button>
         </li>
       </ul>
-      <p v-if="rows.length >= LIMIT" class="limit muted">
+      <p v-if="loadedRows.length >= LIMIT" class="limit muted">
         {{ t("approvalsLists.history.limitNote", { limit: LIMIT }) }}
       </p>
     </ApprovalListState>

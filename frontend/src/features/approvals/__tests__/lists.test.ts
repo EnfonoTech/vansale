@@ -10,6 +10,7 @@ import {
   retryNames,
   rowStates,
   safeDeskUrl,
+  searchRows,
   sentBackTarget,
 } from "../lists";
 import { item } from "./fixtures";
@@ -326,5 +327,39 @@ describe("expectedStatesOf", () => {
 
   it("ignores a name that is not among the documents", () => {
     expect(expectedStatesOf(docs, ["JV-9"])).toEqual({});
+  });
+});
+
+describe("searchRows", () => {
+  const rows = [
+    { docname: "PUR-ORD-2026-00033", transaction: "Purchase Order", holder: "Amjith", role_id: "" },
+    { docname: "SAL-INV-2026-00007", transaction: "Sales Invoice", holder: "", role_id: "Accounts Manager" },
+  ];
+  const fields = ["docname", "transaction", "holder", "role_id"] as const;
+
+  it("keeps every row for empty or blank text", () => {
+    expect(searchRows(rows, "", [...fields])).toBe(rows);
+    expect(searchRows(rows, "   ", [...fields])).toBe(rows);
+  });
+
+  it("matches any field, ignoring case and outer spaces", () => {
+    expect(searchRows(rows, " pur-ord ", [...fields]).map((r) => r.docname)).toEqual(["PUR-ORD-2026-00033"]);
+    expect(searchRows(rows, "sales invoice", [...fields]).map((r) => r.docname)).toEqual(["SAL-INV-2026-00007"]);
+    expect(searchRows(rows, "AMJITH", [...fields]).map((r) => r.docname)).toEqual(["PUR-ORD-2026-00033"]);
+    expect(searchRows(rows, "manager", [...fields]).map((r) => r.docname)).toEqual(["SAL-INV-2026-00007"]);
+  });
+
+  it("returns nothing when no field matches", () => {
+    expect(searchRows(rows, "zzz", [...fields])).toEqual([]);
+  });
+
+  it("only looks in the fields it is given", () => {
+    expect(searchRows(rows, "amjith", ["docname"])).toEqual([]);
+  });
+
+  it("copes with a missing value", () => {
+    const sparse = [{ docname: "A-1", reason: undefined as string | undefined }];
+    expect(searchRows(sparse, "a-1", ["docname", "reason"])).toHaveLength(1);
+    expect(searchRows(sparse, "x", ["reason"])).toEqual([]);
   });
 });

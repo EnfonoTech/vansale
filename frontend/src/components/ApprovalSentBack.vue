@@ -7,23 +7,42 @@
  * for a return, and for a user without the van app. Loads its own data on mount;
  * needs no van setup.
  */
-import { onMounted, watch } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import { useI18n } from "vue-i18n";
 import { useOnline } from "@/app/online";
 import { absoluteUrl } from "@/app/platform";
 import { useApprovalsStore } from "@/stores/approvals";
 import { useSessionStore } from "@/stores/session";
-import { ageKey, sentBackTarget } from "@/features/approvals/lists";
+import { ageKey, searchRows, sentBackTarget } from "@/features/approvals/lists";
 import type { SentBackRow } from "@/api/approvals";
 import ApprovalListState from "./ApprovalListState.vue";
 import Icon from "./Icon.vue";
+import ListSearch from "./ListSearch.vue";
 
 const { t, locale } = useI18n();
 const router = useRouter();
 const store = useApprovalsStore();
 const session = useSessionStore();
 const online = useOnline();
+
+const search = ref("");
+const searching = computed(() => search.value.trim() !== "");
+/** The returned documents that match the search text (all of them when it is empty). */
+const rows = computed<SentBackRow[]>(() =>
+  searchRows(store.sentBack, search.value, [
+    "docname",
+    "doctype",
+    "transaction",
+    "state",
+    "submitted_by",
+    "sent_back_by",
+    "role",
+    "reason",
+  ]),
+);
+/** Rows exist but the search hides them all: say so, rather than "nothing sent back". */
+const noMatch = computed(() => searching.value && store.sentBack.length > 0 && rows.value.length === 0);
 
 function reload(): Promise<void> {
   return store.loadSentBack();
@@ -64,49 +83,54 @@ function openAndCorrect(row: SentBackRow) {
 </script>
 
 <template>
-  <ApprovalListState
-    :loading="store.lists.sentBack.loading"
-    :error="store.lists.sentBack.error"
-    :loaded="store.lists.sentBack.loaded"
-    :count="store.sentBack.length"
-    :offline="!online"
-    :icon="store.sentBackUnavailable ? 'alert' : 'edit'"
-    :empty-title="store.sentBackUnavailable ? t('approvalsLists.sentBack.unavailableTitle') : t('approvalsLists.sentBack.emptyTitle')"
-    :empty-hint="store.sentBackUnavailable ? t('approvalsLists.sentBack.unavailableHint') : t('approvalsLists.sentBack.emptyHint')"
-    @retry="reload"
-  >
-    <ul class="rows">
-      <li v-for="row in store.sentBack" :key="`${row.doctype}/${row.docname}`" class="card-row">
-        <div class="head">
-          <strong class="doc">{{ row.docname }}</strong>
-          <span class="pill" data-tone="warning">{{ row.state }}</span>
-        </div>
-        <div class="sub">{{ row.transaction || row.doctype }}</div>
+  <div class="sent-back">
+    <ListSearch v-model="search" :placeholder="t('approvalsLists.search.placeholder')" />
 
-        <blockquote class="reason">
-          {{ row.reason || t("approvalsLists.sentBack.noReason") }}
-        </blockquote>
+    <ApprovalListState
+      :loading="store.lists.sentBack.loading"
+      :error="store.lists.sentBack.error"
+      :loaded="store.lists.sentBack.loaded"
+      :count="rows.length"
+      :offline="!online"
+      :icon="noMatch ? 'search' : store.sentBackUnavailable ? 'alert' : 'edit'"
+      :empty-title="noMatch ? t('approvalsLists.search.noMatchTitle') : store.sentBackUnavailable ? t('approvalsLists.sentBack.unavailableTitle') : t('approvalsLists.sentBack.emptyTitle')"
+      :empty-hint="noMatch ? t('approvalsLists.search.noMatchHint') : store.sentBackUnavailable ? t('approvalsLists.sentBack.unavailableHint') : t('approvalsLists.sentBack.emptyHint')"
+      @retry="reload"
+    >
+      <ul class="rows">
+        <li v-for="row in rows" :key="`${row.doctype}/${row.docname}`" class="card-row">
+          <div class="head">
+            <strong class="doc">{{ row.docname }}</strong>
+            <span class="pill" data-tone="warning">{{ row.state }}</span>
+          </div>
+          <div class="sub">{{ row.transaction || row.doctype }}</div>
 
-        <div class="meta">
-          <span v-if="row.sent_back_by" class="tag warn">
-            <Icon name="user" :size="12" />
-            {{ t("approvalsLists.sentBack.by", { name: row.sent_back_by }) }}<template v-if="row.role"> · {{ row.role }}</template>
-          </span>
-          <span class="tag">
-            <Icon name="clock" :size="12" /> {{ ago(row.days) }}
-          </span>
-        </div>
+          <blockquote class="reason">
+            {{ row.reason || t("approvalsLists.sentBack.noReason") }}
+          </blockquote>
 
-        <button type="button" class="open" :disabled="!canOpen(row)" @click="openAndCorrect(row)">
-          <Icon name="edit" :size="16" /> {{ t("approvalsLists.sentBack.openAndCorrect") }}
-        </button>
-        <p v-if="!canOpen(row)" class="no-link">{{ t("approvalsLists.sentBack.noLink") }}</p>
-      </li>
-    </ul>
-  </ApprovalListState>
+          <div class="meta">
+            <span v-if="row.sent_back_by" class="tag warn">
+              <Icon name="user" :size="12" />
+              {{ t("approvalsLists.sentBack.by", { name: row.sent_back_by }) }}<template v-if="row.role"> · {{ row.role }}</template>
+            </span>
+            <span class="tag">
+              <Icon name="clock" :size="12" /> {{ ago(row.days) }}
+            </span>
+          </div>
+
+          <button type="button" class="open" :disabled="!canOpen(row)" @click="openAndCorrect(row)">
+            <Icon name="edit" :size="16" /> {{ t("approvalsLists.sentBack.openAndCorrect") }}
+          </button>
+          <p v-if="!canOpen(row)" class="no-link">{{ t("approvalsLists.sentBack.noLink") }}</p>
+        </li>
+      </ul>
+    </ApprovalListState>
+  </div>
 </template>
 
 <style scoped>
+.sent-back { display: flex; flex-direction: column; gap: 0.75rem; }
 .rows { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.6rem; }
 .card-row {
   display: flex;
