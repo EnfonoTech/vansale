@@ -11,7 +11,7 @@ table has no list view and is only reachable through its parent.
 | [Van Daily Visit](#van-daily-visit) | Document | 12 |
 | [Van Visit Log](#van-visit-log) | Document | 11 |
 | [Vansale Allowed Mode of Payment](#vansale-allowed-mode-of-payment) | Child table | 1 |
-| [Vansale Configuration](#vansale-configuration) | Document | 33 |
+| [Vansale Configuration](#vansale-configuration) | Document | 35 |
 | [Vansale Configuration Cost Center](#vansale-configuration-cost-center) | Child table | 1 |
 | [Vansale Configuration User](#vansale-configuration-user) | Child table | 4 |
 | [Vansale Configuration Warehouse](#vansale-configuration-warehouse) | Child table | 1 |
@@ -20,7 +20,7 @@ table has no list view and is only reachable through its parent.
 | [Vansale Outbox](#vansale-outbox) | Document | 10 |
 | [Vansale Pin](#vansale-pin) | Document | 3 |
 | [Vansale Push Subscription](#vansale-push-subscription) | Document | 8 |
-| [Vansale Settings](#vansale-settings) | Single | 34 |
+| [Vansale Settings](#vansale-settings) | Single | 37 |
 
 ## Van Daily Visit
 
@@ -116,6 +116,8 @@ table has no list view and is only reachable through its parent.
 | | | | **-- Printing --** |
 | `invoice_print_format` | Link | Print Format | - |
 | `receipt_print_format` | Link | Print Format | - |
+| `quotation_print_format` | Link | Print Format | - |
+| `sales_order_print_format` | Link | Print Format | - |
 | `direct_print_mode` | Select | Follow Global / Enabled / Disabled / default `Follow Global` | - |
 | `print_after_submit_mode` | Select | Follow Global / Enabled / Disabled / default `Follow Global` | - |
 | `pdf_button_mode` | Select | Follow Global / Enabled / Disabled / default `Follow Global` | - |
@@ -249,7 +251,9 @@ table has no list view and is only reachable through its parent.
 | `allow_delete_draft_payment` | Check | default `1` | - |
 | | | | **-- Print --** |
 | `invoice_print_format` | Link | Print Format | - |
+| `quotation_print_format` | Link | Print Format | - |
 | `receipt_print_format` | Link | Print Format | - |
+| `sales_order_print_format` | Link | Print Format | - |
 | `direct_print` | Check | default `0` | - |
 | `print_after_submit` | Check | default `0` | - |
 | `show_pdf_button` | Check | default `1` | - |
@@ -268,6 +272,7 @@ table has no list view and is only reachable through its parent.
 | `update_stock_on_invoice` | Check | default `1` | - |
 | `quotation_next_step` | Select | Sales Order / Sales Invoice / Both / default `Sales Order` | - |
 | `cr_number_field` | Data | - | - |
+| `customer_scope` | Select | Own customers / Own list, search all / default `Own customers` | - |
 | `credit_needs_limit` | Check | default `0` | - |
 | `ask_driver` | Check | default `0` | - |
 

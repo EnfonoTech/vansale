@@ -52,6 +52,11 @@ Exported with `bench export-fixtures`, re-imported on every `bench migrate`.
         "module",
         "=",
         "Vansale"
+      ],
+      [
+        "name",
+        "!=",
+        "Sales Invoice-custom_return_reason"
       ]
     ]
   }
