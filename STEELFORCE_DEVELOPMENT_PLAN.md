@@ -332,10 +332,11 @@ We don't build approval screens. We make sure:
 
 ## Risks / notes
 
-- **`custom_return_reason` clash:** vansale ships it as a Select field, while Steel Force's site has an older Data
-  field with the same name. Today the site's field stays; if vansale's ever overwrites it, sf_trading's "Other +
-  text" breaks. Check after each migrate:
-  `select fieldtype from tabCustom Field where name='Sales Invoice-custom_return_reason'` → **Data**.
+- **`custom_return_reason`:** Steel Force's site owns an older Data field with this name (mandatory on return /
+  debit note; sf_trading reads it as "Other + text"). vansale no longer ships it as a fixture: it creates the
+  Select only on a site that has no such field and never updates an existing one, so a migrate leaves the site's
+  field alone. The app writes the reason text into a Data field and the option into a Select. Check:
+  `select fieldtype from tabCustom Field where name='Sales Invoice-custom_return_reason'` → **Data** on Steel Force.
 - **Back-dating:** permission_manager can refuse back-dated documents (off today). If production turns it on, an
   invoice saved offline and synced the next day would be refused.
 - **Credit and approval rules can't be checked offline**, so credit sales need a connection; cash sales work

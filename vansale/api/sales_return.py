@@ -17,7 +17,9 @@ from vansale.api.outbox import claim
 from vansale.api.datetime_util import document_datetime, naive_site_to_utc_iso, parse_client_ts
 
 # Structured return reasons. Mirrors the `custom_return_reason` Select options
-# shipped in `fixtures/custom_field.json` — keep the two in step.
+# in `vansale.setup.CREATE_ONLY_CUSTOM_FIELDS` — keep the two in step (a test
+# checks it). A site that already owns that field keeps its own definition;
+# see `reason_field_value`.
 RETURN_REASONS = (
     "Damaged",
     "Expired",
@@ -517,10 +519,41 @@ def _set_reason(doc, reason_option: str, reason_text: str, note: Optional[str]) 
     doc.remarks = f"{reason_text} — {extra}" if extra and extra != reason_text else reason_text
     if steelforce.set_return_reason(doc, reason_option, reason_text, note):
         return
-    # Guarded: a site that has not migrated the fixture yet still takes returns,
-    # it just loses the structured breakdown until the next migrate.
-    if doc.meta.has_field("custom_return_reason"):
-        doc.custom_return_reason = reason_option
+    # Guarded: a site without the field (not installed or migrated yet) still
+    # takes returns, it just loses the structured breakdown.
+    df = doc.meta.get_field("custom_return_reason")
+    if df is None:
+        return
+    value = reason_field_value(df, reason_option, reason_text)
+    if value is not None:
+        doc.custom_return_reason = value
+
+
+def reason_field_value(df, reason_option: str, reason_text: str) -> Optional[str]:
+    """What to store in `custom_return_reason`, by the site's own field type.
+
+    The field is the app's Select on a site that had none, but Steel Force
+    already owns a Data field of that name (free text, read by sf_trading as
+    "Other" + text) and the app leaves it alone, so both must work:
+
+    * Select: the option, or "Other" if the site's list lacks it (a Select
+      refuses a value outside its options and would fail the whole return).
+    * Data / text: the reason text, so "Other" keeps what the salesman typed.
+      Data holds 140 characters; the rest stays in Remarks.
+    * Any other type: nothing; the return still saves, remarks carry the reason.
+
+    Returns None when nothing should be stored.
+    """
+    if df.fieldtype == "Select":
+        options = [o.strip() for o in (df.options or "").split("\n") if o.strip()]
+        if reason_option in options:
+            return reason_option
+        return "Other" if "Other" in options else None
+    if df.fieldtype == "Data":
+        return (reason_text or reason_option)[:140]
+    if df.fieldtype in ("Small Text", "Text", "Long Text"):
+        return reason_text or reason_option
+    return None
 
 
 @frappe.whitelist(methods=["POST"])
