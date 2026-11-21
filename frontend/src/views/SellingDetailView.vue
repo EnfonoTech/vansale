@@ -11,7 +11,16 @@ import {
   type SellingDetail, type SellingKind,
 } from "@/api/selling";
 import { openPrint } from "@/api/print";
-import { cancellationOptions, requestCancellation, type CancellationOptions } from "@/api/steelforce";
+import {
+  cancellationOptions,
+  collectOrder,
+  orderPaymentState,
+  requestCancellation,
+  type CancellationOptions,
+  type OrderPaymentState,
+} from "@/api/steelforce";
+import { isOnline } from "@/app/online";
+import { genUuid } from "@/offline/queue";
 import { ApiError } from "@/app/frappe";
 import { useSessionStore } from "@/stores/session";
 import { useToastStore } from "@/stores/toasts";
@@ -37,6 +46,7 @@ async function load() {
   try {
     doc.value = await docDetail(props.kind, props.name);
     void loadCancellation();
+    void loadOrderPayment();
   } catch (e) {
     err.value = e instanceof Error ? e.message : String(e);
   } finally {
@@ -92,6 +102,65 @@ function tone(status: string): string {
 }
 
 const isDraft = computed(() => doc.value?.docstatus === 0);
+// One id per conversion, kept until it succeeds: a tap repeated after a
+// timeout returns the document the first tap made, not a second one.
+let convertId = genUuid();
+
+// Steel Force: money taken on a submitted order (an advance), the desk's
+// "Receive Payment" (sf_trading's own function: branch modes, cheques, loyalty
+// only when it closes the order). Online only.
+const pay = ref<OrderPaymentState | null>(null);
+const payOpen = ref(false);
+const payMode = ref("");
+const payAmount = ref<number | null>(null);
+const payChequeNo = ref("");
+const payChequeDate = ref(new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10));
+const payLoyalty = ref<number | null>(null);
+const payIsCheque = computed(() => Boolean(pay.value?.cheque_modes?.includes(payMode.value)));
+async function loadOrderPayment() {
+  pay.value = null;
+  if (props.kind !== "order" || doc.value?.docstatus !== 1 || !isOnline()) return;
+  try {
+    pay.value = await orderPaymentState(props.name);
+  } catch {
+    pay.value = null;
+  }
+}
+function openOrderPayment() {
+  payOpen.value = true;
+  payMode.value = pay.value?.modes?.[0] ?? pay.value?.cheque_modes?.[0] ?? "";
+  payAmount.value = pay.value?.balance ?? null;
+}
+async function receiveOrderPayment() {
+  if (!doc.value || !pay.value || busy.value) return;
+  const amount = Number(payAmount.value) || 0;
+  if (amount <= 0) { toasts.warn("Enter the amount"); return; }
+  if (payIsCheque.value && (!payChequeNo.value.trim() || !payChequeDate.value)) { toasts.warn("Enter the cheque number and date"); return; }
+  const ok = await confirmSubmit("Receive payment?", [
+    `${withCurrency(fmt(amount))} · ${payMode.value}${payLoyalty.value ? ` · loyalty ${fmt(Number(payLoyalty.value))}` : ""}`,
+    `Order ${doc.value.name}`,
+  ]);
+  if (!ok) return;
+  busy.value = true;
+  try {
+    const res = await collectOrder({
+      sales_order: doc.value.name,
+      mode_of_payment: payMode.value,
+      amount,
+      cheque_no: payIsCheque.value ? payChequeNo.value.trim() : undefined,
+      cheque_date: payIsCheque.value ? payChequeDate.value : undefined,
+      write_off_amount: Number(payLoyalty.value) || undefined,
+    });
+    toasts.success(`Payment ${res.payment_entries.join(", ")} recorded on ${doc.value.name}`);
+    payOpen.value = false;
+    payLoyalty.value = null;
+    await load();
+  } catch (e) {
+    toasts.error(e instanceof ApiError ? e.serverMessage ?? e.message : e instanceof Error ? e.message : String(e));
+  } finally {
+    busy.value = false;
+  }
+}
 const isOpen = computed(() => doc.value?.docstatus === 1 && !["Lost", "Expired", "Ordered", "Closed", "Completed", "Cancelled"].includes(doc.value.status));
 // Past its Valid Till: ERPNext makes no order from it (unless Selling Settings
 // allows), and the app makes no invoice either; it can still be marked lost.
@@ -179,7 +248,8 @@ const toOrder = () => run(async () => {
     });
     if (!ok) return;
   }
-  const res = await quotationToOrder(doc.value.name);
+  const res = await quotationToOrder(doc.value.name, undefined, convertId);
+  convertId = genUuid();
   if (res.converted_customer) toasts.success(`Lead converted to customer ${res.converted_customer}`);
   toasts.success(`Order ${res.name} created`);
   void router.push({ name: "order-detail", params: { name: res.name } });
@@ -195,7 +265,8 @@ const quoteToInvoice = () => run(async () => {
     });
     if (!ok) return;
   }
-  const res = await quotationToInvoice(doc.value.name);
+  const res = await quotationToInvoice(doc.value.name, convertId);
+  convertId = genUuid();
   if (res.converted_customer) toasts.success(`Lead converted to customer ${res.converted_customer}`);
   toasts.success(`Invoice ${res.name} drafted — choose payment and submit`);
   void router.push({ name: "invoice-edit", params: { name: res.name } });
@@ -203,7 +274,8 @@ const quoteToInvoice = () => run(async () => {
 
 const toInvoice = () => run(async () => {
   if (!doc.value) return;
-  const res = await orderToInvoice(doc.value.name);
+  const res = await orderToInvoice(doc.value.name, convertId);
+  convertId = genUuid();
   toasts.success(`Invoice ${res.name} drafted — choose payment and submit`);
   void router.push({ name: "invoice-edit", params: { name: res.name } });
 });
@@ -274,6 +346,9 @@ const open = (name: string, route: string) => router.push({ name: route, params:
           </template>
           <template v-else-if="isOpen && kind === 'order' && (doc.per_billed ?? 0) < 100">
             <button class="primary" :disabled="busy" @click="toInvoice"><Icon name="invoice" :size="16" /> Create invoice</button>
+            <button v-if="pay?.enabled && (pay.balance ?? 0) > 0 && !payOpen" class="ghost" :disabled="busy" @click="openOrderPayment">
+              <Icon name="payment" :size="16" /> Receive payment
+            </button>
           </template>
           <button v-if="!isDraft" class="ghost" :disabled="busy" @click="print"><Icon name="receipt" :size="16" /> Print</button>
           <button v-if="cancelOptions?.can_request && !cancelOpen" class="ghost danger-ghost" :disabled="busy"
@@ -301,6 +376,40 @@ const open = (name: string, route: string) => router.push({ name: route, params:
           <div class="row">
             <button class="danger" :disabled="busy || !lostReady" @click="lost">Mark lost</button>
             <button class="ghost" :disabled="busy" @click="lostOpen = false">Back</button>
+          </div>
+        </div>
+        <div v-if="payOpen && pay" class="stack-sm cancel-form">
+          <span class="tiny">
+            Left to pay on the order: {{ fmt(pay.balance ?? 0) }}<template v-if="(pay.advance_paid ?? 0) > 0"> (advance so far {{ fmt(pay.advance_paid ?? 0) }})</template>
+          </span>
+          <label class="field">
+            <span class="tiny">Mode of payment</span>
+            <select v-model="payMode">
+              <option v-for="m in pay.modes ?? []" :key="m" :value="m">{{ m }}</option>
+              <option v-for="m in pay.cheque_modes ?? []" :key="`c-${m}`" :value="m">{{ m }} (cheque)</option>
+            </select>
+          </label>
+          <label class="field">
+            <span class="tiny">Amount</span>
+            <input type="number" min="0" step="any" inputmode="decimal" v-model.number="payAmount" />
+          </label>
+          <template v-if="payIsCheque">
+            <label class="field">
+              <span class="tiny">Cheque no.</span>
+              <input type="text" v-model="payChequeNo" inputmode="numeric" />
+            </label>
+            <label class="field">
+              <span class="tiny">Cheque date</span>
+              <input type="date" v-model="payChequeDate" />
+            </label>
+          </template>
+          <label v-if="(pay.max_write_off ?? 0) > 0" class="field">
+            <span class="tiny">Loyalty (up to {{ fmt(pay.max_write_off ?? 0) }}, only to close the order)</span>
+            <input type="number" min="0" step="any" inputmode="decimal" v-model.number="payLoyalty" />
+          </label>
+          <div class="row">
+            <button class="primary" :disabled="busy" @click="receiveOrderPayment">Record payment</button>
+            <button class="ghost" :disabled="busy" @click="payOpen = false">Back</button>
           </div>
         </div>
         <div v-if="cancelOpen" class="stack-sm cancel-form">

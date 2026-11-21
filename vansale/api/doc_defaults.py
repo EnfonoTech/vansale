@@ -27,6 +27,10 @@ def apply_van_defaults(doc) -> None:
         price_list = current_user_van_price_list() or frappe.db.get_single_value(
             "Selling Settings", "selling_price_list"
         )
+        # Steel Force: one of the branch's own lists (sf_trading refuses others).
+        from vansale import steelforce
+
+        price_list = steelforce.branch_selling_list(price_list)
         if price_list:
             doc.selling_price_list = price_list
 

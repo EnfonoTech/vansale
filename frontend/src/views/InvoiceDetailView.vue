@@ -121,7 +121,7 @@ async function openRefund() {
   refundOpen.value = true;
   if (refundMops.value.length) return;
   try {
-    refundMops.value = await modesOfPayment();
+    refundMops.value = await modesOfPayment(true);
   } catch {
     refundMops.value = [];
   }
@@ -226,6 +226,8 @@ async function submitInvoice() {
       item_code: i.item_code,
       item_name: i.item_name,
       rate: i.rate,
+      // ERPNext's own figure for the draft (after the invoice discount).
+      net_rate: i.net_rate ?? i.rate,
       conversion_factor: i.conversion_factor,
     })),
     // What the credit-limit check will count: the draft's unpaid part.
@@ -354,7 +356,7 @@ async function deleteInvoice() {
               <Icon name="share" :size="16" /> {{ sharing ? "Preparing…" : "Share" }}
             </button>
             <button
-              v-if="inv.docstatus === 1 && !inv.is_return"
+              v-if="inv.docstatus === 1 && !inv.is_return && !inv.return_window?.blocked"
               class="ghost"
               @click="returnInvoice"
             >
@@ -362,6 +364,11 @@ async function deleteInvoice() {
             </button>
           </template>
         </div>
+        <!-- Steel Force return window: said here, not after the return is filled in. -->
+        <p v-if="inv.return_window?.past_window" class="xsmall" :class="inv.return_window.blocked ? 'muted' : 'warn-note'">
+          {{ inv.return_window.blocked ? "No return:" : "Past the return window:" }}
+          sold {{ inv.return_window.age }} days ago, returns allowed within {{ inv.return_window.days }} days{{ inv.return_window.blocked ? "." : " (you may still return it)." }}
+        </p>
       </section>
 
       <!-- Pay the customer back for this credit note (kept as credit at the return). -->
@@ -447,6 +454,10 @@ async function deleteInvoice() {
           <strong>Grand total</strong>
           <strong><SarSymbol :code="session.currency" />{{ fmt(inv.grand_total) }}</strong>
         </div>
+        <div v-if="(inv.total_advance ?? 0) > 0" class="totals-row">
+          <span class="muted">Advance (paid on the order)</span>
+          <span><SarSymbol :code="session.currency" />{{ fmt(inv.total_advance ?? 0) }}</span>
+        </div>
         <div class="totals-row">
           <span class="muted">Paid</span>
           <span><SarSymbol :code="session.currency" />{{ fmt(inv.paid_amount) }}</span>
@@ -477,6 +488,7 @@ async function deleteInvoice() {
 </template>
 
 <style scoped>
+.warn-note { color: var(--warning); margin: 0.4rem 0 0; }
 .hero {
   background: linear-gradient(135deg, color-mix(in srgb, var(--primary) 10%, var(--surface)) 0%, var(--surface) 100%);
 }

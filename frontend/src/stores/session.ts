@@ -135,6 +135,12 @@ export const useSessionStore = defineStore("session", {
     showPdfButton: (s) => s.defaults?.print?.pdf_button !== false,
     showShareButton: (s) => s.defaults?.print?.share_button !== false,
     customerForm: (s) => s.defaults?.customer_form ?? null,
+    /** Steel Force loyalty (write-off at payment); null = not offered. */
+    loyalty: (s) => s.defaults?.loyalty ?? null,
+    /** Steel Force site (sf_trading's rules run on every save). */
+    steelforce: (s) => s.defaults?.steelforce === true,
+    /** Lists a line may be priced from (offer lists); empty = no choice per line. */
+    rowPriceLists: (s): string[] => s.defaults?.row_price_lists ?? [],
     splitPayment: (s) => Boolean(s.defaults?.split_payment),
     advancePayment: (s) => Boolean(s.defaults?.advance_payment),
     lineDiscount: (s) => s.defaults?.invoice_options?.line_discount !== false,

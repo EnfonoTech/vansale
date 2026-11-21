@@ -15,6 +15,12 @@ frappe.ui.form.on("Vansale Settings", {
 	},
 	// "PDF same as browser print": Chromium + fonts on the server (vansale/pdf_engine.py).
 	refresh(frm) {
+		// Steel Force sites: the settings and per-van setup the app needs next to sf_trading.
+		frm.add_custom_button(__("Check Steel Force setup"), () => {
+			frappe.call("vansale.steelforce.setup_check.check").then((r) => {
+				frappe.msgprint({ title: __("Steel Force setup"), message: r.message.html, wide: true });
+			});
+		});
 		frm.add_custom_button(__("Check PDF setup"), () => {
 			frappe.call("vansale.pdf_engine.check").then((r) => {
 				frappe.msgprint({ title: __("PDF engine"), message: r.message.html, wide: true });

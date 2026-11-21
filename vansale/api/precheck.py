@@ -85,12 +85,15 @@ def check(
     lines: Optional[list[dict[str, Any]]] = None,
     amount: Optional[float] = None,
     from_order: Optional[int] = None,
+    is_return: Optional[int] = None,
 ) -> dict:
     """{"problems": [...], "warnings": [...]} for a sale about to be submitted.
 
     `amount`: the part of the sale left unpaid (the whole order for an order),
     for the credit-limit check. `from_order`: an invoice made from an order,
-    which ERPNext does not check again (the order was)."""
+    which ERPNext does not check again (the order was). `is_return`: a
+    credit note — only the customer gates that also refuse a return (Steel
+    Force's credit-customer documents and phone); no credit limit or price."""
     from vansale import steelforce
     from vansale.api.access import check_read
     from vansale.api.invoice import _user_company
@@ -104,6 +107,10 @@ def check(
 
     problems: list[str] = []
     warnings: list[str] = []
+    is_return = frappe.utils.cint(is_return)
+    if is_return:
+        extra = steelforce.precheck(doctype, customer, payment_type, [], 0, is_return=1)
+        return {"problems": extra.get("problems") or [], "warnings": extra.get("warnings") or []}
     if (payment_type or "").lower() in ("credit", "cheque") and doctype != "Quotation":
         problem = credit_limit_problem(customer, _user_company())
         if problem:

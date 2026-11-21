@@ -14,7 +14,7 @@ import frappe
 from frappe import _
 from frappe.utils import cint, flt, getdate, nowdate
 
-from vansale.api.datetime_util import naive_site_to_utc_iso, parse_client_ts
+from vansale.api.datetime_util import document_datetime, naive_site_to_utc_iso, parse_client_ts
 from vansale.api.sales_return import refund_owed, resolve_return_reason, return_uoms, returned_qty_by_row
 from vansale.api.access import check_read, readable_doc
 from vansale.api.outbox import claim
@@ -228,6 +228,9 @@ def save(
     cheque_no: Optional[str] = None,  # payment_type "cheque" (post-dated cheque, Steel Force)
     cheque_date: Optional[str] = None,
     driver: Optional[str] = None,  # delivery person on a cash sale (Steel Force)
+    cheque_amount: Optional[float] = None,  # part of the sale paid by the cheque (blank = all)
+    cheque_rest_mode: Optional[str] = None,  # how the rest of a part-cheque sale is paid now
+    write_off_amount: Optional[float] = None,  # Steel Force "Loyalty" written off at payment
 ) -> dict:
     if not client_id:
         frappe.throw(_("client_id is required"))
@@ -250,7 +253,7 @@ def save(
     company = _user_company()
     set_warehouse = warehouse or _get_default_warehouse(company)
 
-    posting = parse_client_ts(posting_ts) if posting_ts else frappe.utils.now_datetime()
+    posting = document_datetime(posting_ts)
 
     doc = frappe.new_doc("Sales Invoice")
     doc.customer = customer
@@ -277,15 +280,16 @@ def save(
     later = pay_type == "cash" and _collect_later(collect_later, doc)
     pe_mode = (pay_type == "cash" and not later and _cash_via_payment_entry()) or pay_type == "cheque"
     rows = (
-        _cheque_rows(mode_of_payment, cheque_no, cheque_date) if pay_type == "cheque"
+        _cheque_rows(mode_of_payment, cheque_no, cheque_date, cheque_amount, cheque_rest_mode, payments) if pay_type == "cheque"
         else _payment_rows(mode_of_payment, payments) if pay_type == "cash" and not later
         else []
     )
+    write_off = _loyalty(write_off_amount, pe_mode, rows, doc.customer, doc.company, items)
     if pay_type == "cash" and not later and not pe_mode:
         doc.is_pos = 1
         # payments rows filled after insert so grand_total is known.
     if pe_mode:
-        _set_cash_mode(doc, rows)
+        _set_cash_mode(doc, rows, write_off)
 
     # Tax template — resolved through the customer's Tax Category / Tax Rule
     # so a zero-rated or exempt customer is not charged standard VAT. Falls
@@ -315,7 +319,7 @@ def save(
         _fill_pos_payments(doc, rows)
         doc.save()
     elif pe_mode:
-        _check_rows_total(doc, rows)
+        _check_rows_total(doc, rows, write_off)
 
     payment_entries: list[str] = []
     if submit:
@@ -387,9 +391,20 @@ def _payment_rows(mode_of_payment: Optional[str], payments: Optional[list[dict[s
     return rows
 
 
-def _cheque_rows(mode_of_payment: Optional[str], cheque_no: Optional[str], cheque_date: Optional[str]) -> list[dict]:
-    """A post-dated cheque for the whole invoice: one of the branch's PDC modes,
-    its number and date (sf_trading's PDC fields come from these)."""
+def _cheque_rows(
+    mode_of_payment: Optional[str],
+    cheque_no: Optional[str],
+    cheque_date: Optional[str],
+    cheque_amount: Optional[float] = None,
+    rest_mode: Optional[str] = None,
+    payments: Optional[list[dict[str, Any]]] = None,
+) -> list[dict]:
+    """A post-dated cheque: one of the branch's PDC modes, its number and date
+    (sf_trading's PDC fields come from these). For the whole invoice, or a
+    part (`cheque_amount`) with the rest paid now in other modes — `payments`
+    as in a split cash sale, or the older single `rest_mode` (kept for sales
+    queued by an earlier app). The desk's cheque dialog takes cheque and other
+    modes together."""
     if not steelforce.cheque_modes():
         frappe.throw(_("Cheque sales are not set up for your branch"))
     mode = (mode_of_payment or "").strip() or steelforce.cheque_modes()[0]
@@ -398,23 +413,80 @@ def _cheque_rows(mode_of_payment: Optional[str], cheque_no: Optional[str], chequ
     if not (cheque_no or "").strip() or not cheque_date:
         frappe.throw(_("Enter the cheque number and date"))
     check_mode_allowed(mode)
-    return [{
+    amount = flt(cheque_amount) if cheque_amount not in (None, "") else None
+    if amount is not None and amount <= 0:
+        frappe.throw(_("Enter the cheque amount"))
+    rows = [{
         "mode_of_payment": mode,
-        "amount": None,
+        "amount": amount,
         "reference_no": cheque_no.strip(),
         "reference_date": str(getdate(cheque_date)),
     }]
+    rest = [
+        {
+            "mode_of_payment": (p.get("mode_of_payment") or "").strip(),
+            "amount": flt(p.get("amount")) if p.get("amount") not in (None, "") else None,
+            "reference_no": p.get("reference_no") or None,
+        }
+        for p in (payments or [])
+        if (p.get("mode_of_payment") or "").strip() and flt(p.get("amount")) != 0
+    ]
+    if not rest and amount is not None and (rest_mode or "").strip():
+        rest = [{"mode_of_payment": rest_mode.strip(), "amount": None, "reference_no": None}]
+    if rest and amount is None:
+        frappe.throw(_("Enter the cheque amount"))
+    if len(rest) > 1:
+        from vansale.api.me import split_payment_allowed
+
+        if not split_payment_allowed():
+            frappe.throw(_("Paying with several modes is not enabled for your van"))
+    for row in rest:
+        if row["amount"] is not None and row["amount"] < 0:
+            frappe.throw(_("Payment amount cannot be negative"))
+        if row["mode_of_payment"] in steelforce.cheque_modes():
+            frappe.throw(
+                _("The rest is paid now: choose a cash or bank mode, not {0}").format(row["mode_of_payment"])
+            )
+        check_mode_allowed(row["mode_of_payment"])
+    return rows + rest
+
+
+def _loyalty(amount, pe_mode: bool, rows: list[dict], customer: str, company: str, items) -> float:
+    """Steel Force "Loyalty" written off when the customer pays: only where the
+    collection goes through sf_trading's payment function (a cheque, or a cash
+    sale posted by Payment Entry and submitted at once), and only what
+    sf_trading would accept — checked now so the sale is not refused later."""
+    amount = flt(amount)
+    if amount <= 0:
+        return 0.0
+    if amount < 0 or not pe_mode or not rows:
+        frappe.throw(_("Loyalty is given only on a sale paid now"))
+    if cash_sale_settings()["payment_entry_status"] != "Submit" and any(
+        not r.get("reference_date") for r in rows
+    ):
+        frappe.throw(_("Loyalty needs the cash payment posted at once (Payment Entry status Submit)"))
+    orders = {i.get("sales_order") for i in (items or []) if i.get("sales_order")}
+    problem = steelforce.loyalty_problem(customer, company, amount, orders)
+    if problem:
+        frappe.throw(problem)
+    return amount
 
 
 def _invoice_total(doc) -> float:
     return flt(doc.rounded_total) or flt(doc.grand_total)
 
 
-def _check_rows_total(doc, rows: list[dict]) -> None:
-    paid = sum(flt(r["amount"]) for r in rows if r["amount"] is not None)
+def _check_rows_total(doc, rows: list[dict], write_off: float = 0) -> None:
+    paid = sum(flt(r["amount"]) for r in rows if r["amount"] is not None) + flt(write_off)
     if paid > _invoice_total(doc) + 0.005:
         frappe.throw(
             _("Payments ({0}) are more than the invoice total ({1})").format(paid, _invoice_total(doc))
+        )
+    # A part cheque needs the rest paid now (the desk allocates the whole sale).
+    cheque = [r for r in rows if r.get("reference_date")]
+    if cheque and all(r["amount"] is not None for r in rows) and paid < _invoice_total(doc) - 0.005:
+        frappe.throw(
+            _("The cheque covers {0} of {1}: choose how the rest is paid").format(paid, _invoice_total(doc))
         )
 
 
@@ -434,7 +506,7 @@ def _fill_pos_payments(doc, rows: list[dict]) -> None:
         doc.append("payments", {"mode_of_payment": mop, "account": account, "amount": amount})
 
 
-def _set_cash_mode(doc, rows: list[dict]) -> None:
+def _set_cash_mode(doc, rows: list[dict], write_off: float = 0) -> None:
     """Payment Entry posting: no POS payments table, so keep the chosen
     mode(s) on the invoice until submit creates the Payment Entries."""
     from vansale.api.payment import _resolve_accounts
@@ -449,15 +521,28 @@ def _set_cash_mode(doc, rows: list[dict]) -> None:
         # The full rows are kept when the plain mode isn't enough to collect:
         # several modes, a part amount, or a cheque's number and date.
         detailed = len(rows) > 1 or rows[0]["amount"] is not None or bool(rows[0].get("reference_date"))
-        doc.custom_vansale_payments = frappe.as_json(rows) if detailed else None
+        if write_off:
+            # Loyalty rides with the rows until submit makes the entries.
+            doc.custom_vansale_payments = frappe.as_json({"rows": rows, "write_off": write_off})
+        else:
+            doc.custom_vansale_payments = frappe.as_json(rows) if detailed else None
 
 
 def _stored_rows(inv) -> list[dict]:
     if inv.get("custom_vansale_payments"):
-        return frappe.parse_json(inv.custom_vansale_payments)
+        stored = frappe.parse_json(inv.custom_vansale_payments)
+        return stored.get("rows") or [] if isinstance(stored, dict) else stored
     if inv.get("custom_vansale_payment_mode"):
         return [{"mode_of_payment": inv.custom_vansale_payment_mode, "amount": None, "reference_no": None}]
     return []
+
+
+def _stored_write_off(inv) -> float:
+    if inv.get("custom_vansale_payments"):
+        stored = frappe.parse_json(inv.custom_vansale_payments)
+        if isinstance(stored, dict):
+            return flt(stored.get("write_off"))
+    return 0.0
 
 
 def _cash_payment_entry(inv) -> list[str]:
@@ -472,11 +557,17 @@ def _cash_payment_entry(inv) -> list[str]:
     from vansale.api.payment import build_payment_entry, submit_if_configured
 
     names: list[str] = []
-    remaining = flt(inv.outstanding_amount)
-    handled = steelforce.collect_invoice(inv, _stored_rows(inv), cash_sale_settings()["payment_entry_status"])
+    rows = _stored_rows(inv)
+    handled = steelforce.collect_invoice(
+        inv, rows, cash_sale_settings()["payment_entry_status"], write_off=_stored_write_off(inv)
+    )
     if handled is not None:
-        return handled
-    for row in _stored_rows(inv):
+        names, rows = handled
+        if not rows:
+            return names
+        inv.reload()
+    remaining = flt(inv.outstanding_amount)
+    for row in rows:
         amount = min(flt(row["amount"]) if row.get("amount") is not None else remaining, remaining)
         if amount <= 0:
             continue
@@ -540,6 +631,10 @@ def _append_items(doc, items: list[dict[str, Any]], set_warehouse: Optional[str]
             row.discount_percentage = float(item["discount_percentage"])
         if item.get("discount_amount") is not None:
             row.discount_amount = float(item["discount_amount"])
+        # Steel Force: the line's own price list (an offer list); its minimum
+        # price is then that list's (sf_trading's per-row Price List).
+        if item.get("price_list") and row.meta.has_field("custom_price_list"):
+            row.custom_price_list = steelforce.row_price_list(item["price_list"])
         if set_warehouse:
             row.warehouse = item.get("warehouse") or set_warehouse
 
@@ -608,6 +703,9 @@ def update_draft(
     cheque_no: Optional[str] = None,
     cheque_date: Optional[str] = None,
     driver: Optional[str] = None,
+    cheque_amount: Optional[float] = None,
+    cheque_rest_mode: Optional[str] = None,
+    write_off_amount: Optional[float] = None,
 ) -> dict:
     """In-place update a draft Sales Invoice.
 
@@ -652,12 +750,14 @@ def update_draft(
     later = pay_type == "cash" and _collect_later(collect_later, doc)
     pe_mode = (pay_type == "cash" and not later and _cash_via_payment_entry()) or pay_type == "cheque"
     rows = (
-        _cheque_rows(mode_of_payment, cheque_no, cheque_date) if pay_type == "cheque"
+        _cheque_rows(mode_of_payment, cheque_no, cheque_date, cheque_amount, cheque_rest_mode, payments) if pay_type == "cheque"
         else _payment_rows(mode_of_payment, payments) if pay_type == "cash" and not later
         else []
     )
+    # The draft's own rows name the orders it bills (loyalty already given there).
+    write_off = _loyalty(write_off_amount, pe_mode, rows, doc.customer, doc.company, [*items, *(r.as_dict() for r in doc.items)])
     if pe_mode:
-        _set_cash_mode(doc, rows)
+        _set_cash_mode(doc, rows, write_off)
     elif pay_type == "cash" and not later:
         doc.is_pos = 1
     elif pay_type == "credit" or later:
@@ -823,19 +923,19 @@ def return_against(
             "idempotent_replay": True,
         }
 
-    from vansale.api.sales_return import _set_reason, build_return_against, refund_credit_note
+    from vansale.api.sales_return import _set_reason, build_return_against, submit_or_hold
 
     original = readable_doc("Sales Invoice", original_name)
-    posting = parse_client_ts(posting_ts) if posting_ts else frappe.utils.now_datetime()
+    posting = document_datetime(posting_ts)
     doc = build_return_against(original, items, posting, discount_amount)
     _set_reason(doc, reason_option, reason_text, note)
     doc.custom_client_id = client_id
 
     doc.insert(ignore_permissions=False)
     refund_entry = None
+    held = False
     if submit:
-        doc.submit()
-        refund_entry = refund_credit_note(doc, refund)
+        refund_entry, held = submit_or_hold(doc, refund)
 
     _record_outbox(client_id, doc.name, posting_ts, {
         "return_against": original.name,
@@ -854,6 +954,8 @@ def return_against(
         "idempotent_replay": False,
         "is_return": 1,
         "refund_entry": refund_entry,
+        # Steel Force: saved as a draft for its return approval to submit.
+        "needs_approval": held,
     }
 
 
@@ -970,6 +1072,8 @@ def detail(name: str) -> dict:
         # Delivery person on a cash sale (Steel Force).
         "driver": steelforce.driver_of(doc),
         "driver_name": steelforce.driver_name(steelforce.driver_of(doc)),
+        # Steel Force: how far the return window is (None = no window).
+        "return_window": steelforce.return_window(doc),
         # Made from an order: the order already counts against the credit limit.
         "sales_order": next((i.sales_order for i in doc.items if i.get("sales_order")), None),
         "payment_type": steelforce.payment_type_of(doc)
@@ -978,6 +1082,8 @@ def detail(name: str) -> dict:
             [{"mode_of_payment": p.mode_of_payment, "amount": flt(p.amount)} for p in doc.payments]
             if doc.get("payments") else _stored_rows(doc)
         ),
+        # Steel Force "Loyalty" chosen on a draft (written off when it is collected).
+        "write_off_amount": _stored_write_off(doc),
         "mode_of_payment": (
             doc.payments[0].mode_of_payment if doc.get("payments") else doc.get("custom_vansale_payment_mode")
         ),
@@ -986,6 +1092,9 @@ def detail(name: str) -> dict:
         "total_taxes_and_charges": float(doc.total_taxes_and_charges or 0),
         "discount_amount": float(doc.discount_amount or 0),
         "outstanding_amount": float(doc.outstanding_amount or 0),
+        # Advance already paid (an order's advance ERPNext applies to the
+        # invoice made from it): not to be collected again.
+        "total_advance": float(doc.get("total_advance") or 0),
         # Credit note: what may still be paid back (open credit less draft refunds).
         "refundable_amount": refund_owed(doc) if doc.is_return else 0.0,
         "paid_amount": float((doc.grand_total or 0) - (doc.outstanding_amount or 0)),
@@ -1003,6 +1112,8 @@ def detail(name: str) -> dict:
                 "stock_qty": float(i.stock_qty or 0) or float(i.qty or 0) * float(i.conversion_factor or 1),
                 "return_uoms": units.get(i.name, []),
                 "rate": float(i.rate or 0),
+                # After the invoice's additional discount, tax left out.
+                "net_rate": float(i.net_rate or 0),
                 "price_list_rate": float(i.price_list_rate or 0),
                 "discount_percentage": float(i.discount_percentage or 0),
                 "discount_amount": float(i.discount_amount or 0),
@@ -1011,6 +1122,7 @@ def detail(name: str) -> dict:
                 "conversion_factor": float(i.conversion_factor or 1),
                 "stock_uom": i.stock_uom,
                 "warehouse": i.warehouse,
+                "price_list": i.get("custom_price_list"),
             }
             for i in doc.items
         ],

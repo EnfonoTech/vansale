@@ -22,6 +22,7 @@ import { ApiError } from "@/app/frappe";
 import { countryOptions, defaultCountry, isKsa, ksaAddressErrors, ksaVatError, mobileProblem } from "@/features/van/ksa";
 import { useSessionStore } from "@/stores/session";
 import { useToastStore } from "@/stores/toasts";
+import { genUuid } from "@/offline/queue";
 import Icon from "@/components/Icon.vue";
 
 const router = useRouter();
@@ -64,6 +65,10 @@ const additionalNumber = ref("");
 const district = ref("");
 
 const busy = ref(false);
+// One id for this new customer, kept across retries: a create that timed out
+// (a large photo) and is tapped again returns the first customer instead of
+// making "Name - 1" or failing on its own VAT number.
+const clientId = genUuid();
 
 // B2B is offered only where the user may make one (older servers: always).
 const canB2B = computed(() => session.customerForm?.b2b !== false);
@@ -113,6 +118,7 @@ async function submit() {
   busy.value = true;
   try {
     const res = await createCustomer({
+      client_id: clientId,
       customer_name: customerName.value.trim(),
       customer_type: isB2B.value ? "b2b" : "b2c",
       mobile_no: mobileNo.value || undefined,
@@ -134,7 +140,8 @@ async function submit() {
     });
     toasts.success(`Customer ${res.customer_name} created`);
     if (redirectTo === "invoice") {
-      router.replace({ name: "invoice-new", query: { customer: res.name } });
+      // restore=1: the invoice form puts back the cart left for this customer.
+      router.replace({ name: "invoice-new", query: { customer: res.name, restore: "1" } });
     } else {
       router.replace({ name: "customer-detail", params: { name: res.name } });
     }

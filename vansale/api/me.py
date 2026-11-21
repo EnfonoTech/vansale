@@ -213,6 +213,29 @@ def config_defaults() -> dict:
         "customer_form": customer_form_config(company),
         "selling_flow": selling_flow(user),
         "approvals": {"enabled": approvals.is_available()},
+        "loyalty": loyalty_settings(company, user),
+        # sf_trading runs next to the app (its credit / approval rules need a connection).
+        "steelforce": steelforce_rules_active(),
+        # Lists a line may be priced from instead of the document's (an offer list).
+        "row_price_lists": row_price_lists(),
+    }
+
+
+def loyalty_settings(company: str | None, user: str | None = None) -> dict | None:
+    """Steel Force "Loyalty" (written off when the customer pays): the
+    company's maximum, and whether a cash sale can carry it (it rides on the
+    Payment Entry sf_trading makes, so only a cash sale posted by Payment
+    Entry and submitted at once; a cheque always). None where not set up."""
+    from vansale import steelforce
+
+    config = steelforce.loyalty_config(company)
+    if not config:
+        return None
+    cash = cash_sale_settings(user)
+    return {
+        "max": config["max"],
+        "on_cash": cash["posting"] == "Payment Entry" and cash["payment_entry_status"] == "Submit",
+        "on_collection": collection_payment_entry_status(user) == "Submit",
     }
 
 
@@ -305,15 +328,23 @@ def customer_name_2_field() -> str | None:
 
 def cr_number_field() -> str | None:
     """Customer field for the Commercial Registration number: Vansale Settings
-    "CR number field" when it exists on Customer, else `custom_cr_number`."""
+    "CR number field" when it exists on Customer, else the first known one
+    (`custom_cr_number`, or sf_trading's `custom_commercial_registration_number`,
+    which refuses a VAT customer without it)."""
     meta = frappe.get_meta("Customer")
     configured = frappe.db.get_single_value("Vansale Settings", "cr_number_field") if frappe.get_meta(
         "Vansale Settings"
     ).has_field("cr_number_field") else None
-    for fieldname in ([configured] if configured else []) + ["custom_cr_number"]:
+    for fieldname in ([configured] if configured else []) + ["custom_cr_number", "custom_commercial_registration_number"]:
         if fieldname and meta.has_field(fieldname):
             return fieldname
     return None
+
+
+def row_price_lists() -> list[str]:
+    from vansale import steelforce
+
+    return steelforce.row_price_lists()
 
 
 def steelforce_rules_active() -> bool:
@@ -525,23 +556,37 @@ def return_without_invoice_allowed(user: str | None = None) -> bool:
 
 
 def print_formats(user: str | None = None) -> dict:
-    """Print formats the app uses: van → Vansale Settings → the app's own.
+    """Print formats the app uses: van → Vansale Settings → (Steel Force) the
+    company's desk print format → the app's own.
 
     Quotation / Sales Order have no app layout: they fall back to the
     doctype's default print format (Customize Form), else Standard.
     """
+    from vansale import steelforce
+
+    # Steel Force: what the company's desk prints (Company > Print Formats)
+    # when the van and Vansale Settings choose nothing.
+    company = van_default("Company", user) or frappe.defaults.get_user_default("Company", user or frappe.session.user)
+
+    def company_or(doctype: str, fallback: str) -> str:
+        return steelforce.company_print_format(company, doctype) or fallback
+
     return {
         "invoice": _van_or_global(
-            "invoice_print_format", "invoice_print_format", DEFAULT_INVOICE_PRINT_FORMAT, user
+            "invoice_print_format", "invoice_print_format",
+            company_or("Sales Invoice", DEFAULT_INVOICE_PRINT_FORMAT), user,
         ),
         "receipt": _van_or_global(
-            "receipt_print_format", "receipt_print_format", DEFAULT_RECEIPT_PRINT_FORMAT, user
+            "receipt_print_format", "receipt_print_format",
+            company_or("Payment Entry", DEFAULT_RECEIPT_PRINT_FORMAT), user,
         ),
         "quotation": _van_or_global(
-            "quotation_print_format", "quotation_print_format", _desk_print_format("Quotation"), user
+            "quotation_print_format", "quotation_print_format",
+            company_or("Quotation", _desk_print_format("Quotation")), user,
         ),
         "sales_order": _van_or_global(
-            "sales_order_print_format", "sales_order_print_format", _desk_print_format("Sales Order"), user
+            "sales_order_print_format", "sales_order_print_format",
+            company_or("Sales Order", _desk_print_format("Sales Order")), user,
         ),
     }
 

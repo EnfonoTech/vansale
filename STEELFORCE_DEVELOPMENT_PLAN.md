@@ -167,6 +167,85 @@ The Phase 1 flows were run again and all pass. Frontend type-check and the 86 un
 
 **Not tested live:** *Request cancellation*. The dev site has no active cancellation workflow, and the test salesman has no requester role, so the button stays hidden, as designed.
 
+## Review of 20 Nov 2026 — batch 1 (21 Nov, branch `fix/sf-review-batch1`)
+
+The "Vansale Steel Force Review" (H1–H7, M1–M8, L1–L4) was checked against the code on 21 Nov; this batch fixes the small items. Medium items (collections through sf_trading's payment function, branch-aware prices, which customers a salesman sees, letting him complete a credit customer) and the settings checklist come next.
+
+| Tag | Change |
+|---|---|
+| [STD] | **H1 Document date from the server.** Online saves send no time; work queued offline keeps its time only within 24 h and never in the future (`vansale_offline_grace_hours`) |
+| [STD] | **H2 Collections:** the van's company, that company's invoices only, and the cheque / transfer date sent with the reference |
+| [SF] | **M1 Refunds** offer and accept only the branch's modes marked for returns |
+| [SF] | **H4 Returns pre-checked** for sf_trading's customer gates that refuse them (phone, credit-customer documents), before the return is sent |
+| [STD]+[SF] | **H7 Minimum price after the invoice discount** in the pre-check (ERPNext `net_rate`, tax left out), as sf_trading checks it on save |
+| [SF] | **M2 Return window** shown on the invoice: Return hidden when it has passed (a user who may override sees a note) |
+| [SF] | **M3 Items** limited to the company's items (Item Default), as sf_trading shows branch users; selling another is refused |
+| [SF] | **M4 Orders pre-checked** against the customer's and salesman's cash limit, payment days and branch cash limit |
+| [SF] | **M5 Lead → customer** follows the new-customer rules (mobile, no duplicate name) |
+| [STD] | **L1** A Lost, Ordered or Expired quotation is refused by the server when invoiced |
+| [STD] | **L2** A return keeps the original invoice's sales team |
+| [STD] | Customer hook no longer adds a second 100% sales-team row to a desk customer; CR field falls back to `custom_commercial_registration_number` |
+
+## Review of 20 Nov 2026 — batch 2 (21 Nov, same branch)
+
+The medium items, and the answers of 21 Nov: returns stay as sf_trading has them (not exempt from the credit-documents check; the app pre-checks them); customers — a setting, see below; print format — the company's desk format unless the van / settings choose one; no delivery-note step for now.
+
+| Tag | Change |
+|---|---|
+| [SF] | **H2 Collections through sf_trading's payment function** (`create_pos_payments_for_invoice`), one entry per invoice, oldest first: a cheque mode becomes a post-dated cheque (number and date required; sf_trading may keep it in Draft and dates it as the invoice), **Loyalty** (write-off up to the company's Max Payment Write Off) on the last invoice paid, more than the open invoices refused. Used when collections are submitted at once; a Draft setting keeps the app's own draft entry |
+| [SF] | **Part cheque on a sale:** laid out like a split cash sale — the cheque row (amount blank = the rest), then "Add payment mode" rows in cash / bank modes (one always, more with "Split payment"), as the desk's cheque dialog (cheque entry first, the others after, loyalty on the last). The older single "rest mode" is still accepted from queued sales |
+| [SF] | **Loyalty at the sale** (cash paid now posted by Payment Entry, or cheque) and at collection; checked before saving against sf_trading's own rules (company maximum, loyalty already given on the order, an unapplied order advance that carried loyalty) |
+| [SF] | **H7 Branch prices:** the price list is one of the branch's lists (else its default), as sf_trading requires on save; Item Prices limited to other branches are skipped and the branch's own price comes first (sf_trading's `visible`) |
+| [STD] | **H3 "Customers a salesman finds"** (Vansale Settings, default *Own customers*): *Own list, search all* keeps the list to his own customers but lets a search find any customer the desk lets him see (company / branch access); such a customer is marked "Not your customer" |
+| [STD] | **H4 Complete a credit customer from the van:** second phone number and document photos on the contact screen (the customer is not re-saved, so an approved customer is not sent back for approval); Payment Terms stay with the office |
+| [STD] | **M7 Order advance:** an invoice made from an order with an advance shows it and asks the customer only for the rest |
+| [SF] | **M6 Print format:** van → Vansale Settings → the company's desk print format (Company > Print Formats) → the app's own |
+| [SF] | **M4 Own cash:** the collections screen shows the salesman's uncollected cash sales against his cash limit / payment days |
+| [SF] | **Check Steel Force setup** button on Vansale Settings: site settings and every van (cash posting, branch, Branch Configuration, branch price list, customer group, roles, loyalty) with what to fix |
+
+## Batch 3 (21 Nov, same branch) — the rest of the frontend review
+
+Steel Force:
+
+| Tag | Change |
+|---|---|
+| [SF] | **#1 Returns under sf_trading's return approval** are saved as drafts with the refund planned on them (sf_trading's plan, paid when the approval submits the return) and open on the approvals screen to be sent; before, the app submitted them and sf_trading refused, so nothing was saved |
+| [SF] | **#2 Receive payment on an order** (an advance) through sf_trading's `create_payments_for_sales_order`: branch modes, a cheque mode as a post-dated cheque, loyalty only when it closes the order |
+| [SF] | **#26 Orders** take Cheque (where the branch has cheque modes) and a delivery person on a cash order |
+| [SF] | **#27** No sale, cash included, to a customer waiting for approval (checked before saving, offline too); credit and cheque refused offline (sf_trading's credit rules are checked online) |
+| [SF] | **#8** Cash held by the branch's delivery persons on the collections screen |
+
+Standard:
+
+| Tag | Change |
+|---|---|
+| [STD] | **#3** A return on a partly paid invoice settles what the invoice still owes (ERPNext's own credit-note reconciliation) and refunds only the rest; the refund box shows the limit |
+| [STD] | **#4** A refund with no payment mode is refused instead of silently kept as credit |
+| [STD] | **#5** Route "Today's summary" counts the day's sales / returns / collections for the customers on the route; the visit card's Invoice / Payment open with the customer |
+| [STD] | **#6** Van stock reads the van's warehouse first, lists sold-out items (the "Out" count), no 500-item cut |
+| [STD] | **#9** Paying more than the invoices is refused unless advances are allowed (then the confirm says how much stays as advance) |
+| [STD] | **#10** Queued work belongs to the user who did it and is sent only for them; logout counts the real queue; "Sign in with password" on the PIN screen warns about unsent work |
+| [STD] | **#11** A 502 / 503 / 504 (restart, deploy) is a network failure: the sale is queued, not refused |
+| [STD] | **#12** An ended web session is recognised: the app says so and goes to sign-in (unsent work stays) |
+| [STD] | **#13** *Retry* sends at once (the backoff wait is cleared) |
+| [STD] | **#14** "already exists" is a refusal, not success (the unposted sale stayed deleted from the queue); failures are classified by the server's exception type, so Arabic messages are handled |
+| [STD] | **#15** Web app offline start: the service worker keeps the build's files and the last page, so the app and every screen open without a connection (built files are hashed, each build kept apart, older ones dropped) |
+| [STD] | **#16** Dismiss asks first; an unclassified failure reads "Not sent" |
+| [STD] | **#19** Editing a draft made in the desk / with a pricing rule no longer applies its line discount twice |
+| [STD] | **#20** Delete draft works (own drafts, server-checked); "Make invoice" on an order opens the waiting draft instead of making another |
+| [STD] | **#21** A lead whose status ERPNext set (Quotation, Opportunity) can be edited |
+| [STD] | **#22** One client id per new customer / quotation / order / conversion, kept across retries (a timeout + retry returns the first document) |
+| [STD] | **#23** Contact / address Save stays off until the record has loaded |
+| [STD] | **#25** The discounted rate is rounded to rate precision before the amount, as ERPNext does |
+| [STD] | **#28** A salesman deletes only his own drafts (new sites: no delete right on Quotation / Sales Order) |
+| [STD] | **#29** Offline-saved sales show at the top of the invoice list; "New customer" mid-sale keeps the cart |
+
+| [STD] | **#16 Fix a refused queued entry with a form:** lines (qty, rate, remove), Cash / Credit (Cheque when it was one) with the cash mode or cheque no. / date, loyalty, discount, payment amount / reference, notes. A split payment is dropped when the lines change (paid whole in the main mode, said on screen). The raw JSON stays under "Advanced" for support. The queue list refreshes when a send finishes |
+| [SF] | **Per-line price list (offer lists):** when the van's branch has more than one selling list, each line of an invoice / order / quotation can be priced from one of them (sf_trading's per-row `custom_price_list`). The rate and minimum come from that list (an enforcing offer list may go below the usual minimum), the pre-check uses it, it is checked against the branch's lists on save, and it carries from order to invoice |
+| [STD] | Split cash sale "tap for rest" fills what the customer pays (less advance / loyalty), not the invoice total |
+
+Still open: a delivery-note step (not wanted for now).
+
 ## Frontend review (17 Nov 2026) — open items
 
 From a read-through of the whole frontend. The three marked *fixed* were confirmed live and fixed in Phase 2;

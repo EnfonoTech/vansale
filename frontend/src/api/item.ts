@@ -228,11 +228,17 @@ async function _writeDetail(doc: ItemDetail, customer?: string): Promise<void> {
   await tx.done;
 }
 
-export async function priceFor(itemCode: string, customer?: string, uom?: string): Promise<PriceForResult> {
+export async function priceFor(
+  itemCode: string,
+  customer?: string,
+  uom?: string,
+  priceList?: string | null,
+): Promise<PriceForResult> {
   const qs = new URLSearchParams();
   qs.set("item_code", itemCode);
   if (customer) qs.set("customer", customer);
   if (uom) qs.set("uom", uom);
+  if (priceList) qs.set("price_list", priceList);
 
   const fetchFromCache = async (): Promise<PriceForResult> => {
     const d = await db();
@@ -248,11 +254,16 @@ export async function priceFor(itemCode: string, customer?: string, uom?: string
     };
   };
 
-  if (!isOnline()) return await fetchFromCache();
+  // A line's own list is priced on the server only: the cache holds the
+  // document list's prices, which would be the wrong price for it.
+  if (!isOnline()) {
+    if (priceList) throw new NetworkError("Offline: the price list's prices need a connection");
+    return await fetchFromCache();
+  }
   try {
     return await apiCall<PriceForResult>("GET", `vansale.api.item.price_for?${qs.toString()}`);
   } catch (err) {
-    if (err instanceof NetworkError) return await fetchFromCache();
+    if (err instanceof NetworkError && !priceList) return await fetchFromCache();
     throw err;
   }
 }

@@ -40,7 +40,10 @@ def _apply(doc, f: dict) -> None:
         doc.first_name = f["lead_name"].strip()
         doc.middle_name = None
         doc.last_name = None
-    if f.get("status"):
+    # A status ERPNext set itself (Quotation, Opportunity) comes back unchanged
+    # from the form: that is no change, not a refusal (editing such a lead
+    # always failed). Only moving it to a status the app may not set is refused.
+    if f.get("status") and f["status"] != doc.status:
         if f["status"] not in OPEN_STATUSES:
             frappe.throw(_("Status {0} cannot be set from the app").format(f["status"]))
         doc.status = f["status"]
@@ -209,6 +212,12 @@ def ensure_customer(lead) -> tuple[str, bool]:
             customer.set(field, _default_leaf(doctype, van_field, field))
     from vansale import steelforce
 
+    # Steel Force: the same rules as a customer made in the app (mobile, no
+    # second customer of the same name). Not the B2B Creator rule: a lead
+    # carries no VAT number, so it never becomes a B2B customer there.
+    steelforce.check_new_customer(
+        customer.customer_name, False, customer.get("mobile_no") or lead.get("mobile_no") or lead.get("phone")
+    )
     steelforce.on_new_customer(customer)
     customer.insert()
     return customer.name, True

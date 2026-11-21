@@ -397,7 +397,7 @@ def daily_report(client_date: Optional[str] = None, plan_date: Optional[str] = N
 
     visits = frappe.db.sql(
         """
-        SELECT status, invoice, payment
+        SELECT status, invoice, payment, customer
         FROM `tabVan Daily Visit`
         WHERE user = %s AND visit_date = %s
         """,
@@ -407,30 +407,27 @@ def daily_report(client_date: Optional[str] = None, plan_date: Optional[str] = N
     stop_count = len(visits)
     done_visits = [v for v in visits if v.status in ("done", "skipped")]
 
-    invoice_names = [v.invoice for v in visits if v.invoice]
-    payment_names = [v.payment for v in visits if v.payment]
-
-    sales = 0.0
-    returns = 0.0
-    if invoice_names:
-        placeholders = ", ".join(["%s"] * len(invoice_names))
-        sales_row = frappe.db.sql(
-            f"SELECT COALESCE(SUM(grand_total), 0) FROM `tabSales Invoice` WHERE name IN ({placeholders}) AND is_return = 0",
-            tuple(invoice_names),
+    # The day's sales, returns and collections of this salesman for the
+    # customers on today's route. The visit's own invoice / payment links
+    # were never filled by the app, so the summary was always 0.
+    customers = sorted({v.customer for v in visits if v.customer})
+    sales = returns = collections = 0.0
+    if customers:
+        params = {"user": user, "day": today_, "customers": tuple(customers)}
+        row = frappe.db.sql(
+            """SELECT COALESCE(SUM(CASE WHEN is_return = 0 THEN grand_total ELSE 0 END), 0),
+                      COALESCE(SUM(CASE WHEN is_return = 1 THEN ABS(grand_total) ELSE 0 END), 0)
+               FROM `tabSales Invoice`
+               WHERE owner = %(user)s AND docstatus = 1 AND posting_date = %(day)s
+                 AND customer IN %(customers)s""",
+            params,
         )
-        sales = float(sales_row[0][0] or 0)
-        returns_row = frappe.db.sql(
-            f"SELECT COALESCE(SUM(ABS(grand_total)), 0) FROM `tabSales Invoice` WHERE name IN ({placeholders}) AND is_return = 1",
-            tuple(invoice_names),
-        )
-        returns = float(returns_row[0][0] or 0)
-
-    collections = 0.0
-    if payment_names:
-        placeholders = ", ".join(["%s"] * len(payment_names))
+        sales, returns = float(row[0][0] or 0), float(row[0][1] or 0)
         pay_row = frappe.db.sql(
-            f"SELECT COALESCE(SUM(paid_amount), 0) FROM `tabPayment Entry` WHERE name IN ({placeholders})",
-            tuple(payment_names),
+            """SELECT COALESCE(SUM(paid_amount), 0) FROM `tabPayment Entry`
+               WHERE owner = %(user)s AND docstatus = 1 AND payment_type = 'Receive'
+                 AND posting_date = %(day)s AND party_type = 'Customer' AND party IN %(customers)s""",
+            params,
         )
         collections = float(pay_row[0][0] or 0)
 

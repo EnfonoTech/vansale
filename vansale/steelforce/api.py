@@ -38,6 +38,96 @@ def drivers() -> list[dict]:
     return [{"name": r.name, "full_name": r.full_name or r.name, **_driver_cash(r.name, branch)} for r in rows]
 
 
+@frappe.whitelist(methods=["GET"])
+def my_cash() -> dict:
+    """The salesman's own uncollected cash, as sf_trading's Sales Order limits
+    count it (his Cash invoices still unpaid), with his cash limit and payment
+    days and the oldest invoice past them. {} where there is none to show."""
+    if not steelforce.is_active():
+        return {}
+    try:
+        from sf_trading import sales_order_limits as sol
+    except ImportError:
+        return {}
+    from vansale.api.invoice import _user_company
+    from vansale.api.me import current_user_sales_person, van_default
+
+    sales_person = current_user_sales_person()
+    if not sales_person:
+        return {}
+    company = _user_company()
+    limits = sol.get_limits("Sales Person", sales_person)
+    branch = van_default("Branch")
+    holding = sol.uncollected_cash("Sales Person", sales_person, company)
+    overdue = (
+        sol.overdue_invoice("Sales Person", sales_person, company, frappe.utils.nowdate(), limits.days)
+        if limits.days else None
+    )
+    branch_limit = flt(limits.branch.get(branch)) if branch else 0.0
+    return {
+        "holding": holding,
+        "cash_limit": flt(limits.cash),
+        "payment_days": int(limits.days or 0),
+        "branch": branch if branch_limit else None,
+        "branch_holding": sol.uncollected_cash("Sales Person", sales_person, company, branch) if branch_limit else 0.0,
+        "branch_limit": branch_limit,
+        "overdue": {"name": overdue.name, "posting_date": str(overdue.posting_date),
+                    "outstanding_amount": flt(overdue.outstanding_amount)} if overdue else None,
+    }
+
+
+@frappe.whitelist(methods=["GET"])
+def order_payment_state(sales_order: str) -> dict:
+    """What the app's "Receive payment" on an order needs (sf_trading's own
+    state: balance, the branch's modes and cheque modes, loyalty limit);
+    {"enabled": False} on other sites."""
+    if not steelforce.is_active():
+        return {"enabled": False}
+    try:
+        from sf_trading.api.sales_order_payment import get_sales_order_payment_state
+    except ImportError:
+        return {"enabled": False}
+    state = get_sales_order_payment_state(sales_order)
+    return {
+        "enabled": True,
+        "balance": flt(state.get("balance")),
+        "advance_paid": flt(state.get("advance_paid")),
+        "modes": [m.get("mode_of_payment") if isinstance(m, dict) else m for m in state.get("modes") or []],
+        "cheque_modes": [m.get("mode_of_payment") if isinstance(m, dict) else m for m in state.get("pdc_modes") or []],
+        "max_write_off": flt(state.get("max_write_off")) if state.get("write_off_account") else 0.0,
+    }
+
+
+@frappe.whitelist(methods=["POST"])
+def collect_order(
+    sales_order: str,
+    mode_of_payment: str,
+    amount: float,
+    cheque_no: Optional[str] = None,
+    cheque_date: Optional[str] = None,
+    write_off_amount: Optional[float] = None,
+) -> dict:
+    """Money taken on a submitted order (an advance), through sf_trading's own
+    `create_payments_for_sales_order`: branch modes, a cheque mode as a
+    post-dated cheque, loyalty only when it closes the order."""
+    if not steelforce.is_active():
+        frappe.throw(_("Payment on an order is not available on this site"))
+    from sf_trading.api.sales_order_payment import create_payments_for_sales_order
+
+    is_cheque = mode_of_payment in steelforce.cheque_modes()
+    if is_cheque and not ((cheque_no or "").strip() and cheque_date):
+        frappe.throw(_("Enter the cheque number and date"))
+    names = create_payments_for_sales_order(
+        sales_order,
+        [{"mode_of_payment": mode_of_payment, "amount": flt(amount)}],
+        cheque_date=cheque_date if is_cheque else None,
+        cheque_no=(cheque_no or "").strip() if is_cheque else None,
+        write_off_amount=flt(write_off_amount),
+    )
+    frappe.db.commit()
+    return {"payment_entries": list(names or [])}
+
+
 def _driver_cash(driver: str, branch: Optional[str]) -> dict:
     """What the driver holds and why sf_trading would refuse them (its own
     checks, so the rule stays in sf_trading)."""
@@ -56,7 +146,7 @@ def _driver_cash(driver: str, branch: Optional[str]) -> dict:
         return {}
     blocked = None
     if overdue:
-        blocked = _("Overdue collection {0} of {1}").format(overdue.name, overdue.posting_date)
+        blocked = _("Overdue: {0} from {1}").format(overdue.name, frappe.utils.formatdate(overdue.posting_date))
     elif limit and holding >= limit:
         blocked = _("At the cash limit")
     elif branch_limit and branch_holding >= branch_limit:

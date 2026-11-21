@@ -22,7 +22,7 @@ import {
 import { ApiError } from "@/app/frappe";
 import { useSessionStore } from "@/stores/session";
 import { useToastStore } from "@/stores/toasts";
-import { computeTaxTotals } from "@/features/van/tax";
+import { computeTaxTotals, netRateFactor } from "@/features/van/tax";
 import Icon from "@/components/Icon.vue";
 import SarSymbol from "@/components/SarSymbol.vue";
 import SearchSelect from "@/components/SearchSelect.vue";
@@ -35,7 +35,11 @@ import CreditPanel from "@/components/CreditPanel.vue";
 import LineInsight from "@/components/LineInsight.vue";
 import { useLineInsight } from "@/features/van/lineInsight";
 import { stockLabel } from "@/features/van/stock";
-import { creditRefusal, useCreditStatus } from "@/features/van/credit";
+import { creditRefusal, saleBlock, useCreditStatus } from "@/features/van/credit";
+import { isOnline } from "@/app/online";
+import { genUuid } from "@/offline/queue";
+import { modesOfPayment } from "@/api/payment";
+import { drivers as listDrivers, type DriverRow } from "@/api/steelforce";
 
 const props = defineProps<{ kind: SellingKind; name?: string }>();
 const router = useRouter();
@@ -74,6 +78,14 @@ function effectiveRate(l: Line): number {
   const disc = session.lineDiscount ? Number(l.discount_percentage) || 0 : 0;
   return (Number(l.rate) || 0) * (1 - disc / 100);
 }
+/** A saved line's rate before its discount %, for the form's own discount math. */
+function rateBeforeDiscount(rate: number, pct: number | undefined, listRate: number | undefined | null): number {
+  const d = session.lineDiscount ? Number(pct) || 0 : 0;
+  if (d <= 0) return Number(rate) || 0;
+  if (d >= 100) return Number(listRate) || 0;
+  const f = 10 ** session.ratePrecision;
+  return Math.round(((Number(rate) || 0) / (1 - d / 100)) * f) / f;
+}
 const belowMin = (l: Line) => Boolean(l.min_rate) && effectiveRate(l) + 0.0001 < (l.min_rate ?? 0);
 
 const customers = ref<CustomerRow[]>([]);
@@ -84,6 +96,9 @@ const itemSearch = ref("");
 const remarks = ref("");
 const discountAmount = ref<number | null>(null);
 const busy = ref(false);
+// One id per new document, kept across retries (a save that timed out and is
+// tapped again returns the first document, not a second).
+const saveClientId = genUuid();
 
 const addDays = (n: number) => {
   const d = new Date();
@@ -94,7 +109,17 @@ const addDays = (n: number) => {
 const date = ref(addDays(props.kind === "quotation" ? 30 : 7));
 // Cash / credit on an order, where the site keeps it there (Steel Force's credit checks read it).
 const showPayment = computed(() => props.kind === "order" && session.orderPaymentType);
-const paymentType = ref<"cash" | "credit">(session.defaultPaymentType === "credit" ? "credit" : "cash");
+const paymentType = ref<"cash" | "credit" | "cheque">(session.defaultPaymentType === "credit" ? "credit" : "cash");
+// Steel Force orders also take a cheque (where the branch has cheque modes)
+// and a delivery person on a cash order, as the desk's order form does.
+const hasChequeModes = ref(false);
+const driverList = ref<DriverRow[]>([]);
+const driver = ref("");
+onMounted(() => {
+  if (props.kind !== "order") return;
+  void modesOfPayment().then((m) => (hasChequeModes.value = m.some((x) => x.pdc))).catch(() => {});
+  if (session.askDriver) void listDrivers().then((d) => (driverList.value = d)).catch(() => {});
+});
 // An order counts against the customer's credit limit: show it, and refuse
 // Credit on tap (with the reason) when the customer can't have it.
 const { status: credit, loading: creditLoading } = useCreditStatus(
@@ -102,9 +127,12 @@ const { status: credit, loading: creditLoading } = useCreditStatus(
   computed(() => props.kind === "order" && quotationTo.value === "Customer"),
 );
 const creditRefused = computed(() => creditRefusal(credit.value, "credit"));
-function pickPayment(t: "cash" | "credit") {
-  if (t === "credit" && creditRefused.value && paymentType.value !== "credit") {
-    toasts.warn(creditRefused.value);
+const chequeRefused = computed(() => creditRefusal(credit.value, "cheque"));
+function pickPayment(t: "cash" | "credit" | "cheque") {
+  const why = (t === "credit" ? creditRefused.value : t === "cheque" ? chequeRefused.value : null)
+    || (t !== "cash" ? saleBlock(null, t, { online: isOnline(), steelforce: session.steelforce }) : null);
+  if (why && paymentType.value !== t) {
+    toasts.warn(why);
     return;
   }
   paymentType.value = t;
@@ -142,7 +170,10 @@ function usePrice(l: Line, rate: number) {
 
 function recalc(l: Line) {
   const disc = session.lineDiscount ? Number(l.discount_percentage) || 0 : 0;
-  l.amount = round(Math.max(0, (Number(l.qty) || 0) * (Number(l.rate) || 0) * (1 - disc / 100)));
+  // The discounted rate rounded to the rate precision first, as ERPNext does.
+  const f = 10 ** session.ratePrecision;
+  const rate = Math.round((Number(l.rate) || 0) * (1 - disc / 100) * f) / f;
+  l.amount = round(Math.max(0, (Number(l.qty) || 0) * rate));
 }
 
 const netTotal = computed(() => lines.value.reduce((s, l) => s + l.amount, 0));
@@ -182,7 +213,7 @@ watch(customer, async (c) => {
   if (!c) return;
   for (const l of lines.value) {
     try {
-      const p = await priceFor(l.item_code, c, l.uom);
+      const p = await priceFor(l.item_code, c, l.uom, l.price_list);
       if (p.price_list_rate) {
         l.price_list_rate = roundRate(p.price_list_rate);
         l.rate = roundRate(p.price_list_rate);
@@ -234,10 +265,34 @@ async function onUomChange(l: Line) {
   const chosen = l.uoms?.find((u) => u.uom === l.uom);
   if (!chosen) return;
   l.conversion_factor = chosen.conversion_factor;
+  if (l.price_list) {
+    // The UOM choices carry the document list's prices; a line on its own list asks the server.
+    await onPriceListChange(l);
+    return;
+  }
   l.price_list_rate = roundRate(chosen.price_list_rate);
   l.rate = roundRate(chosen.price_list_rate);
   l.min_rate = chosen.min_rate;
   recalc(l);
+}
+
+/** Steel Force: price a line from another of the branch's lists (an offer
+ *  list), as the desk's per-row Price List. A list without a price for the
+ *  item leaves the rate as it is; its minimum still applies. */
+async function onPriceListChange(l: Line) {
+  try {
+    const p = await priceFor(l.item_code, insightCustomer.value || undefined, l.uom, l.price_list);
+    l.min_rate = p.min_rate ?? undefined;
+    if (p.price_list_rate) {
+      l.price_list_rate = roundRate(p.price_list_rate);
+      l.rate = roundRate(p.price_list_rate);
+    } else {
+      toasts.warn(`${l.item_name || l.item_code} has no price in ${l.price_list || "the usual list"}`);
+    }
+    recalc(l);
+  } catch (e) {
+    toasts.warn(e instanceof Error ? e.message : String(e));
+  }
 }
 
 async function prefill(name: string) {
@@ -259,18 +314,22 @@ async function prefill(name: string) {
     keepRates = Boolean(d.customer) && customer.value !== d.customer;
     customer.value = d.customer ?? "";
     date.value = (props.kind === "quotation" ? d.valid_till : d.delivery_date) ?? date.value;
-    if (d.payment_type === "cash" || d.payment_type === "credit") paymentType.value = d.payment_type;
+    if (d.payment_type === "cash" || d.payment_type === "credit" || d.payment_type === "cheque") paymentType.value = d.payment_type;
+    driver.value = d.driver ?? "";
     remarks.value = d.remarks ?? "";
     discountAmount.value = d.discount_amount || null;
     lines.value = d.items.map<Line>((it) => ({
       item_code: it.item_code,
       item_name: it.item_name,
       qty: it.qty,
-      rate: it.rate,
+      // The saved rate is after the line discount; the form applies the % to
+      // `rate`, so start from the rate before it (else discounted twice).
+      rate: rateBeforeDiscount(it.rate, it.discount_percentage, it.price_list_rate),
       price_list_rate: it.price_list_rate,
       uom: it.uom ?? undefined,
       conversion_factor: it.conversion_factor ?? 1,
       discount_percentage: it.discount_percentage,
+      price_list: it.price_list ?? null,
       uoms: it.uom ? [{ uom: it.uom, conversion_factor: it.conversion_factor ?? 1, price_list_rate: it.price_list_rate ?? 0 }] : [],
       amount: it.amount,
     }));
@@ -314,13 +373,27 @@ async function doSave(submit: 0 | 1) {
   }
   // Lock the buttons from the first tap: the pre-check and the confirm take a
   // moment, and a second tap meanwhile submitted a second document.
+  // Steel Force: an order for a customer awaiting approval, or credit / cheque offline.
+  if (submit && props.kind === "order" && quotationTo.value === "Customer") {
+    const blocked = saleBlock(credit.value, showPayment.value ? paymentType.value : undefined,
+      { online: isOnline(), steelforce: session.steelforce });
+    if (blocked) { toasts.warn(blocked, 6000); return; }
+  }
   busy.value = true;
   if (submit && quotationTo.value === "Customer") {
     const go = await precheckBeforeSubmit(
       props.kind === "order" ? "Sales Order" : "Quotation",
       customer.value,
       showPayment.value ? paymentType.value : undefined,
-      lines.value.map((l) => ({ item_code: l.item_code, item_name: l.item_name, rate: effectiveRate(l), conversion_factor: l.conversion_factor })),
+      lines.value.map((l) => ({
+        item_code: l.item_code,
+        item_name: l.item_name,
+        rate: effectiveRate(l),
+        // The minimum price is checked after the document discount (sf_trading).
+        net_rate: effectiveRate(l) * netRateFactor(netTotal.value, totals.value),
+        conversion_factor: l.conversion_factor,
+        price_list: l.price_list || null,
+      })),
       { amount: props.kind === "order" ? totals.value.grand : 0 },
     );
     if (!go) { busy.value = false; return; }
@@ -339,6 +412,7 @@ async function doSave(submit: 0 | 1) {
       date: date.value || undefined,
       warehouse: props.kind === "order" ? warehouse.value || undefined : undefined,
       payment_type: showPayment.value ? paymentType.value : undefined,
+      driver: showPayment.value && paymentType.value === "cash" && session.askDriver ? driver.value : undefined,
       remarks: remarks.value,
       discount_amount: Math.max(0, Number(discountAmount.value) || 0),
       submit,
@@ -350,17 +424,18 @@ async function doSave(submit: 0 | 1) {
           item_code: l.item_code,
           item_name: l.item_name,
           qty: l.qty,
-          rate: Math.max(0, base * (1 - pct / 100)),
+          rate: Math.round(Math.max(0, base * (1 - pct / 100)) * 10 ** session.ratePrecision) / 10 ** session.ratePrecision,
           // Same rule as the invoice: a typed rate above the list price becomes the list price.
           price_list_rate: Math.max(listRate, base),
           uom: l.uom,
           conversion_factor: l.conversion_factor,
+          price_list: l.price_list || undefined,
         };
       }),
     };
     const res = props.name
       ? await updateDocDraft(props.kind, props.name, payload)
-      : await saveDoc(props.kind, payload);
+      : await saveDoc(props.kind, payload, saveClientId);
     toasts.success(`${k.value.title} ${res.name} ${submit ? "submitted" : "saved as draft"}`);
     void router.replace({ name: k.value.detail, params: { name: res.name } });
   } catch (e) {
@@ -417,7 +492,20 @@ onMounted(loadAll);
                 :data-blocked="Boolean(creditRefused)" @click="pickPayment('credit')">
           <Icon :name="creditRefused ? 'alert' : 'clock'" :size="16" /> Credit
         </button>
+        <button v-if="hasChequeModes || paymentType === 'cheque'" type="button" class="seg-btn"
+                :data-active="paymentType === 'cheque'" :data-blocked="Boolean(chequeRefused)" @click="pickPayment('cheque')">
+          <Icon :name="chequeRefused ? 'alert' : 'receipt'" :size="16" /> Cheque
+        </button>
       </div>
+      <label v-if="showPayment && paymentType === 'cash' && session.askDriver && driverList.length" class="field">
+        <span class="tiny">Delivery person</span>
+        <select v-model="driver">
+          <option value="">No delivery person</option>
+          <option v-for="d in driverList" :key="d.name" :value="d.name" :disabled="Boolean(d.blocked) && d.name !== driver">
+            {{ d.full_name }}{{ d.blocked ? ` — ${d.blocked}` : "" }}
+          </option>
+        </select>
+      </label>
       <CreditPanel
         v-if="kind === 'order' && quotationTo === 'Customer' && customer"
         :status="credit"
@@ -463,6 +551,13 @@ onMounted(loadAll);
                      v-model.number="l.discount_percentage" @input="recalc(l)" />
             </label>
           </div>
+          <label v-if="session.rowPriceLists.length > 1" class="row-pl">
+            <span class="tiny">Price list</span>
+            <select v-model="l.price_list" @change="onPriceListChange(l)">
+              <option :value="null">Usual list</option>
+              <option v-for="pl in session.rowPriceLists" :key="pl" :value="pl">{{ pl }}</option>
+            </select>
+          </label>
           <LineInsight :item-code="l.item_code" :customer="insightCustomer" :uom="l.uom"
                        :conversion-factor="l.conversion_factor" :last="insight.lastSale(l.item_code)"
                        :short="insight.shortage(l)" @use="(r: number) => usePrice(l, r)" />
@@ -537,7 +632,7 @@ onMounted(loadAll);
 .min-low { color: var(--danger); font-weight: 600; }
 .field { display: flex; flex-direction: column; gap: 0.3rem; }
 .label { font-size: var(--text-sm); color: var(--text-muted); font-weight: 500; }
-.seg { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; }
+.seg { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 0.5rem; }
 .seg-btn {
   all: unset; cursor: pointer; padding: 0.55rem 0.75rem; border-radius: var(--radius-sm);
   background: var(--surface-muted); text-align: center; font-weight: 500;
@@ -557,6 +652,8 @@ onMounted(loadAll);
 .line-grid { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 0.4rem; align-items: end; margin-top: 0.3rem; }
 .line-grid.no-disc { grid-template-columns: 1fr 1fr 1fr; }
 .line-grid label { display: flex; flex-direction: column; gap: 0.15rem; }
+.row-pl { display: grid; grid-template-columns: auto 1fr; gap: 0.5rem; align-items: center; }
+.row-pl select { padding: 0.4rem 0.55rem; font-size: var(--text-sm); }
 .line-grid input, .line-grid select { padding: 0.45rem 0.55rem; font-size: var(--text-sm); }
 .tiny { font-size: 0.65rem; color: var(--text-faint); text-transform: uppercase; letter-spacing: 0.06em; font-weight: 600; }
 .line-foot { display: flex; justify-content: space-between; align-items: center; padding-top: 0.25rem; border-top: 1px dashed var(--border); }

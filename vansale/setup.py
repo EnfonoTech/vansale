@@ -25,10 +25,11 @@ VAN_USER_PERMISSIONS: list[dict] = [
     # Core sales flow — van users write these.
     {"parent": "Sales Invoice", "read": 1, "write": 1, "create": 1, "submit": 1, "cancel": 0, "delete": 0, "print": 1, "email": 1, "report": 1, "export": 1, "share": 1},
     # Pre-invoice cycle: lead -> quotation -> sales order. Drafts are deleted
-    # through `frappe.client.delete`, so these roles get delete on their own.
+    # through `vansale.api.selling.delete_draft` (own drafts only), so no
+    # delete right: with one a salesman could delete anyone's draft.
     {"parent": "Lead", "read": 1, "write": 1, "create": 1, "submit": 0, "cancel": 0, "delete": 0, "print": 1, "email": 1, "report": 1, "export": 1, "share": 0},
-    {"parent": "Quotation", "read": 1, "write": 1, "create": 1, "submit": 1, "cancel": 0, "delete": 1, "print": 1, "email": 1, "report": 1, "export": 1, "share": 1},
-    {"parent": "Sales Order", "read": 1, "write": 1, "create": 1, "submit": 1, "cancel": 0, "delete": 1, "print": 1, "email": 1, "report": 1, "export": 1, "share": 1},
+    {"parent": "Quotation", "read": 1, "write": 1, "create": 1, "submit": 1, "cancel": 0, "delete": 0, "print": 1, "email": 1, "report": 1, "export": 1, "share": 1},
+    {"parent": "Sales Order", "read": 1, "write": 1, "create": 1, "submit": 1, "cancel": 0, "delete": 0, "print": 1, "email": 1, "report": 1, "export": 1, "share": 1},
     {"parent": "Lead Source", "read": 1, "write": 0, "create": 0, "submit": 0, "cancel": 0, "delete": 0, "print": 0, "email": 0, "report": 0, "export": 0, "share": 0},
     {"parent": "Quotation Lost Reason", "read": 1, "write": 0, "create": 0, "submit": 0, "cancel": 0, "delete": 0, "print": 0, "email": 0, "report": 0, "export": 0, "share": 0},
     {"parent": "Payment Entry", "read": 1, "write": 1, "create": 1, "submit": 1, "cancel": 0, "delete": 0, "print": 1, "email": 1, "report": 1, "export": 1, "share": 1},

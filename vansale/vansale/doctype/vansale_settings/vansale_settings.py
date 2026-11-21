@@ -94,6 +94,9 @@ def global_flags() -> dict:
         "update_stock_on_invoice": True,
         "quotation_next_step": "Sales Order",
         "credit_needs_limit": False,
+        # A salesman's customers: his own (Sales Team), or his own list with a
+        # search over every customer the desk lets him see.
+        "customer_scope": "Own customers",
         "ask_driver": False,
     }
     try:
@@ -118,6 +121,7 @@ def global_flags() -> dict:
             "quotation_print_format",
             "sales_order_print_format",
             "quotation_next_step",
+            "customer_scope",
         ):
             if row.get(key):
                 flags[key] = row[key]

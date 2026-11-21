@@ -12,6 +12,8 @@ import { useSessionStore } from "@/stores/session";
 import { useApprovalsStore } from "@/stores/approvals";
 import { warmCaches } from "@/offline/warm";
 import { useSyncStore } from "@/stores/sync";
+import { useToastStore } from "@/stores/toasts";
+import { SESSION_EXPIRED_EVENT } from "@/app/frappe";
 
 const route = useRoute();
 const router = useRouter();
@@ -83,7 +85,22 @@ watch(online, async (isNow, wasNow) => {
  * indefinitely. Refresh on start and whenever Android brings the app back to
  * the foreground, which is when a driver would notice a change anyway.
  */
+// The web session ended (every call came back 403 and the app looked stuck):
+// say so once and go to sign-in. Queued work stays on the phone and is sent
+// after the same user signs in again.
+let expiryShown = false;
+function onSessionExpired() {
+  if (expiryShown || route.name === "login") return;
+  expiryShown = true;
+  useToastStore().warn("Your session has ended — sign in again. Unsent work stays on this phone.", 6000);
+  session.logout();
+  void router.replace({ name: "login" }).finally(() => {
+    expiryShown = false;
+  });
+}
+
 onMounted(() => {
+  window.addEventListener(SESSION_EXPIRED_EVENT, onSessionExpired);
   if (session.isAuthenticated) void session.refreshDefaults();
   syncPending();
 

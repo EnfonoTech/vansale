@@ -81,3 +81,14 @@ export function computeTaxTotals({
   const tax = afterDiscount * r;
   return { afterDiscount, tax, grand: afterDiscount + tax, netOfTax: afterDiscount };
 }
+
+/**
+ * What one unit of the lines' price is worth after the invoice discount, tax
+ * left out: the factor to turn a line rate into ERPNext's `net_rate`.
+ * sf_trading checks the minimum price on that (after the additional discount),
+ * so the pre-check must too. 1 when there are no lines.
+ */
+export function netRateFactor(lineTotal: number, totals: TaxTotals): number {
+  const lines = Number(lineTotal) || 0;
+  return lines > 0 ? Math.max(totals.netOfTax, 0) / lines : 1;
+}

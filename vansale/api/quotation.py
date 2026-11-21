@@ -342,6 +342,14 @@ def make_invoice(client_id: str, name: str) -> dict:
     existing = claim(client_id, "invoice", "Sales Invoice")
     if existing:
         return {"name": existing, "idempotent_replay": True}
+    # The screen hides "Make invoice" for these; the server says no as well.
+    status = _shown_status(quotation.status, quotation.docstatus, quotation.valid_till)
+    if status == "Lost":
+        frappe.throw(_("Quotation {0} is marked Lost").format(quotation.name))
+    if status == "Ordered":
+        frappe.throw(_("Quotation {0} already has a sales order: invoice the order").format(quotation.name))
+    if status == "Expired":
+        frappe.throw(_("Quotation {0} has expired (Valid Till {1})").format(quotation.name, quotation.valid_till))
 
     customer, converted = _quotation_customer(quotation)
     invoice = steelforce.invoice_from_quotation(quotation.name, customer)

@@ -393,10 +393,10 @@ const todayLabel = computed(() => {
         <textarea v-model="notesModel" rows="2" placeholder="Observation…" />
       </label>
       <div class="row actions">
-        <button class="ghost" @click="router.push({ name: 'invoice-new' })">
+        <button class="ghost" @click="router.push({ name: 'invoice-new', query: { customer: visit.active.stop.customer } })">
           <Icon name="invoice" :size="16" /> Invoice
         </button>
-        <button class="ghost" @click="router.push({ name: 'payment-new' })">
+        <button class="ghost" @click="router.push({ name: 'payment-new', query: { customer: visit.active.stop.customer } })">
           <Icon name="payment" :size="16" /> Payment
         </button>
       </div>

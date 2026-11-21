@@ -26,6 +26,8 @@ export interface CustomerRow {
   outstanding?: number;
   /** Salesman's list: the customer's whole balance (outstanding = their van's). */
   outstanding_total?: number;
+  /** Found by the wider search ("Own list, search all"), not one of the salesman's own customers. */
+  not_assigned?: boolean;
 }
 
 /** Name to show for a customer row (older cached rows lack display_name). */
@@ -50,6 +52,10 @@ export interface CustomerAddress {
 
 export interface CustomerDetail extends CustomerRow {
   customer_type?: string;
+  /** A second phone number on the customer's primary contact. */
+  phone_2?: string | null;
+  /** Files attached to the customer (documents on file). */
+  documents?: number;
   /** Collected but awaiting office submit (draft Payment Entries). */
   pending?: number;
   addresses: CustomerAddress[];
@@ -298,6 +304,8 @@ export async function downloadStatementPdf(
 }
 
 export interface CustomerCreatePayload {
+  /** The form's id, kept across retries (the server returns the first customer). */
+  client_id?: string;
   customer_name: string;
   customer_type?: "b2b" | "b2c";
   mobile_no?: string;
@@ -369,11 +377,21 @@ export async function saveAddress(payload: AddressPayload): Promise<{ name: stri
   return apiCall<{ name: string }>("POST", "vansale.api.customer.save_address", payload);
 }
 
-/** Set the customer's mobile / email (its primary Contact). */
+/** Set the customer's mobile / email / second phone (its primary Contact). */
 export async function saveContact(payload: {
   customer: string;
   mobile_no?: string;
   email_id?: string;
+  /** Second number; "" removes it, missing leaves it. */
+  phone_2?: string;
 }): Promise<{ contact: string }> {
   return apiCall<{ contact: string }>("POST", "vansale.api.customer.save_contact", payload);
+}
+
+/** Attach a photo / PDF of a customer document (CR, VAT certificate, ID …). */
+export async function attachDocument(
+  customer: string,
+  attachment: { filename: string; data: string },
+): Promise<{ file_url: string }> {
+  return apiCall<{ file_url: string }>("POST", "vansale.api.customer.attach_document", { customer, attachment });
 }

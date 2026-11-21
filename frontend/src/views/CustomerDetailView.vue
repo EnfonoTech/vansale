@@ -178,7 +178,7 @@ async function onEndVisit() {
           </div>
           <button type="button" class="link-btn" @click="editContact">
             <Icon name="edit" :size="14" />
-            {{ customer.mobile_no || customer.email_id ? "Edit contact" : "Add phone / email" }}
+            {{ customer.mobile_no || customer.email_id ? "Contact & documents" : "Add phone / email / document" }}
           </button>
         </div>
       </section>
