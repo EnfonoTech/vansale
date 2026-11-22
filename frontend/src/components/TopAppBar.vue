@@ -2,6 +2,7 @@
 import { computed } from "vue";
 import { useI18n } from "vue-i18n";
 import { useRoute, useRouter } from "vue-router";
+import { useBranding } from "@/app/branding";
 import { useOnline } from "@/app/online";
 import { useSessionStore } from "@/stores/session";
 import { useSyncStore } from "@/stores/sync";
@@ -125,9 +126,11 @@ const PARENTS: Record<string, (r: RouteLike) => RouteTarget> = {
   },
 };
 
+const { branding } = useBranding();
+
 const title = computed(() => {
   const name = String(route.name ?? "");
-  return TRANSLATED_TITLES[name] ? t(TRANSLATED_TITLES[name]) : (TITLES[name] ?? "Van Sale");
+  return TRANSLATED_TITLES[name] ? t(TRANSLATED_TITLES[name]) : (TITLES[name] ?? branding.value.appName);
 });
 
 const subtitle = computed(() => {

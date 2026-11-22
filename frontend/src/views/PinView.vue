@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { totalPending } from "@/offline/queue";
 import { useConfirmStore } from "@/stores/confirm";
-import { computed, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { changePin, loginWithPin, setupPin } from "@/api/auth";
 import { configDefaults } from "@/api/me";
@@ -9,6 +9,7 @@ import { useApprovalsStore } from "@/stores/approvals";
 import { usePushStore } from "@/stores/push";
 import { useSessionStore } from "@/stores/session";
 import { ApiError, NetworkError } from "@/app/frappe";
+import { authStyleClass, useBranding } from "@/app/branding";
 import { isOnline } from "@/app/online";
 import { canUnlockOffline, rememberPin, verifyPinOffline } from "@/app/pin-offline";
 import { useToastStore } from "@/stores/toasts";
@@ -49,6 +50,9 @@ const busy = ref(false);
 const shake = ref(false);
 
 const PIN_LEN = 4;
+
+const { branding, refreshBranding } = useBranding();
+onMounted(() => void refreshBranding());
 
 const heading = computed(() => {
   if (mode.value === "unlock") return "Enter PIN";
@@ -226,7 +230,7 @@ const cta = computed(() => {
 </script>
 
 <template>
-  <div class="auth-wrap" @keydown="onKey" tabindex="-1">
+  <div class="auth-wrap" :class="authStyleClass(branding.style)" @keydown="onKey" tabindex="-1">
     <div class="auth">
       <div class="brand">
         <div class="brand-mark"><BrandMark :size="24" /></div>

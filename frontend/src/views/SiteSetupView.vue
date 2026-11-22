@@ -15,11 +15,12 @@ import { ref } from "vue";
 import { useRouter } from "vue-router";
 import { normalizeSiteUrl, setSiteUrl, siteUrl } from "@/app/platform";
 import { NATIVE_VERSION } from "@/app/native-version";
+import { authStyleClass, useBranding } from "@/app/branding";
 import BrandMark from "@/components/BrandMark.vue";
 import Icon from "@/components/Icon.vue";
 
 const router = useRouter();
-const appTitle = __APP_TITLE__;
+const { branding } = useBranding();
 
 const input = ref(siteUrl() ?? "");
 const error = ref("");
@@ -97,11 +98,11 @@ async function connect() {
 </script>
 
 <template>
-  <div class="auth-wrap">
+  <div class="auth-wrap" :class="authStyleClass(branding.style)">
     <div class="auth">
       <div class="brand">
         <div class="brand-mark"><BrandMark :size="28" /></div>
-        <h1>{{ appTitle }}</h1>
+        <h1>{{ branding.appName }}</h1>
         <p class="muted small">Connect to your company server</p>
       </div>
 

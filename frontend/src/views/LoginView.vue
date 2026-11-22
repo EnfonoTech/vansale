@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { ref } from "vue";
+import { onMounted, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { login } from "@/api/auth";
 import { useSessionStore } from "@/stores/session";
 import { ApiError, NetworkError } from "@/app/frappe";
 import { NATIVE_VERSION } from "@/app/native-version";
 import { forgetPin, forgetPinOfOthers } from "@/app/pin-offline";
+import { authStyleClass, useBranding } from "@/app/branding";
 import BrandMark from "@/components/BrandMark.vue";
 
 const router = useRouter();
@@ -15,9 +16,10 @@ const session = useSessionStore();
 /** Reached from the PIN screen's "Sign in with password instead": the password stands in for the PIN. */
 const fromPin = route.query.from === "pin";
 
-// Baked in from CUSTOMER_APP_TITLE at build time — the Android launcher
-// label already comes from the same var via strings.xml.
-const appTitle = __APP_TITLE__;
+// Name, logo and style come from Vansale Settings (last answer kept, build title
+// until the first one). The Android launcher label is still baked at build time.
+const { branding, refreshBranding } = useBranding();
+onMounted(() => void refreshBranding());
 
 const email = ref("");
 const password = ref("");
@@ -114,11 +116,11 @@ async function onSubmit() {
 </script>
 
 <template>
-  <div class="auth-wrap">
+  <div class="auth-wrap" :class="authStyleClass(branding.style)">
     <div class="auth">
       <div class="brand">
         <div class="brand-mark"><BrandMark :size="28" /></div>
-        <h1>{{ appTitle }}</h1>
+        <h1>{{ branding.appName }}</h1>
         <p class="muted small">Sign in to continue</p>
       </div>
 

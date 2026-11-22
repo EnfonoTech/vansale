@@ -16,6 +16,7 @@ import "@fontsource/cairo/700.css";
 
 import "./styles/tokens.css";
 import "./styles/base.css";
+import "./styles/auth-styles.css";
 import "./styles/saudi-riyal.css";
 
 const app = createApp(App);

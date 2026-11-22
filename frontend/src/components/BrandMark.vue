@@ -11,23 +11,40 @@
  * build targets use different bases (`/assets/vansale/spa/` for the
  * Frappe-served PWA, `./` for the Capacitor WebView).
  */
-import { ref } from "vue";
+import { computed, ref, watch } from "vue";
+import { useBranding } from "@/app/branding";
 import Icon from "./Icon.vue";
 
 const props = withDefaults(defineProps<{ size?: number }>(), { size: 28 });
 
-const logoUrl = `${import.meta.env.BASE_URL}brand-logo.png`;
-const useFallback = ref(false);
+const { branding } = useBranding();
+const buildLogoUrl = `${import.meta.env.BASE_URL}brand-logo.png`;
+
+// The Login logo from Vansale Settings first, then the logo staged at build time,
+// then the built-in truck: a file that fails to load steps down to the next.
+const configuredFailed = ref(false);
+const buildFailed = ref(false);
+watch(() => branding.value.logoUrl, () => { configuredFailed.value = false; });
+
+const logoUrl = computed(() => {
+  if (branding.value.logoUrl && !configuredFailed.value) return branding.value.logoUrl;
+  return buildFailed.value ? "" : buildLogoUrl;
+});
+
+function onLogoError() {
+  if (branding.value.logoUrl && !configuredFailed.value) configuredFailed.value = true;
+  else buildFailed.value = true;
+}
 </script>
 
 <template>
-  <Icon v-if="useFallback" name="truck" :size="props.size" />
+  <Icon v-if="!logoUrl" name="truck" :size="props.size" />
   <img
     v-else
     :src="logoUrl"
     alt=""
     class="brand-logo"
-    @error="useFallback = true"
+    @error="onLogoError"
   />
 </template>
 
