@@ -53,9 +53,14 @@ function onLogoError() {
    rounded frame, so insetting them inside another tinted tile reads as a
    mistake. `inherit` picks up the tile's radius; parents set overflow. */
 .brand-logo {
+  /* A square box whatever the file's shape: `height: 100%` does not resolve inside
+     the tile's grid, so a taller logo (the Steel Force emblem is 512x593) ran past
+     the tile and its bottom was clipped. The white shows around a logo that is not
+     square; a logo with its own background fills the box. */
   width: 100%;
-  height: 100%;
+  aspect-ratio: 1 / 1;
   object-fit: contain;
+  background: #fff;
   border-radius: inherit;
   display: block;
 }
