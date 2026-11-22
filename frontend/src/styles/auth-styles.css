@@ -132,3 +132,16 @@ div.auth-wrap.auth-style-dark .key:hover:not(:disabled) {
 div.auth-wrap.auth-style-dark .key.key-util {
   color: #94a3b8;
 }
+
+/* ---- Wide screens: the app column is narrow, so paint what is around it too ---- */
+
+html:has(div.auth-wrap.auth-style-dark),
+body:has(div.auth-wrap.auth-style-dark),
+.app-root:has(div.auth-wrap.auth-style-dark) {
+  background: #0b1220;
+}
+html:has(div.auth-wrap.auth-style-split),
+body:has(div.auth-wrap.auth-style-split),
+.app-root:has(div.auth-wrap.auth-style-split) {
+  background: var(--surface);
+}
