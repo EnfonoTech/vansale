@@ -21,6 +21,21 @@ import frappe
 from werkzeug.wrappers import Response
 
 SCOPE = "/vansale"
+# The app is also served at /sf-connect (same page, same built files). Each path has its
+# own manifest, worker and icons, so an app installed at /vansale keeps working and an
+# install made at /sf-connect is scoped to /sf-connect.
+ALIAS_SCOPES = ("/sf-connect",)
+SCOPES = (SCOPE, *ALIAS_SCOPES)
+INSTALL_FILES = ("manifest.webmanifest", "sw.js", "shell-files.json")
+
+
+def scope_of(path: str | None) -> str:
+    """The scope a request path belongs to: an alias under its own folder, else /vansale."""
+    path = (path or "").split("?")[0]
+    for alias in ALIAS_SCOPES:
+        if path == alias or path.startswith(alias + "/"):
+            return alias
+    return SCOPE
 ICON_SIZES = (192, 512)
 DEFAULT_NAME = "Van Sale"
 DEFAULT_THEME = "#2563eb"
@@ -50,7 +65,7 @@ def _shell_files() -> dict:
     return {"version": version, "files": files}
 
 
-SW_JS = """/* Van Sale service worker: makes the web app installable. */
+_SW_TEMPLATE = """/* Van Sale service worker: makes the web app installable. */
 const OFFLINE_HTML = '<!doctype html><meta charset="utf-8">' +
   '<meta name="viewport" content="width=device-width,initial-scale=1">' +
   '<title>Van Sale</title><body style="font-family:sans-serif;padding:2rem;text-align:center">' +
@@ -58,14 +73,14 @@ const OFFLINE_HTML = '<!doctype html><meta charset="utf-8">' +
 
 self.addEventListener("install", () => self.skipWaiting());
 
-const SHELL_URL = "/vansale";
+const SHELL_URL = "__SCOPE__";
 const PAGE_CACHE = "vansale-page";
 const FILES_PREFIX = "vansale-files-";
 
 /* Keep every file of the current build (listed by the server), then drop the
    caches of older builds. A file that fails is tried again on the next visit. */
 async function keepAppFiles() {
-  const res = await fetch("/vansale/shell-files.json", { cache: "no-store" });
+  const res = await fetch("__SCOPE__/shell-files.json", { cache: "no-store" });
   if (!res.ok) return;
   const list = await res.json();
   const name = FILES_PREFIX + list.version;
@@ -130,8 +145,8 @@ self.addEventListener("push", (event) => {
     self.registration.showNotification(data.title || "Approval needed", {
       body: data.body || "",
       tag: data.tag,
-      data: { url: data.url || "/vansale/approvals" },
-      icon: "/vansale/icon-192.png",
+      data: { url: data.url || "__SCOPE__/approvals" },
+      icon: "__SCOPE__/icon-192.png",
     }),
   );
 });
@@ -142,16 +157,16 @@ self.addEventListener("push", (event) => {
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
   const origin = self.location.origin;
-  let target = origin + "/vansale/approvals";
+  let target = origin + "__SCOPE__/approvals";
   try {
     const url = new URL((event.notification.data && event.notification.data.url) || "", origin);
-    if (url.origin === origin && url.pathname.startsWith("/vansale/")) target = url.href;
+    if (url.origin === origin && url.pathname.startsWith("__SCOPE__/")) target = url.href;
   } catch (e) {
     /* not a URL: the approvals list it is */
   }
   event.waitUntil(
     self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((windows) => {
-      const open = windows.find((w) => w.url.startsWith(origin + "/vansale"));
+      const open = windows.find((w) => w.url.startsWith(origin + "__SCOPE__"));
       if (open && typeof open.navigate === "function") {
         return open.navigate(target).then(
           (moved) => (moved || open).focus(),
@@ -163,6 +178,14 @@ self.addEventListener("notificationclick", (event) => {
   );
 });
 """
+
+
+SW_JS = _SW_TEMPLATE.replace("__SCOPE__", SCOPE)
+
+
+def sw_js(scope: str = SCOPE) -> str:
+    """The service worker for one scope (/vansale or an alias)."""
+    return _SW_TEMPLATE.replace("__SCOPE__", scope)
 
 
 def _settings() -> dict:
@@ -186,35 +209,35 @@ def theme_color() -> str:
         return DEFAULT_THEME
 
 
-def head_tags() -> str:
-    """Tags added to the SPA page so browsers offer to install it."""
+def head_tags(scope: str = SCOPE) -> str:
+    """Tags added to the SPA page so browsers offer to install it (the manifest and icons of `scope`)."""
     name = frappe.utils.escape_html(app_name())
     return (
-        f'<link rel="manifest" href="{SCOPE}/manifest.webmanifest">'
+        f'<link rel="manifest" href="{scope}/manifest.webmanifest">'
         # Tab icon; without one the browser asks for /favicon.ico (404).
-        f'<link rel="icon" type="image/png" href="{SCOPE}/icon-192.png">'
-        f'<link rel="apple-touch-icon" href="{SCOPE}/icon-192.png">'
+        f'<link rel="icon" type="image/png" href="{scope}/icon-192.png">'
+        f'<link rel="apple-touch-icon" href="{scope}/icon-192.png">'
         '<meta name="mobile-web-app-capable" content="yes">'
         '<meta name="apple-mobile-web-app-capable" content="yes">'
         f'<meta name="apple-mobile-web-app-title" content="{name}">'
     )
 
 
-def _manifest() -> dict:
+def _manifest(scope: str = SCOPE) -> dict:
     name = app_name()
     icons = [
-        {"src": f"{SCOPE}/icon-{s}.png", "sizes": f"{s}x{s}", "type": "image/png", "purpose": "any"}
+        {"src": f"{scope}/icon-{s}.png", "sizes": f"{s}x{s}", "type": "image/png", "purpose": "any"}
         for s in ICON_SIZES
     ]
     icons.append(
-        {"src": f"{SCOPE}/icon-512-maskable.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable"}
+        {"src": f"{scope}/icon-512-maskable.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable"}
     )
     return {
-        "id": SCOPE,
+        "id": scope,
         "name": name,
         "short_name": name if len(name) <= 12 else name.split()[0][:12],
-        "start_url": SCOPE,
-        "scope": SCOPE,
+        "start_url": scope,
+        "scope": scope,
         "display": "standalone",
         # Phones and tablets, either way up (a portrait lock kept tablets
         # from turning to landscape once installed).
@@ -276,7 +299,7 @@ def _cached_icon(size: int, maskable: bool) -> bytes:
     return data
 
 
-_ICON_RE = re.compile(r"^/vansale/icon-(\d+)(-maskable)?\.png$")
+_ICON_RE = re.compile(r"^(?:" + "|".join(re.escape(s) for s in SCOPES) + r")/icon-(\d+)(-maskable)?\.png$")
 
 
 class VansalePWARenderer:
@@ -290,15 +313,13 @@ class VansalePWARenderer:
 
     def can_render(self) -> bool:
         p = self.path
-        return p in (f"{SCOPE}/manifest.webmanifest", f"{SCOPE}/sw.js", f"{SCOPE}/shell-files.json") or bool(
-            _ICON_RE.match(p)
-        )
+        return p in {f"{s}/{name}" for s in SCOPES for name in INSTALL_FILES} or bool(_ICON_RE.match(p))
 
     def render(self) -> Response:
         p = self.path
         if p.endswith("manifest.webmanifest"):
             return Response(
-                json.dumps(_manifest()),
+                json.dumps(_manifest(scope_of(p))),
                 content_type="application/manifest+json",
                 headers={"Cache-Control": "no-cache"},
             )
@@ -309,12 +330,13 @@ class VansalePWARenderer:
                 headers={"Cache-Control": "no-cache"},
             )
         if p.endswith("sw.js"):
+            scope = scope_of(p)
             return Response(
-                SW_JS,
+                sw_js(scope),
                 content_type="application/javascript",
-                # The worker lives at /vansale/sw.js but controls /vansale
+                # The worker lives at <scope>/sw.js but controls <scope>
                 # itself (no trailing slash), one level above its folder.
-                headers={"Service-Worker-Allowed": SCOPE, "Cache-Control": "no-cache"},
+                headers={"Service-Worker-Allowed": scope, "Cache-Control": "no-cache"},
             )
         m = _ICON_RE.match(p)
         size = int(m.group(1))

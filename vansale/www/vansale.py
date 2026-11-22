@@ -17,11 +17,13 @@ def get_context(context):
     _leave_site_root()
     index_path = frappe.get_app_path("vansale", "public", "spa", "index.html")
     if os.path.exists(index_path):
-        from vansale.pwa import head_tags
+        from vansale.pwa import SCOPE, head_tags, scope_of
 
+        path = frappe.request.path if getattr(frappe, "request", None) else SCOPE
         with open(index_path, encoding="utf-8") as fh:
-            # Manifest + icons, so phones offer "Install app" (see vansale/pwa.py).
-            context.spa_html = fh.read().replace("</head>", head_tags() + "</head>", 1)
+            # Manifest + icons of the address it was opened at, so phones offer
+            # "Install app" for that address (see vansale/pwa.py).
+            context.spa_html = fh.read().replace("</head>", head_tags(scope_of(path)) + "</head>", 1)
     else:
         context.spa_html = "<h1>Van Sale is not built. Run the frontend build.</h1>"
 

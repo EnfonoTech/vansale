@@ -17,9 +17,12 @@ after_migrate = [
 ]
 
 # /vansale and every /vansale/<path> render www/vansale (the SPA's index.html),
-# so the web app has clean URLs and a refresh on a deep link works.
+# so the web app has clean URLs and a refresh on a deep link works. /sf-connect and
+# /sf-connect/<path> render the same page: the app's second address (see pwa.ALIAS_SCOPES).
 website_route_rules = [
     {"from_route": "/vansale/<path:app_path>", "to_route": "vansale"},
+    {"from_route": "/sf-connect", "to_route": "vansale"},
+    {"from_route": "/sf-connect/<path:app_path>", "to_route": "vansale"},
 ]
 
 # Install files for the web app (manifest, service worker, icons) under /vansale.

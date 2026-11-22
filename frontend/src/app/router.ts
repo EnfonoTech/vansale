@@ -1,8 +1,9 @@
 /**
  * Router.
  *
- * Web: browser history under `/vansale/` (clean URLs). Frappe serves the
- * SPA's index.html for `/vansale` and every `/vansale/<path>` (www/vansale +
+ * Web: browser history under `/vansale/` or, as its alias, `/sf-connect/` (clean
+ * URLs; `web-base.ts` picks the one the app was opened at). Frappe serves the
+ * SPA's index.html for each address and every `<address>/<path>` (www/vansale +
  * `website_route_rules` in hooks.py), so a refresh on a deep link loads the
  * app. Assets keep their `/assets/vansale/spa/` URLs.
  *
@@ -24,8 +25,9 @@ import type { RouteRecordRaw } from "vue-router";
 import { useSessionStore } from "@/stores/session";
 import { approvalsOnly, routeAllowedWithoutVan } from "@/features/approvals/inbox";
 import { isNative, needsSiteSetup } from "./platform";
+import { webBase } from "./web-base";
 
-const WEB_BASE = import.meta.env.DEV ? "/" : "/vansale/";
+const WEB_BASE = import.meta.env.DEV ? "/" : webBase();
 const LEGACY_WEB_PATH = "/assets/vansale/spa/";
 
 if (!isNative() && !import.meta.env.DEV && window.location.pathname.startsWith(LEGACY_WEB_PATH)) {
