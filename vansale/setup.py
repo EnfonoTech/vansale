@@ -199,6 +199,11 @@ VANSALE_CUSTOM_FIELDS: dict[str, list[dict]] = {
             "insert_after": "is_pos",
             "read_only": 1,
             "no_copy": 1,
+            # A memo, not a branch gate. Without this a User Permission marked "is default"
+            # copies the raiser's default mode into every new invoice, credit sales included,
+            # and a user of another branch whose permissions lack that mode is then refused
+            # the invoice ("Not permitted ... linked to Mode of Payment 'Cash-SFSS'").
+            "ignore_user_permissions": 1,
             "module": "Vansale",
         },
         {
