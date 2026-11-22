@@ -55,7 +55,18 @@ function writeCachedBranding(value: Branding): void {
   }
 }
 
-const state = ref<Branding>(readCachedBranding() ?? normalizeBranding(null));
+/** The browser tab's title: the build's own is "Van Sale". */
+function applyTitle(value: Branding): void {
+  try {
+    document.title = value.appName;
+  } catch {
+    /* no document (tests, workers): nothing to title */
+  }
+}
+
+const cachedAtStart = readCachedBranding();
+const state = ref<Branding>(cachedAtStart ?? normalizeBranding(null));
+if (cachedAtStart) applyTitle(cachedAtStart);
 
 /** The class that tells the global auth stylesheet which look to draw. */
 export function authStyleClass(style: LoginStyle): string {
@@ -78,6 +89,7 @@ async function refreshBranding(): Promise<void> {
     const next = normalizeBranding(body?.message);
     next.logoUrl = absoluteUrl(next.logoUrl);
     state.value = next;
+    applyTitle(next);
     writeCachedBranding(next);
   } catch {
     /* offline or slow: keep the cached or fallback value */
@@ -91,5 +103,7 @@ export function useBranding(): { branding: Readonly<Ref<Branding>>; refreshBrand
 }
 
 export function resetBrandingForTests(): void {
-  state.value = readCachedBranding() ?? normalizeBranding(null);
+  const cached = readCachedBranding();
+  state.value = cached ?? normalizeBranding(null);
+  if (cached) applyTitle(cached);
 }

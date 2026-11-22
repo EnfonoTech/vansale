@@ -29,6 +29,7 @@ describe("branding", () => {
   beforeEach(() => {
     window.localStorage.clear();
     apiBase.mockReturnValue("");
+    document.title = "Van Sale";
     resetBrandingForTests();
   });
   afterEach(() => {
@@ -102,6 +103,21 @@ describe("branding", () => {
     vi.stubGlobal("fetch", fetchMock);
     await useBranding().refreshBranding();
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("refreshBranding sets the page title to the app name", async () => {
+    vi.stubGlobal("fetch", answer({ app_name: "SF Connect", style: "classic" }));
+    await useBranding().refreshBranding();
+    expect(document.title).toBe("SF Connect");
+  });
+
+  it("the cached name is the page title at start", () => {
+    window.localStorage.setItem(
+      BRANDING_CACHE_KEY,
+      JSON.stringify({ appName: "SF Connect", logoUrl: "", style: "classic" }),
+    );
+    resetBrandingForTests();
+    expect(document.title).toBe("SF Connect");
   });
 
   it("authStyleClass names the style on the wrapper", () => {
