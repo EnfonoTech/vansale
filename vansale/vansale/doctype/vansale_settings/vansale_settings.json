@@ -50,6 +50,8 @@
   "pwa_app_name",
   "column_break_install",
   "pwa_icon",
+  "login_logo",
+  "login_style",
   "section_break_access",
   "office_roles",
   "section_break_customer",
@@ -273,7 +275,7 @@
   {
    "fieldname": "section_break_install",
    "fieldtype": "Section Break",
-   "label": "Install on phone (web app)"
+   "label": "Branding and install on phone"
   },
   {
    "fieldname": "pwa_app_name",
@@ -288,6 +290,20 @@
    "fieldname": "pwa_icon",
    "fieldtype": "Attach Image",
    "label": "App icon"
+  },
+  {
+   "description": "Shown on the sign-in and PIN screens. Leave blank to use the App icon. Upload it as a public file.",
+   "fieldname": "login_logo",
+   "fieldtype": "Attach Image",
+   "label": "Login logo"
+  },
+  {
+   "default": "Classic",
+   "description": "How the sign-in and PIN screens look.",
+   "fieldname": "login_style",
+   "fieldtype": "Select",
+   "label": "Login style",
+   "options": "Classic\nSplit\nDark glass"
   },
   {
    "fieldname": "section_break_access",

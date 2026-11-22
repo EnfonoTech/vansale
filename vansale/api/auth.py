@@ -325,6 +325,20 @@ def site_info():
     return {"ok": True, "app": "vansale", "app_version": __version__}
 
 
+@frappe.whitelist(allow_guest=True, methods=["GET"])
+def branding():
+    """The name, logo and sign-in style the app shows on its login screen.
+
+    `allow_guest` justification: the sign-in screen draws these before anyone
+    can log in. The values are only what that public page already shows (an
+    app name, a public logo URL, a style name); no user, tenant or document
+    data, and a private file URL is never returned.
+    """
+    from vansale.branding import get_branding
+
+    return get_branding()
+
+
 @frappe.whitelist()
 def ping():
     """Liveness probe used by the client to verify a cached token still works."""
