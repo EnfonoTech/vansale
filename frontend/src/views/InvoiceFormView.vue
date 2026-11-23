@@ -482,6 +482,15 @@ async function doSave(submit: 0 | 1) {
   if (lines.value.length === 0) { toasts.warn("Add at least one item"); return; }
   const zeroQty = lines.value.find((l) => !(Number(l.qty) > 0));
   if (zeroQty) { toasts.warn(`Enter a quantity for ${zeroQty.item_name || zeroQty.item_code}`); return; }
+  // No free lines unless Vansale Settings allows them: rate 0, or 0 after a
+  // 100% line discount. The server refuses them as well.
+  if (!session.zeroRateAllowed) {
+    const free = lines.value.find((l) => {
+      const disc = session.lineDiscount ? Number(l.discount_percentage) || 0 : 0;
+      return !((Number(l.rate) || 0) * (1 - disc / 100) > 0);
+    });
+    if (free) { toasts.warn(`Rate is 0 for ${free.item_name || free.item_code}. Enter a price.`); return; }
+  }
   if (useSplit.value) {
     if (!payRows.value.length) { toasts.warn("Add a payment, or choose Credit"); return; }
     if (splitCredit.value < -0.005) { toasts.warn("Payments are more than the invoice total"); return; }

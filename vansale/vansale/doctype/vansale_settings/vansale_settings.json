@@ -18,6 +18,7 @@
   "default_payment_type",
   "confirm_before_submit",
   "stock_source",
+  "allow_zero_rate",
   "section_break_cash_sale",
   "cash_sale_posting",
   "cash_payment_entry_status",
@@ -133,6 +134,12 @@
    "fieldtype": "Select",
    "label": "Stock figures from (Bin = fast, Stock Ledger = exact)",
    "options": "Bin\nStock Ledger"
+  },
+  {
+   "default": "0",
+   "fieldname": "allow_zero_rate",
+   "fieldtype": "Check",
+   "label": "Allow zero rate (free items) on sales and bulk returns"
   },
   {
    "fieldname": "section_break_cash_sale",
@@ -301,7 +308,7 @@
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-11-10 12:00:00.000000",
+ "modified": "2026-11-23 12:00:00.000000",
  "modified_by": "Administrator",
  "module": "Vansale",
  "name": "Vansale Settings",

@@ -67,6 +67,8 @@ def global_flags() -> dict:
         "allow_delete_draft_payment": True,
         # Yes / No before posting an invoice, return, payment or refund.
         "confirm_before_submit": False,
+        # A sales line at rate 0 is refused unless a site allows free items.
+        "allow_zero_rate": False,
         # Van stock in the app: Bin (ERPNext's running totals, fast) or the
         # Stock Ledger (what the Stock Balance report and submit check use).
         "stock_source": "Bin",
@@ -118,6 +120,7 @@ def global_flags() -> dict:
             "allow_delete_draft_payment",
             "confirm_before_submit",
             "pdf_like_browser_print",
+            "allow_zero_rate",
         ):
             if key in row:
                 flags[key] = bool(int(row.get(key) or 0))

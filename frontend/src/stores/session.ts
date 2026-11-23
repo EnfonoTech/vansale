@@ -114,6 +114,8 @@ export const useSessionStore = defineStore("session", {
     defaultPaymentType: (s): "cash" | "credit" => s.defaults?.invoice_options?.default_payment ?? "cash",
     paymentDelete: (s) => s.defaults?.payment_delete !== false,
     confirmSubmit: (s) => s.defaults?.confirm_submit === true,
+    /** Free items allowed (rate 0); off by default — the server refuses them too. */
+    zeroRateAllowed: (s) => s.defaults?.zero_rate_allowed === true,
     returnWithoutInvoice: (s) => Boolean(s.defaults?.return_without_invoice),
   },
   actions: {

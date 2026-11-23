@@ -47,6 +47,28 @@ def _customer_title(customer: str) -> Optional[str]:
     return customer_titles([customer]).get(customer)
 
 
+def check_zero_rate(doc) -> None:
+    """Refuse lines with no price (rate 0, also after a 100% line discount)
+    unless Vansale Settings allows free items. A forgotten price list entry
+    or a rate typed as 0 otherwise went out as a free sale. Called by the
+    app's save / edit / submit and bulk return endpoints; returns against an
+    invoice keep the original's rate and are not checked."""
+    from vansale.api.me import zero_rate_allowed
+
+    if zero_rate_allowed():
+        return
+    free = [
+        d.item_name or frappe.db.get_value("Item", d.item_code, "item_name") or d.item_code
+        for d in doc.get("items")
+        if flt(d.qty) and flt(d.rate) <= 0
+    ]
+    if free:
+        frappe.throw(
+            _("Rate is 0 for {0}. Enter a price.").format(", ".join(dict.fromkeys(free))),
+            title=_("Zero rate"),
+        )
+
+
 def _user_company() -> str:
     return (
         _user_default("Company")
@@ -281,6 +303,7 @@ def save(
 
     # Invoice-level ERPNext additional discount.
     _set_additional_discount(doc, discount_amount)
+    check_zero_rate(doc)
 
     doc.insert(ignore_permissions=False)
 
@@ -585,6 +608,7 @@ def update_draft(
     # no stale client-side modified timestamp to collide with — the
     # error was being thrown by ERPNext hooks that touch the parent
     # row (e.g. tax/total recalculation) between our load and save.
+    check_zero_rate(doc)
     doc.flags.ignore_version = True
     doc.save(ignore_permissions=False)
 
@@ -660,6 +684,8 @@ def submit_draft(name: str, mode_of_payment: Optional[str] = None) -> dict:
         })
         doc.save()
 
+    # A draft made in desk or before the setting may hold a free line.
+    check_zero_rate(doc)
     doc.submit()
     payment_entries = _cash_payment_entry(doc)
     frappe.db.commit()

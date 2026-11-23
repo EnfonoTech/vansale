@@ -212,6 +212,8 @@ async function submit() {
   if (!customer.value) { toasts.warn("Pick a customer"); return; }
   const picked = lines.value.filter((l) => Number(l.qty) > 0);
   if (!picked.length) { toasts.warn("Add at least one item with a quantity"); return; }
+  const free = session.zeroRateAllowed ? undefined : picked.find((l) => !(Number(l.rate) > 0));
+  if (free) { toasts.warn(`Rate is 0 for ${free.item_name || free.item_code}. Enter a price.`); return; }
   if (!reason.value) { toasts.warn("Choose a return reason"); return; }
   if (refOptions.value?.enabled && !references.value.length) {
     toasts.warn("Choose at least one original invoice (ZATCA needs a reference)");

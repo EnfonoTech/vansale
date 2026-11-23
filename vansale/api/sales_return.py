@@ -666,6 +666,9 @@ def save_without_invoice(
 
     posting = parse_client_ts(posting_ts) if posting_ts else frappe.utils.now_datetime()
     doc = build_bulk_return(customer, items, references, posting, discount_amount=discount_amount)
+    from vansale.api.invoice import check_zero_rate
+
+    check_zero_rate(doc)  # bulk return: the rate is typed
     _set_reason(doc, reason_option, reason_text, note)
     doc.custom_client_id = client_id
     doc.insert(ignore_permissions=False)

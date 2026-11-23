@@ -43,6 +43,8 @@ export interface ConfigDefaults {
   payment_delete?: boolean;
   /** Ask Yes / No before posting (Vansale Settings). */
   confirm_submit?: boolean;
+  /** Vansale Settings "Allow zero rate": false/missing = a line at rate 0 is refused. */
+  zero_rate_allowed?: boolean;
   /** Returns without an original invoice allowed (setting). */
   return_without_invoice?: boolean;
   /** Print formats chosen in Vansale Settings / the van. */

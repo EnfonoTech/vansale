@@ -196,6 +196,7 @@ def config_defaults() -> dict:
         "invoice_options": invoice_options(),
         "payment_delete": bool(global_flags().get("allow_delete_draft_payment", True)),
         "confirm_submit": bool(global_flags().get("confirm_before_submit", False)),
+        "zero_rate_allowed": zero_rate_allowed(),
         "return_without_invoice": return_without_invoice_allowed(user),
         "print_formats": print_formats(user),
         "print": print_behaviour(user),
@@ -376,6 +377,12 @@ def collection_payment_entry_status(user: str | None = None) -> str:
     if status in ("Submit", "Draft"):
         return status
     return cash_sale_settings(user)["payment_entry_status"]
+
+
+def zero_rate_allowed() -> bool:
+    """Vansale Settings "Allow zero rate (free items)": off by default, so a
+    sale or bulk return line with no price is refused."""
+    return bool(global_flags().get("allow_zero_rate", False))
 
 
 def invoice_options() -> dict:
