@@ -478,6 +478,8 @@ function removeLine(idx: number) {
 }
 
 async function doSave(submit: 0 | 1) {
+  // One save at a time: a double tap on Submit made two invoices.
+  if (busy.value || savingDraft.value) return;
   if (!customer.value) { toasts.warn("Pick a customer"); return; }
   if (lines.value.length === 0) { toasts.warn("Add at least one item"); return; }
   const zeroQty = lines.value.find((l) => !(Number(l.qty) > 0));
@@ -499,6 +501,8 @@ async function doSave(submit: 0 | 1) {
     if (singleAmount.value > grandTotal.value + 0.005) { toasts.warn("Amount is more than the invoice total"); return; }
   }
   const flag = submit === 1;
+  // Locked from the first tap, before the Yes / No question.
+  if (flag) busy.value = true; else savingDraft.value = true;
   if (flag) {
     const paid = useSplit.value
       ? splitPaid.value
@@ -511,9 +515,8 @@ async function doSave(submit: 0 | 1) {
       `${lines.value.length} item${lines.value.length === 1 ? "" : "s"} · ${withCurrency(money(grandTotal.value))}`,
       pay,
     ]);
-    if (!ok) return;
+    if (!ok) { busy.value = false; return; }
   }
-  if (flag) busy.value = true; else savingDraft.value = true;
   try {
     // The invoice discount goes to ERPNext as its Additional Discount
     // (discount_amount + apply_discount_on from Vansale Settings), so item
@@ -634,7 +637,8 @@ onMounted(loadAll);
     <section class="card stack">
       <div class="row-head">
         <span class="label">Customer</span>
-        <button type="button" class="link-btn" @click="newCustomerClick">
+        <!-- An edited draft keeps its customer: no picker, no "New". -->
+        <button v-if="!isEditMode" type="button" class="link-btn" @click="newCustomerClick">
           <Icon name="plus" :size="14" /> New
         </button>
       </div>
@@ -643,6 +647,7 @@ onMounted(loadAll);
         :options="customerOptions"
         placeholder="Search customer by name or code"
         remote
+        :disabled="isEditMode"
         @search="onCustomerSearch"
       />
       <div v-if="selectedCustomer" class="selected-hint">

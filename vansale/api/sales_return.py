@@ -276,7 +276,17 @@ def build_return_against(original, items: list[dict[str, Any]], posting=None, di
     doc.posting_time = posting.strftime("%H:%M:%S")
     append_return_rows(doc, original, items)
     _carry_invoice_discount(doc, original, discount_amount)
-    sp = current_user_sales_person()
+    # The original sale's sales team, as the desk's return copies it, so the
+    # credit note nets off against the same salesmen's targets / commission.
+    # Only a sale with no sales team gets the salesman doing the return.
+    team = [r for r in (original.get("sales_team") or []) if r.sales_person]
+    for row in team:
+        doc.append("sales_team", {
+            "sales_person": row.sales_person,
+            "allocated_percentage": row.allocated_percentage,
+            "commission_rate": row.get("commission_rate"),
+        })
+    sp = None if team else current_user_sales_person()
     if sp:
         doc.append("sales_team", {"sales_person": sp, "allocated_percentage": 100})
     _decide_outstanding(doc, original)

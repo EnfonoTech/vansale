@@ -215,12 +215,13 @@ function editDraft() {
  */
 async function submitInvoice() {
   if (!inv.value || busy.value) return;
+  // Locked from the first tap (a double tap submitted twice).
+  busy.value = true;
   const ok = await confirmSubmit(`Submit ${inv.value.name}?`, [
     customerLine(inv.value.customer_title, inv.value.customer_name, inv.value.customer),
     `${withCurrency(fmt(inv.value.grand_total))}`,
   ]);
-  if (!ok) return;
-  busy.value = true;
+  if (!ok) { busy.value = false; return; }
   try {
     await submitDraft(inv.value.name);
     toasts.success(`Submitted ${inv.value.name}`);

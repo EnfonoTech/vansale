@@ -687,7 +687,8 @@ def create(
     if address_line1:
         addr_data = {
             "doctype": "Address",
-            "address_title": customer_name,
+            # The name as saved (it may be put in Title Case), not as typed.
+            "address_title": doc.customer_name,
             "address_type": "Billing",
             "address_line1": address_line1,
             "address_line2": address_line2,
