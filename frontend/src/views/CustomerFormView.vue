@@ -65,7 +65,8 @@ const isB2B = computed(() => customerType.value === "b2b");
 const problems = computed(() => {
   const list: string[] = [];
   if (!customerName.value.trim()) list.push("Customer name is required");
-  const vatError = ksaVatError(taxId.value, country.value);
+  // VAT is a B2B field (hidden and not sent for B2C).
+  const vatError = isB2B.value ? ksaVatError(taxId.value, country.value) : null;
   if (vatError) list.push(vatError);
   if (isKsa(country.value)) {
     list.push(
@@ -97,7 +98,9 @@ async function submit() {
       customer_type: customerType.value,
       mobile_no: mobileNo.value || undefined,
       email_id: emailId.value || undefined,
-      tax_id: taxId.value || undefined,
+      // VAT / CR belong to B2B only: a VAT buyer gets a standard tax invoice,
+      // which ZATCA refuses without the buyer's address (B2C has none).
+      tax_id: isB2B.value ? taxId.value || undefined : undefined,
       address_line1: addressLine1.value || undefined,
       address_line2: addressLine2.value || undefined,
       city: city.value || undefined,
@@ -107,7 +110,7 @@ async function submit() {
       building_number: buildingNumber.value || undefined,
       additional_number: additionalNumber.value || undefined,
       district: district.value || undefined,
-      cr_number: crNumber.value || undefined,
+      cr_number: isB2B.value ? crNumber.value || undefined : undefined,
       customer_name_2: customerName2.value || undefined,
     });
     toasts.success(`Customer ${res.customer_name} created`);
@@ -163,11 +166,11 @@ async function submit() {
           <input type="email" v-model="emailId" inputmode="email" />
         </label>
       </div>
-      <label class="field">
+      <label v-if="isB2B" class="field">
         <span class="tiny">VAT number</span>
         <input type="text" v-model="taxId" inputmode="numeric" />
       </label>
-      <label v-if="session.customerForm?.cr_number" class="field">
+      <label v-if="isB2B && session.customerForm?.cr_number" class="field">
         <span class="tiny">CR number</span>
         <input type="text" v-model="crNumber" inputmode="numeric" />
       </label>

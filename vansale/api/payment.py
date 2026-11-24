@@ -16,7 +16,7 @@ from frappe.utils import cint, flt
 from vansale.api.access import check_read, readable_doc
 from vansale.api.me import is_office_user
 from vansale.api.outbox import claim
-from vansale.api.datetime_util import naive_site_to_utc_iso, parse_client_ts
+from vansale.api.datetime_util import document_datetime, naive_site_to_utc_iso, parse_client_ts
 
 
 def _record_outbox(client_id: str, ref_name: str, posting_ts: Optional[str], payload: dict) -> None:
@@ -79,7 +79,14 @@ def build_payment_entry(
     Shared by the payment screen (`save`) and cash sales posted as a
     Payment Entry (`invoice.save`).
     """
-    paid_from, paid_to = _resolve_accounts(company, mode_of_payment)
+    from erpnext.accounts.party import get_party_account
+
+    receivable, paid_to = _resolve_accounts(company, mode_of_payment)
+    # The customer's own receivable (Customer → Customer Group → Company), as
+    # ERPNext's invoice uses: the company default was refused for a customer
+    # with an account of its own ("SI is associated with X, but Party Account
+    # is Debtors"), and an advance went to the wrong account.
+    paid_from = get_party_account("Customer", customer, company) or receivable
     # Account currencies — required by ERPNext's Payment Entry validation;
     # skipping this made validate() trip on str vs Dict attribute access.
     paid_from_currency = frappe.db.get_value("Account", paid_from, "account_currency") or "SAR"
@@ -300,7 +307,7 @@ def save(
         or frappe.defaults.get_user_default("Company", frappe.session.user)
         or frappe.db.get_single_value("Global Defaults", "default_company")
     )
-    posting = parse_client_ts(posting_ts) if posting_ts else frappe.utils.now_datetime()
+    posting = document_datetime(posting_ts)
     # ERPNext requires Reference No + Date on bank-type modes. The date was
     # never sent, so every bank collection failed; default it to the posting
     # date and ask for the number up front.

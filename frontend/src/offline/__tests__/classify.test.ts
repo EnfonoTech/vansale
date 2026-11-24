@@ -90,3 +90,22 @@ describe("classifyError", () => {
     expect(c.retryable).toBe(true);
   });
 });
+
+describe("classify: duplicates and the server's exception type", () => {
+  it("a duplicate refusal is not success (the queued sale must not be deleted)", () => {
+    const c = classifyError(new ApiError("x", 417, "Customer 'Al Noor' already exists."));
+    expect(c.treatAsSuccess).toBe(false);
+    expect(c.kind).toBe("validation");
+  });
+  it("an Arabic refusal is classified by its exception type", () => {
+    const c = classifyError(new ApiError("x", 417, "العميل غير مسموح", "ValidationError"));
+    expect(c.kind).toBe("validation");
+    expect(c.retryable).toBe(false);
+    expect(classifyError(new ApiError("x", 403, "غير مسموح", "PermissionError")).kind).toBe("permission");
+  });
+  it("an ended session retries quietly", () => {
+    const c = classifyError(new ApiError("x", 401, "ended", "SessionExpired"));
+    expect(c.kind).toBe("network");
+    expect(c.userFacing).toBe(false);
+  });
+});

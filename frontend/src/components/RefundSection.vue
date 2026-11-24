@@ -28,17 +28,20 @@ const mops = ref<ModeOfPayment[]>([]);
 const money = (n: number) => (Number(n) || 0).toFixed(props.precision);
 const needsReference = (mode: string) => Boolean(mops.value.find((m) => m.name === mode)?.needs_reference);
 
-// Like the sale's payment: the full credit by default (follows the total
-// until edited); less = partial refund, the rest stays as customer credit.
+// Most that can be paid back: the credit less what the invoice still owes
+// (settled against the invoice on submit).
+const refundMax = computed(() => props.totals?.refund_max ?? props.totals?.grand_total ?? 0);
+// Like the sale's payment: all of it by default (follows the total until
+// edited); less = partial refund, the rest stays as customer credit.
 const amountModel = computed<number | string>({
-  get: () => (state.value.amount == null ? props.totals?.grand_total ?? 0 : state.value.amount),
+  get: () => (state.value.amount == null ? refundMax.value : state.value.amount),
   set: (v) => {
     const n = Number(v);
     state.value.amount = (v as unknown) === "" || !Number.isFinite(n) ? null : n;
   },
 });
 const remaining = computed(() =>
-  state.value.amount == null || !props.totals ? 0 : Math.max(props.totals.grand_total - state.value.amount, 0),
+  state.value.amount == null || !props.totals ? 0 : Math.max(refundMax.value - state.value.amount, 0),
 );
 
 onMounted(async () => {
@@ -63,6 +66,13 @@ onMounted(async () => {
     </p>
     <template v-else>
       <span class="label">Refund</span>
+      <p v-if="(totals.original_outstanding ?? 0) > 0 && totals.refund_max != null" class="muted xsmall" style="margin:0">
+        <SarSymbol :code="currency" />{{ money(totals.grand_total - totals.refund_max) }} of this credit clears what the
+        invoice still owes; up to <SarSymbol :code="currency" />{{ money(totals.refund_max) }} can be paid back.
+      </p>
+      <p v-if="state.on && !mops.length" class="bad-note xsmall" style="margin:0">
+        No payment mode to refund with here — keep it as credit, or ask the office.
+      </p>
       <!-- Same toggle as the sale's Cash / Credit. -->
       <div class="seg">
         <button type="button" class="seg-btn" :data-active="state.on" @click="state.on = true">
@@ -113,5 +123,6 @@ onMounted(async () => {
 .refund-grid { display: grid; grid-template-columns: 1fr 8rem; gap: 0.5rem; }
 .field { display: flex; flex-direction: column; gap: 0.3rem; }
 .rest { display: flex; justify-content: space-between; }
+.bad-note { color: var(--danger); }
 .refund-grid .full { grid-column: 1 / -1; }
 </style>

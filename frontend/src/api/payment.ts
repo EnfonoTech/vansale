@@ -130,9 +130,10 @@ export async function save(payload: PaymentPayload): Promise<SavedPayment> {
 
   if (isOnline()) {
     try {
+      // No posting_ts: the server's clock dates an online payment; a queued
+      // one sends the time it was taken.
       const res = await apiCall<SavedPayment>("POST", "vansale.api.payment.save", {
         client_id: clientId,
-        posting_ts: clientTs,
         ...payload,
       });
       const sync = useSyncStore();

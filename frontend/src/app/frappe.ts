@@ -71,13 +71,29 @@ export async function clearCredentials(): Promise<void> {
 export class ApiError extends Error {
   status: number;
   serverMessage?: string;
-  constructor(message: string, status: number, serverMessage?: string) {
+  /** Frappe's exception class (ValidationError, PermissionError, …): the same
+   *  in every language, unlike the message. */
+  excType?: string;
+  constructor(message: string, status: number, serverMessage?: string, excType?: string) {
     super(message);
     this.name = "ApiError";
     this.status = status;
     this.serverMessage = serverMessage;
+    this.excType = excType;
   }
 }
+
+/** The web session ended (Frappe answers as Guest): sign in again. Queued
+ *  work stays and is retried after sign-in. */
+export class SessionExpiredError extends ApiError {
+  constructor() {
+    super("Your session has ended — sign in again", 401, "Your session has ended — sign in again", "SessionExpired");
+    this.name = "SessionExpiredError";
+  }
+}
+
+/** Fired once per expiry so the app can send the user to the sign-in screen. */
+export const SESSION_EXPIRED_EVENT = "vansale:session-expired";
 
 /** Plain "we couldn't reach the server" error — safe to queue + retry. */
 export class NetworkError extends Error {
@@ -211,6 +227,9 @@ function parseServerError(body: unknown): string | undefined {
   return text || undefined;
 }
 
+/** How long a call may take before it is given up (a flaky mobile network). A slow endpoint asks for more. */
+export const DEFAULT_TIMEOUT_MS = 20_000;
+
 /**
  * Call a whitelisted method.
  *
@@ -219,13 +238,16 @@ function parseServerError(body: unknown): string | undefined {
  *   await apiCall("POST", "vansale.api.auth.setup_pin", { pin: "1234" });
  *
  * GET params must be in the URL (fatehhr lesson #13).
+ * `timeoutMs` is how long to wait for the answer; the default suits an
+ * ordinary call, and an endpoint that does a lot of work asks for more.
  */
 export async function apiCall<T>(
   method: "GET" | "POST" | "PUT" | "DELETE",
   path: string,
   body?: unknown,
+  timeoutMs: number = DEFAULT_TIMEOUT_MS,
 ): Promise<T> {
-  return callOnce<T>(method, path, body, false);
+  return callOnce<T>(method, path, body, false, timeoutMs);
 }
 
 async function callOnce<T>(
@@ -233,6 +255,7 @@ async function callOnce<T>(
   path: string,
   body: unknown,
   csrfRetried: boolean,
+  timeoutMs: number,
 ): Promise<T> {
   const hasDotted = /^[a-z_][\w.]+$/i.test(path.split("?")[0]);
   const url = apiUrl(path, hasDotted);
@@ -246,10 +269,10 @@ async function callOnce<T>(
     init.body = JSON.stringify(body);
   }
 
-  // 20s timeout so mobile WebView doesn't hang forever on flaky networks.
+  // 20s timeout (by default) so mobile WebView doesn't hang forever on flaky networks.
   // Without this, slow/failing requests surface as indefinite blank screens.
   const controller = new AbortController();
-  const timeoutId = window.setTimeout(() => controller.abort(), 20_000);
+  const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
   init.signal = controller.signal;
 
   let res: Response;
@@ -279,14 +302,29 @@ async function callOnce<T>(
     (data as { exc_type?: string } | null)?.exc_type === "CSRFTokenError"
   ) {
     resetCsrfToken();
-    return callOnce<T>(method, path, body, true);
+    return callOnce<T>(method, path, body, true, timeoutMs);
+  }
+
+  // The session cookie is no longer valid: Frappe ran the call as Guest and
+  // says so. Every call then failed with a bare 403 and the app looked stuck.
+  const signingIn = /^vansale\.api\.auth\.(login|login_with_pin)\b|^login\b/.test(path);
+  if ((data as { session_expired?: number } | null)?.session_expired && !res.ok && !signingIn) {
+    window.dispatchEvent(new CustomEvent(SESSION_EXPIRED_EVENT));
+    throw new SessionExpiredError();
+  }
+
+  // A proxy answering while the server restarts / deploys: nothing was
+  // processed, so it is a network failure (queue and retry), not a refusal.
+  if (res.status === 502 || res.status === 503 || res.status === 504) {
+    throw new NetworkError(`Server unavailable (HTTP ${res.status})`);
   }
 
   if (!res.ok) {
     // serverMessage only when the server said something readable, so a
     // screen's own wording ("Incorrect email or password") is used otherwise.
     const serverMsg = parseServerError(data);
-    throw new ApiError(serverMsg ?? `HTTP ${res.status}`, res.status, serverMsg);
+    const excType = (data as { exc_type?: string } | null)?.exc_type;
+    throw new ApiError(serverMsg ?? `HTTP ${res.status}`, res.status, serverMsg, excType);
   }
 
   const wrapped = data as { message?: T } | null;

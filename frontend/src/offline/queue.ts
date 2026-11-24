@@ -14,10 +14,23 @@ export function genUuid(): string {
   return `uuid-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
+/** Who is signed in (read from the saved session; no store needed). */
+export function currentUser(): string | null {
+  try {
+    const raw = window.localStorage.getItem("vansale.session");
+    return raw ? (JSON.parse(raw) as { user?: string | null }).user ?? null : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function addEntry<T extends QueuedBase>(
   store: QueueStoreName,
   entry: T,
 ): Promise<number> {
+  // Queued work belongs to the user who did it: it must never post under the
+  // next person who signs in on this phone.
+  if (!entry.owner) entry.owner = currentUser();
   const d = await db();
   return Number(await (d.add as (s: QueueStoreName, v: unknown) => Promise<IDBValidKey>)(store, entry));
 }
@@ -58,4 +71,23 @@ export async function totalPending(): Promise<number> {
   ];
   const counts = await Promise.all(stores.map(countPending));
   return counts.reduce((a, b) => a + b, 0);
+}
+
+/** "Retry" pressed: every waiting entry may go now, whatever its backoff
+ *  (it waited up to 30 minutes after the tap). */
+export async function clearBackoff(): Promise<void> {
+  const stores: QueueStoreName[] = [
+    "invoice_queue",
+    "payment_queue",
+    "return_queue",
+    "visit_queue",
+    "customer_queue",
+    "stock_entry_queue",
+  ];
+  for (const store of stores) {
+    for (const entry of await getAllEntries(store)) {
+      if (entry.status === "dismissed" || entry.nextAttemptAt === undefined) continue;
+      await updateEntry(store, { ...entry, nextAttemptAt: undefined });
+    }
+  }
 }

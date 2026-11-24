@@ -623,6 +623,10 @@ def create(
         or "Saudi Arabia"
     )
 
+    if resolved_country == _KSA and tax_id and not is_b2b:
+        # A buyer with a VAT number gets a standard (B2B) tax invoice, which
+        # ZATCA refuses without the buyer's address.
+        frappe.throw(_("A customer with a VAT number is a B2B (company) customer."))
     if resolved_country == _KSA:
         _validate_ksa(resolved_country, is_b2b, tax_id, building_number, pincode, district, address_line1, city)
     elif is_b2b:

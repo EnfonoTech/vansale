@@ -39,13 +39,32 @@ export interface ClassifiedError {
   message: string;
 }
 
-// "has already been submitted" / "already exists" — allow up to a couple
-// intervening words between the keywords.
+// "has already been submitted" — allow up to a couple intervening words.
+// NOT "already exists": that is the server refusing a duplicate (a customer
+// name, a VAT number), and treating it as success deleted the unposted sale
+// from the queue. A real replay comes back as success (idempotent_replay).
 const IDEMPOTENT = [
   /already\b[\s\S]{0,20}\bsubmitted/i,
   /duplicate\s+client_id/i,
-  /already\s+exists/i,
 ];
+const DUPLICATE = [/already\s+exists/i, /already\s+used\s+by/i];
+
+/** Frappe's exception class → kind. Same in every language (the message is
+ *  translated: an Arabic refusal matched none of the English patterns and was
+ *  retried for ever as "unknown"). */
+const BY_EXC_TYPE: Record<string, ErrorKind> = {
+  PermissionError: "permission",
+  DoesNotExistError: "not-found",
+  LinkValidationError: "not-found",
+  DuplicateEntryError: "validation",
+  UniqueValidationError: "validation",
+  MandatoryError: "validation",
+  ValidationError: "validation",
+  InvalidStatusError: "validation",
+  NegativeStockError: "blocked",
+  InsufficientPermissionError: "permission",
+  SessionExpired: "network",
+};
 const PERMISSION = [/not\s+permitted/i, /permission/i, /forbidden/i];
 const NOT_FOUND = [/not\s+found/i, /does\s+not\s+exist/i];
 // Backend data/setup faults. The van user CANNOT fix these by editing the
@@ -81,6 +100,12 @@ export function classifyError(err: unknown): ClassifiedError {
   }
 
   const msg = extractMessage(err);
+  const excType = err instanceof ApiError ? err.excType : undefined;
+
+  // The session ended: retry quietly after the user signs in again.
+  if (excType === "SessionExpired") {
+    return { kind: "network", retryable: true, treatAsSuccess: false, userFacing: false, requiresEdit: false, message: msg };
+  }
 
   if (IDEMPOTENT.some((re) => re.test(msg))) {
     return {
@@ -112,6 +137,16 @@ export function classifyError(err: unknown): ClassifiedError {
       message: msg,
     };
   }
+  if (DUPLICATE.some((re) => re.test(msg))) {
+    return {
+      kind: "validation",
+      retryable: false,
+      treatAsSuccess: false,
+      userFacing: true,
+      requiresEdit: true,
+      message: msg,
+    };
+  }
   if (BLOCKED.some((re) => re.test(msg))) {
     return {
       kind: "blocked",
@@ -119,6 +154,18 @@ export function classifyError(err: unknown): ClassifiedError {
       treatAsSuccess: false,
       userFacing: true,
       requiresEdit: false,
+      message: msg,
+    };
+  }
+  // Whatever the language, the server's exception class decides.
+  const byType = excType ? BY_EXC_TYPE[excType] : undefined;
+  if (byType) {
+    return {
+      kind: byType,
+      retryable: byType === "network",
+      treatAsSuccess: false,
+      userFacing: byType !== "network",
+      requiresEdit: byType === "validation" || byType === "not-found",
       message: msg,
     };
   }

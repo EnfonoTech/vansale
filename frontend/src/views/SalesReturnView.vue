@@ -143,9 +143,13 @@ const previewError = ref("");
 // Blank = the full credit; otherwise a partial refund, never more than the credit.
 function refundAmountError(): string | null {
   const a = refund.value.amount;
-  if (!refund.value.on || !totals.value?.refundable || a == null) return null;
+  if (!refund.value.on || !totals.value?.refundable) return null;
+  // "Refund now" with no mode used to submit the return and pay nothing.
+  if (!refund.value.mode) return "No payment mode to refund with — choose \"Keep as credit\", or ask the office";
+  if (a == null) return null;
   if (!(a > 0)) return "Refund amount must be more than 0";
-  if (a > totals.value.grand_total + 0.005) return "Refund amount can't be more than the credit";
+  const max = totals.value.refund_max ?? totals.value.grand_total;
+  if (a > max + 0.005) return "Refund amount can't be more than what can be paid back";
   return null;
 }
 function refundPayload() {

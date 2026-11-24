@@ -14,7 +14,7 @@ import frappe
 from frappe import _
 from frappe.utils import cint, flt, getdate, nowdate
 
-from vansale.api.datetime_util import naive_site_to_utc_iso, parse_client_ts
+from vansale.api.datetime_util import document_datetime, naive_site_to_utc_iso, parse_client_ts
 from vansale.api.sales_return import refund_owed, resolve_return_reason, return_uoms, returned_qty_by_row
 from vansale.api.access import check_read, readable_doc
 from vansale.api.outbox import claim
@@ -260,7 +260,7 @@ def save(
     company = _user_company()
     set_warehouse = warehouse or _get_default_warehouse(company)
 
-    posting = parse_client_ts(posting_ts) if posting_ts else frappe.utils.now_datetime()
+    posting = document_datetime(posting_ts)
 
     doc = frappe.new_doc("Sales Invoice")
     doc.customer = customer
@@ -746,10 +746,10 @@ def return_against(
             "idempotent_replay": True,
         }
 
-    from vansale.api.sales_return import _set_reason, build_return_against, refund_credit_note
+    from vansale.api.sales_return import _set_reason, _settle_against_original, build_return_against, refund_credit_note
 
     original = readable_doc("Sales Invoice", original_name)
-    posting = parse_client_ts(posting_ts) if posting_ts else frappe.utils.now_datetime()
+    posting = document_datetime(posting_ts)
     doc = build_return_against(original, items, posting, discount_amount)
     _set_reason(doc, reason_option, reason_text, note)
     doc.custom_client_id = client_id
@@ -758,6 +758,7 @@ def return_against(
     refund_entry = None
     if submit:
         doc.submit()
+        _settle_against_original(doc)
         refund_entry = refund_credit_note(doc, refund)
 
     _record_outbox(client_id, doc.name, posting_ts, {

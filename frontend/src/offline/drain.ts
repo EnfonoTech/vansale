@@ -12,7 +12,7 @@
  * work** — commandment 3.
  */
 import { db, type QueueStoreName, type QueuedBase } from "./db";
-import { getAllEntries, updateEntry, deleteEntry } from "./queue";
+import { currentUser, getAllEntries, updateEntry, deleteEntry } from "./queue";
 import { resolveToRealUrl } from "./photos";
 import { resolveSignatureToRealUrl } from "./signatures";
 import { classifyError } from "./classify";
@@ -75,8 +75,14 @@ export async function drainStore<T extends QueuedBase & { payload: Record<string
   const summary = { processed: 0, failed: 0, skipped: 0 };
   const entries = (await getAllEntries<T>(store)) as T[];
 
+  const me = currentUser();
   for (const entry of entries) {
     if (entry.status === "dismissed") {
+      summary.skipped += 1;
+      continue;
+    }
+    // Another user's offline work waits for them; it is never posted as us.
+    if (entry.owner && me && entry.owner !== me) {
       summary.skipped += 1;
       continue;
     }

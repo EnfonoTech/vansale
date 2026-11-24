@@ -287,10 +287,9 @@ export interface SavedReturn extends SavedInvoice {
  *  Offline path not supported — returns require server-side stock validation. */
 export async function returnAgainst(payload: ReturnPayload): Promise<SavedReturn> {
   const clientId = genUuid();
-  const clientTs = new Date().toISOString();
+  // Online only: the server's clock dates it.
   const res = await apiCall<SavedReturn>("POST", "vansale.api.invoice.return_against", {
     client_id: clientId,
-    posting_ts: clientTs,
     ...payload,
   });
   const sync = useSyncStore();
@@ -306,9 +305,11 @@ export async function save(payload: InvoicePayload): Promise<SavedInvoice> {
 
   if (isOnline()) {
     try {
+      // No posting_ts: the server's clock dates an online sale (a phone clock
+      // set back or forward moved invoice / ZATCA dates). Queued sales send
+      // the time they were made.
       const res = await apiCall<SavedInvoice>("POST", "vansale.api.invoice.save", {
         client_id: clientId,
-        posting_ts: clientTs,
         ...payload,
       });
       const sync = useSyncStore();
@@ -361,7 +362,7 @@ export async function returnWithoutInvoice(payload: {
   const res = await apiCall<SavedReturn & { references?: string[] }>(
     "POST",
     "vansale.api.sales_return.save_without_invoice",
-    { client_id: clientId, posting_ts: new Date().toISOString(), submit: 1, ...payload },
+    { client_id: clientId, submit: 1, ...payload }, // online only: the server dates it
   );
   void useSyncStore().refresh();
   return { ...res, clientId };
@@ -381,6 +382,9 @@ export interface ReturnTotals {
   /** Credit keeps its own balance → can be refunded now (bulk, or a paid invoice). */
   refundable?: boolean;
   original_outstanding?: number | null;
+  /** What can be paid back: the credit less what the invoice still owes
+   *  (that part is settled against the invoice on submit). */
+  refund_max?: number;
 }
 
 /** Pay the customer back for the credit now (Payment Entry "Pay"). */
@@ -423,7 +427,6 @@ export async function refundCreditNote(payload: {
 }): Promise<{ payment_entry: string; docstatus?: number; idempotent_replay?: boolean }> {
   return apiCall("POST", "vansale.api.sales_return.refund", {
     client_id: genUuid(),
-    posting_ts: new Date().toISOString(),
     ...payload,
   });
 }

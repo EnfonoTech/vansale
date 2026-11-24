@@ -10,6 +10,9 @@ import { useRouteVisitStore } from "@/stores/routeVisit";
 import { useOnline } from "@/app/online";
 import { useSessionStore } from "@/stores/session";
 import { warmCaches } from "@/offline/warm";
+import { useSyncStore } from "@/stores/sync";
+import { useToastStore } from "@/stores/toasts";
+import { SESSION_EXPIRED_EVENT } from "@/app/frappe";
 
 const route = useRoute();
 const router = useRouter();
@@ -22,9 +25,39 @@ const session = useSessionStore();
 // helper internally rate-limits to once per 10 min so this never spams.
 // Also re-read config: a van that was offline while the office changed a
 // module toggle should pick it up the moment it has signal again.
+const sync = useSyncStore();
+
+/**
+ * Send what was saved offline. Nothing did this on its own: queued sales
+ * waited until the salesman opened the sync screen and tapped Retry. Safe to
+ * call often — one drain at a time, each entry waits out its own backoff, and
+ * the server ignores a sale it already has (client_id).
+ */
+function syncPending() {
+  if (!session.isAuthenticated) return;
+  void sync.refresh().then(() => {
+    if (sync.pending > 0) void sync.requestDrain();
+  });
+}
+
+// The web session ended (every call came back 403 and the app looked stuck):
+// say so once and go to sign-in. Queued work stays on the phone and is sent
+// after the same user signs in again.
+let expiryShown = false;
+function onSessionExpired() {
+  if (expiryShown || route.name === "login") return;
+  expiryShown = true;
+  useToastStore().warn("Your session has ended — sign in again. Unsent work stays on this phone.", 6000);
+  session.logout();
+  void router.replace({ name: "login" }).finally(() => {
+    expiryShown = false;
+  });
+}
+
 watch(online, (isNow, wasNow) => {
   if (isNow && !wasNow && session.isAuthenticated) {
     void session.refreshDefaults();
+    syncPending();
     void warmCaches({
       warehouse: session.defaultWarehouse ?? undefined,
       force: true,
@@ -42,13 +75,18 @@ watch(online, (isNow, wasNow) => {
  * the foreground, which is when a driver would notice a change anyway.
  */
 onMounted(() => {
+  window.addEventListener(SESSION_EXPIRED_EVENT, onSessionExpired);
   if (session.isAuthenticated) void session.refreshDefaults();
+  syncPending();
 
   void (async () => {
     try {
       const { App: CapApp } = await import("@capacitor/app");
       await CapApp.addListener("appStateChange", ({ isActive }) => {
-        if (isActive && session.isAuthenticated) void session.refreshDefaults();
+        if (isActive && session.isAuthenticated) {
+          void session.refreshDefaults();
+          syncPending();
+        }
       });
     } catch {
       /* web build — @capacitor/app not bundled */
@@ -59,6 +97,7 @@ onMounted(() => {
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "visible" && session.isAuthenticated) {
       void session.refreshDefaults();
+      syncPending();
     }
   });
 });

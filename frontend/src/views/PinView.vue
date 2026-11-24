@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
+import { totalPending } from "@/offline/queue";
+import { useConfirmStore } from "@/stores/confirm";
 import { useRoute, useRouter } from "vue-router";
 import { changePin, loginWithPin, setupPin } from "@/api/auth";
 import { configDefaults } from "@/api/me";
@@ -173,7 +175,18 @@ async function unlockOffline(email: string) {
   pin.value = "";
 }
 
-function signInAgain() {
+async function signInAgain() {
+  // Work still queued on this phone stays this user's: it is sent only when
+  // the same user signs in again (never as the next one). Say so first.
+  const pending = await totalPending();
+  if (pending > 0) {
+    const ok = await useConfirmStore().ask({
+      title: "Unsent work on this phone",
+      message: `${pending} item${pending === 1 ? "" : "s"} have not reached the server yet. They will be sent when this user signs in again.`,
+      confirmText: "Sign in anyway",
+    });
+    if (!ok) return;
+  }
   forgetPin();
   session.logout();
   void router.replace({ name: "login" });
