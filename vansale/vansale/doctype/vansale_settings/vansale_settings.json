@@ -19,6 +19,7 @@
   "confirm_before_submit",
   "stock_source",
   "allow_zero_rate",
+  "allow_delete_draft_invoice",
   "section_break_cash_sale",
   "cash_sale_posting",
   "cash_payment_entry_status",
@@ -140,6 +141,12 @@
    "fieldname": "allow_zero_rate",
    "fieldtype": "Check",
    "label": "Allow zero rate (free items) on sales and bulk returns"
+  },
+  {
+   "default": "0",
+   "fieldname": "allow_delete_draft_invoice",
+   "fieldtype": "Check",
+   "label": "Allow deleting draft invoices"
   },
   {
    "fieldname": "section_break_cash_sale",
@@ -308,7 +315,7 @@
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-11-23 12:00:00.000000",
+ "modified": "2026-11-26 12:00:00.000000",
  "modified_by": "Administrator",
  "module": "Vansale",
  "name": "Vansale Settings",

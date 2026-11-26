@@ -35,12 +35,16 @@ const stateField = ref("");
 const country = ref("Saudi Arabia");
 const phone = ref("");
 const busy = ref(false);
+// Save stays off until the customer (and the address being edited) has
+// loaded: saving early sent blanks that replaced the stored address.
+const loaded = ref(false);
 
 const isB2B = computed(() => customer.value?.customer_type === "Company");
 
 onMounted(async () => {
   try {
     customer.value = await detail(customerName.value);
+    loaded.value = true;
     const a = customer.value.addresses.find((x) => x.name === addressName.value);
     if (a) {
       addressLine1.value = a.address_line1 ?? "";
@@ -163,7 +167,7 @@ async function submit() {
       </div>
     </section>
 
-    <button class="submit" type="button" :disabled="busy" @click="submit">
+    <button class="submit" type="button" :disabled="busy || !loaded" @click="submit">
       <Icon name="check" :size="18" /> {{ busy ? "Saving…" : "Save address" }}
     </button>
   </div>

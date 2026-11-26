@@ -311,7 +311,7 @@ async function deleteInvoice() {
             <button class="ghost" :disabled="busy" @click="printInvoice">
               <Icon name="receipt" :size="16" /> Print
             </button>
-            <button class="ghost danger-ghost" :disabled="busy" @click="deleteInvoice">
+            <button v-if="session.invoiceDelete" class="ghost danger-ghost" :disabled="busy" @click="deleteInvoice">
               <Icon name="trash" :size="16" /> Delete
             </button>
           </template>

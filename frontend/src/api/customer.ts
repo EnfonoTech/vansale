@@ -228,6 +228,8 @@ export async function downloadStatementPdf(
 }
 
 export interface CustomerCreatePayload {
+  /** The form's id, kept across retries (the server returns the first customer). */
+  client_id?: string;
   customer_name: string;
   customer_type?: "b2b" | "b2c";
   mobile_no?: string;

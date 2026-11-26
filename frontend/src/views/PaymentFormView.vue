@@ -132,6 +132,12 @@ function statusTone(status: unknown): string {
 
 const selectedList = computed(() => Array.from(selected.value));
 const hasPicks = computed(() => selected.value.size > 0);
+// What the picked invoices (or all of them) still owe.
+const openTotal = computed(() =>
+  invoices.value
+    .filter((r) => !hasPicks.value || selected.value.has(String(r.name)))
+    .reduce((t, r) => t + (Number(r.outstanding_amount) || 0), 0),
+);
 const totalOutstanding = computed(() =>
   invoices.value.reduce((t, r) => t + (Number(r.outstanding_amount) || 0), 0),
 );
@@ -145,6 +151,12 @@ async function submit() {
   if (!Number.isFinite(n) || n <= 0) { toasts.warn("Amount must be positive"); return; }
   if (needsReference.value && !reference.value.trim()) {
     toasts.warn(`Enter the reference number for ${mode.value}`);
+    return;
+  }
+  // More than the invoices: the rest would sit as an unallocated advance.
+  const over = !advance.value && invoices.value.length ? n - openTotal.value : 0;
+  if (over > 0.005 && !session.advancePayment) {
+    toasts.warn(`That is ${fmt(over)} more than the ${hasPicks.value ? "picked " : ""}invoices (${fmt(openTotal.value)}). Collect up to that amount.`);
     return;
   }
   const cust = customers.value.find((c) => c.name === customer.value);

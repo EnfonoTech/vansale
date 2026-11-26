@@ -248,9 +248,14 @@ watch(customer, async (newCustomer) => {
     keepDraftRates = false;
     return;
   }
+  await repriceLines(newCustomer);
+});
+
+/** The cart's rates from the customer's price list. */
+async function repriceLines(forCustomer: string) {
   for (const l of lines.value) {
     try {
-      const p = await priceFor(l.item_code, newCustomer, l.uom);
+      const p = await priceFor(l.item_code, forCustomer, l.uom);
       if (p.price_list_rate) {
         l.price_list_rate = roundRate(p.price_list_rate);
         l.rate = roundRate(p.price_list_rate);
@@ -260,7 +265,7 @@ watch(customer, async (newCustomer) => {
       /* ignore per-line failures */
     }
   }
-});
+}
 
 async function loadModesOfPayment() {
   try {
@@ -276,6 +281,9 @@ async function loadModesOfPayment() {
 }
 
 async function loadAll() {
+  // Before the lists load, so the cart is back at once (and also offline).
+  if (!isEditMode.value && route.query.restore === "1") void restoreCart(true);
+  else if (!isEditMode.value && cameBackFromNewCustomer()) void restoreCart(false);
   void loadTaxInfo();
   void loadModesOfPayment();
   customers.value = await listCustomers(undefined, 200);
@@ -322,7 +330,10 @@ async function prefillFromDraft(name: string) {
       item_code: it.item_code,
       item_name: it.item_name,
       qty: it.qty,
-      rate: it.rate,
+      // ERPNext's rate is already after the line discount; the form applies
+      // the discount % to `rate`, so start from the rate before it (a desk /
+      // pricing-rule draft was discounted twice and under-billed).
+      rate: rateBeforeDiscount(it.rate, it.discount_percentage, it.price_list_rate),
       price_list_rate: it.price_list_rate,
       discount_percentage: it.discount_percentage,
       discount_amount: it.discount_amount,
@@ -385,6 +396,16 @@ function roundRate(n: number): number {
   return Math.round((Number(n) || 0) * f) / f;
 }
 const rateText = (n: number) => (Number(n) || 0).toFixed(session.ratePrecision);
+/** A saved line's rate before its discount %, for the form's own discount math. */
+function rateBeforeDiscount(rate: number, pct: number | undefined, listRate: number | undefined): number {
+  const d = session.lineDiscount ? Number(pct) || 0 : 0;
+  if (d <= 0) return Number(rate) || 0;
+  const list = Number(listRate) || 0;
+  if (d >= 100) return list;
+  // The list price when it gives this rate (7.77 less 10% = 6.99), not 7.7667.
+  if (list > 0 && roundRate(list * (1 - d / 100)) === roundRate(rate)) return list;
+  return roundRate((Number(rate) || 0) / (1 - d / 100));
+}
 
 function recalc(l: Line) {
   const qty = Number(l.qty) || 0;
@@ -536,7 +557,8 @@ async function doSave(submit: 0 | 1) {
         const listRate = Number(l.price_list_rate) || 0;
         const baseRate = Number(l.rate) || listRate;
         const linePct = session.lineDiscount ? Math.max(0, Math.min(100, Number(l.discount_percentage) || 0)) : 0;
-        const effectiveRate = Math.max(0, baseRate * (1 - linePct / 100));
+        // Rounded to the rate's precision before the amount, as ERPNext does.
+        const effectiveRate = roundRate(Math.max(0, baseRate * (1 - linePct / 100)));
         return {
           item_code: l.item_code,
           item_name: l.item_name,
@@ -624,8 +646,62 @@ async function doSave(submit: 0 | 1) {
   }
 }
 
+// "New customer" in the middle of a sale: the cart is kept and put back when
+// the form opens again, with the new customer or after going back without
+// one (it used to be lost both ways).
+const CART_KEY = "vansale.invoice.cart";
+const CART_MAX_AGE_MS = 2 * 3600_000;
+interface SavedCart {
+  at: number;
+  lines: Line[];
+  customer?: string;
+  paymentType?: "cash" | "credit";
+  discountAmount?: number | null;
+  remarks?: string;
+}
 function newCustomerClick() {
+  try {
+    if (lines.value.length) {
+      const cart: SavedCart = {
+        at: Date.now(),
+        lines: lines.value,
+        customer: customer.value,
+        paymentType: paymentType.value,
+        discountAmount: discountAmount.value,
+        remarks: remarks.value,
+      };
+      sessionStorage.setItem(CART_KEY, JSON.stringify(cart));
+    } else {
+      sessionStorage.removeItem(CART_KEY);
+    }
+  } catch { /* storage full / blocked: the cart is simply not kept */ }
   router.push({ name: "customer-new", query: { redirect: "invoice" } });
+}
+function cameBackFromNewCustomer(): boolean {
+  const forward = (window.history.state as { forward?: unknown } | null)?.forward;
+  return typeof forward === "string" && forward.startsWith("/customer/new");
+}
+async function restoreCart(withNewCustomer: boolean) {
+  let saved: SavedCart | null = null;
+  try {
+    const raw = sessionStorage.getItem(CART_KEY);
+    sessionStorage.removeItem(CART_KEY);
+    saved = raw ? (JSON.parse(raw) as SavedCart) : null;
+  } catch { /* a broken copy is ignored */ }
+  if (!saved?.lines?.length || !(Date.now() - saved.at < CART_MAX_AGE_MS)) return;
+  lines.value = saved.lines;
+  if (saved.paymentType) paymentType.value = saved.paymentType;
+  discountAmount.value = saved.discountAmount ?? null;
+  remarks.value = saved.remarks ?? "";
+  if (withNewCustomer) {
+    // The new customer's prices, as when the customer is changed.
+    toasts.info("Your cart was kept for the new customer");
+    if (customer.value) await repriceLines(customer.value);
+  } else if (saved.customer && saved.customer !== customer.value) {
+    // Back without a new customer: the one chosen before, rates as they were.
+    keepDraftRates = true;
+    customer.value = saved.customer;
+  }
 }
 
 onMounted(loadAll);

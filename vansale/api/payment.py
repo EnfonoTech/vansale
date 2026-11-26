@@ -362,6 +362,20 @@ def save(
     pending = pending_by_invoice([inv["name"] for inv in target_invoices])
     for inv in target_invoices:
         inv["outstanding_amount"] = max(flt(inv["outstanding_amount"]) - pending.get(inv["name"], 0.0), 0.0)
+    # Paying more than the invoices leaves the rest as an unallocated advance:
+    # only where advances are allowed.
+    if not advance and target_invoices:
+        open_total = sum(flt(inv["outstanding_amount"]) for inv in target_invoices)
+        from frappe.utils import fmt_money
+
+        from vansale.api.me import advance_payment_allowed
+
+        if amount - open_total > 0.005 and not advance_payment_allowed():
+            frappe.throw(
+                _("{0} is more than the invoices ({1}); collect up to that amount").format(
+                    fmt_money(amount), fmt_money(open_total)
+                )
+            )
     allocate(doc, target_invoices, amount)
     doc.insert(ignore_permissions=False)
     # Collections have their own Draft / Submit setting (default: same as

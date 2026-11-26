@@ -936,3 +936,26 @@ def detail(name: str) -> dict:
         "sales_persons": sales_persons,
         "modified": naive_site_to_utc_iso(doc.modified),
     }
+
+
+@frappe.whitelist(methods=["POST"])
+def delete_draft(name: str) -> dict:
+    """Delete a draft invoice: the salesman's own (an office user any). A Van
+    User has no delete right on Sales Invoice, so `frappe.client.delete`
+    always failed for him; this deletes with the owner check instead.
+    Only where Vansale Settings "Allow deleting draft invoices" is on (off by
+    default)."""
+    from vansale.api.me import is_office_user
+    from vansale.vansale.doctype.vansale_settings.vansale_settings import global_flags
+
+    if not global_flags().get("allow_delete_draft_invoice", False):
+        frappe.throw(_("Deleting invoices from the app is turned off. Ask the office."), frappe.PermissionError)
+    doc = frappe.get_doc("Sales Invoice", name)
+    if cint(doc.docstatus) != 0:
+        frappe.throw(_("Only a draft can be deleted"))
+    office = is_office_user(default_roles={"System Manager", "Van Manager"})
+    if doc.owner != frappe.session.user and not office:
+        frappe.throw(_("You can only delete your own drafts"), frappe.PermissionError)
+    frappe.delete_doc("Sales Invoice", name, ignore_permissions=True)
+    frappe.db.commit()
+    return {"deleted": True, "name": name}

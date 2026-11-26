@@ -20,6 +20,7 @@ import { isKsa, ksaAddressErrors, ksaVatError } from "@/features/van/ksa";
 import { useSessionStore } from "@/stores/session";
 import { useToastStore } from "@/stores/toasts";
 import Icon from "@/components/Icon.vue";
+import { genUuid } from "@/offline/queue";
 
 const router = useRouter();
 const route = useRoute();
@@ -31,6 +32,9 @@ const customerName = ref("");
 const mobileNo = ref("");
 const emailId = ref("");
 const taxId = ref("");
+// One id for this form: a Save retried after a dropped connection gets the
+// customer the first try made, not a second one.
+const clientId = genUuid();
 // Shown only when the site has the field (session.customerForm).
 const customerName2 = ref("");
 const crNumber = ref("");
@@ -94,6 +98,7 @@ async function submit() {
   busy.value = true;
   try {
     const res = await createCustomer({
+      client_id: clientId,
       customer_name: customerName.value.trim(),
       customer_type: customerType.value,
       mobile_no: mobileNo.value || undefined,
@@ -115,7 +120,8 @@ async function submit() {
     });
     toasts.success(`Customer ${res.customer_name} created`);
     if (redirectTo === "invoice") {
-      router.replace({ name: "invoice-new", query: { customer: res.name } });
+      // restore=1: the invoice form puts back the cart left for this customer.
+      router.replace({ name: "invoice-new", query: { customer: res.name, restore: "1" } });
     } else {
       router.replace({ name: "customer-detail", params: { name: res.name } });
     }

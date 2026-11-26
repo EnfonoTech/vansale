@@ -16,10 +16,14 @@ const title = ref("");
 const mobileNo = ref("");
 const emailId = ref("");
 const busy = ref(false);
+// Save stays off until the contact has loaded: a blank box means "remove",
+// so saving early wiped the stored mobile / email.
+const loaded = ref(false);
 
 onMounted(async () => {
   try {
     const c = await detail(customerName.value);
+    loaded.value = true;
     title.value = customerLabel(c);
     mobileNo.value = c.mobile_no ?? "";
     emailId.value = c.email_id ?? "";
@@ -62,7 +66,7 @@ async function submit() {
         <input type="email" v-model="emailId" inputmode="email" />
       </label>
     </section>
-    <button class="submit" type="button" :disabled="busy" @click="submit">
+    <button class="submit" type="button" :disabled="busy || !loaded" @click="submit">
       <Icon name="check" :size="18" /> {{ busy ? "Saving…" : "Save contact" }}
     </button>
   </div>

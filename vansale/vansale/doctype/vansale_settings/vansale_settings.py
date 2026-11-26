@@ -69,6 +69,9 @@ def global_flags() -> dict:
         "confirm_before_submit": False,
         # A sales line at rate 0 is refused unless a site allows free items.
         "allow_zero_rate": False,
+        # Draft invoices are deleted from the app only where a site allows it
+        # (own drafts; office users any).
+        "allow_delete_draft_invoice": False,
         # Van stock in the app: Bin (ERPNext's running totals, fast) or the
         # Stock Ledger (what the Stock Balance report and submit check use).
         "stock_source": "Bin",
@@ -121,6 +124,7 @@ def global_flags() -> dict:
             "confirm_before_submit",
             "pdf_like_browser_print",
             "allow_zero_rate",
+            "allow_delete_draft_invoice",
         ):
             if key in row:
                 flags[key] = bool(int(row.get(key) or 0))

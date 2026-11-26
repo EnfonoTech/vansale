@@ -74,7 +74,7 @@ def my_warehouse() -> dict:
 
 
 @frappe.whitelist(methods=["GET"])
-def list_stock(warehouse: Optional[str] = None, limit: int = 500) -> dict:
+def list_stock(warehouse: Optional[str] = None, limit: int = 5000) -> dict:
     wh = warehouse or _user_van_warehouse()
     if not wh:
         frappe.throw(_("No van warehouse set. Assign one on your Sales Person profile."))
@@ -83,7 +83,9 @@ def list_stock(warehouse: Optional[str] = None, limit: int = 500) -> dict:
 
     # Quantities from Vansale Settings "Stock figures from" (Bin / Stock Ledger).
     stock = warehouse_stock(wh)
-    in_stock = [code for code, st in stock.items() if st["qty"] > 0]
+    # Every item the van has held, sold-out ones too (the "Out" count read 0
+    # because only items in stock were listed).
+    in_stock = list(stock)
     rows = (
         frappe.db.sql(
             """

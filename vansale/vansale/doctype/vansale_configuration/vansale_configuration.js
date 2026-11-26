@@ -7,6 +7,7 @@
 frappe.ui.form.on("Vansale Configuration", {
 	setup(frm) {
 		vansale_filter_print_formats(frm);
+		vansale_filter_by_company(frm);
 		// ERPNext rejects a group Customer Group on a Customer; offer leaves only.
 		frm.set_query("default_customer_group", () => ({ filters: { is_group: 0 } }));
 		frm.set_query("default_territory", () => ({ filters: { is_group: 0 } }));
@@ -64,6 +65,34 @@ frappe.ui.form.on("Vansale Configuration", {
 		);
 	},
 });
+
+// Warehouse, cost center, branch and payment-mode pickers only offer what
+// belongs to the van's company (validate() refuses the rest on save).
+function vansale_filter_by_company(frm) {
+	const company = () => frm.doc.company;
+	const of_company = () => ({
+		filters: company()
+			? { company: company(), is_group: 0, disabled: 0 }
+			: { is_group: 0, disabled: 0 },
+	});
+	frm.set_query("warehouse", "warehouse", of_company);
+	frm.set_query("cost_center", "cost_center", of_company);
+	frm.set_query("selling_price_list", () => ({ filters: { selling: 1, enabled: 1 } }));
+	// A mode without an account for the company can't be posted by the app.
+	frm.set_query("allowed_modes_of_payment", () => {
+		const filters = [["Mode of Payment", "enabled", "=", 1]];
+		if (company()) filters.push(["Mode of Payment Account", "company", "=", company()]);
+		return { filters };
+	});
+	// Branch has no company in ERPNext; some sites add custom_company
+	// (ksa_compliance). Branches with none set stay on offer.
+	frappe.model.with_doctype("Branch", () => {
+		if (!frappe.meta.has_field("Branch", "custom_company")) return;
+		frm.set_query("branch", () => ({
+			filters: company() ? [["Branch", "custom_company", "in", [company(), ""]]] : [],
+		}));
+	});
+}
 
 // Invoice / receipt print format pickers only offer formats for that doctype.
 // Vansale Settings has the same filter (vansale_settings.js).

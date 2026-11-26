@@ -3,13 +3,17 @@ import { onMounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import { listMine } from "@/api/invoice";
 import { useSessionStore } from "@/stores/session";
+import { useSyncStore } from "@/stores/sync";
 import Icon from "@/components/Icon.vue";
 import ListSearch from "@/components/ListSearch.vue";
 import SarSymbol from "@/components/SarSymbol.vue";
 import CustomerName from "@/components/CustomerName.vue";
+import { currentUser, getAllEntries } from "@/offline/queue";
+import type { QueuedInvoice } from "@/offline/db";
 
 const router = useRouter();
 const session = useSessionStore();
+const sync = useSyncStore();
 const rows = ref<Array<Record<string, unknown>>>([]);
 const err = ref("");
 const loading = ref(false);
@@ -22,6 +26,30 @@ watch(search, () => {
 });
 
 const CACHE_KEY = "vansale.invoices.v1";
+
+// Sales saved offline and not yet on the server: shown above the list, so a
+// salesman doesn't think the sale was lost (and make it again).
+const queued = ref<QueuedInvoice[]>([]);
+async function loadQueued() {
+  try {
+    const me = currentUser();
+    queued.value = (await getAllEntries<QueuedInvoice>("invoice_queue"))
+      .filter((e) => e.status !== "dismissed" && (!e.owner || !me || e.owner === me))
+      .sort((a, b) => b.createdAt - a.createdAt);
+  } catch {
+    queued.value = [];
+  }
+}
+const queuedLines = (e: QueuedInvoice) => ((e.payload.items as unknown[]) ?? []).length;
+// A queued sale sent while the list is open moves from the queued rows to
+// the invoices.
+watch(
+  () => sync.pending,
+  (now, before) => {
+    void loadQueued();
+    if (now < before) void load();
+  },
+);
 
 async function load() {
   err.value = "";
@@ -52,7 +80,10 @@ async function load() {
   }
 }
 
-onMounted(load);
+onMounted(() => {
+  void loadQueued();
+  void load();
+});
 
 function fmt(n: unknown): string {
   const num = typeof n === "number" ? n : Number(n) || 0;
@@ -82,6 +113,25 @@ function tone(status: unknown): string {
 
     <p v-if="err" class="error">{{ err }}</p>
 
+    <ul v-if="queued.length && !search.trim()" class="list">
+      <li
+        v-for="q in queued"
+        :key="q.clientId"
+        class="item queued"
+        role="button"
+        tabindex="0"
+        @click="router.push({ name: 'sync-errors' })"
+        @keyup.enter="router.push({ name: 'sync-errors' })"
+      >
+        <div class="body">
+          <strong>{{ q.customerName || q.payload.customer }}</strong>
+          <span class="muted xsmall">Saved offline · {{ new Date(q.createdAt).toLocaleString() }} · {{ queuedLines(q) }} line{{ queuedLines(q) === 1 ? "" : "s" }}</span>
+        </div>
+        <div class="right">
+          <span class="pill" :data-tone="q.lastError ? 'danger' : 'info'">{{ q.lastError ? "Not sent" : "Waiting to send" }}</span>
+        </div>
+      </li>
+    </ul>
     <div v-if="loading && rows.length === 0" class="stack">
       <div class="skeleton" style="height:3.25rem" />
       <div class="skeleton" style="height:3.25rem" />
@@ -92,7 +142,7 @@ function tone(status: unknown): string {
       <strong>No matches</strong>
       <span class="muted">Nothing found for “{{ search.trim() }}”.</span>
     </div>
-    <div v-else-if="rows.length === 0" class="empty">
+    <div v-else-if="rows.length === 0 && !queued.length" class="empty">
       <Icon name="invoice" :size="32" class="empty-icon" />
       <strong>No invoices yet</strong>
       <span class="muted">Create your first invoice of the day.</span>
@@ -122,6 +172,7 @@ function tone(status: unknown): string {
 </template>
 
 <style scoped>
+.queued { border-inline-start: 3px solid var(--info, var(--primary)); }
 .toolbar { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0.5rem; align-items: center; }
 .new-btn { height: 2.75rem; min-height: 0; padding: 0 0.95rem; white-space: nowrap; }
 

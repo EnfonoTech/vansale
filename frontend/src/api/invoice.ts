@@ -188,13 +188,12 @@ export async function submitDraft(name: string, modeOfPayment?: string): Promise
 
 /**
  * Delete a draft Sales Invoice. Only allowed when `docstatus === 0`
- * (Frappe enforces this server-side). Uses `frappe.client.delete`.
+ * (enforced server-side, with the owner check).
  */
 export async function deleteDraft(name: string): Promise<void> {
-  await apiCall("POST", "frappe.client.delete", {
-    doctype: "Sales Invoice",
-    name,
-  });
+  // The app's own endpoint: a Van User has no delete right on Sales Invoice
+  // (frappe.client.delete always failed); it deletes his own draft only.
+  await apiCall("POST", "vansale.api.invoice.delete_draft", { name });
   const sync = useSyncStore();
   void sync.refresh();
 }
