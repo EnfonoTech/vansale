@@ -95,7 +95,7 @@ def save(
     if existing:
         return _result(frappe.get_doc("Sales Order", existing), replay=True)
 
-    company = _user_company()
+    company = _user_company(throw=True)
     doc = frappe.new_doc("Sales Order")
     doc.customer = customer
     doc.company = company

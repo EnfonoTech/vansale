@@ -52,15 +52,15 @@ def _customer_title(customer: str) -> Optional[str]:
     return customer_titles([customer]).get(customer)
 
 
-def _user_company() -> str:
+def _user_company(throw: bool = False) -> Optional[str]:
+    """The van's company, else the company the user works in
+    (vansale.utils.company.get_user_company): never the site's default company
+    for a user whose Company permissions leave it out. throw=True where a
+    document is made in it."""
     from vansale.api.me import van_default
+    from vansale.utils.company import get_user_company
 
-    return (
-        van_default("Company")
-        or _user_default("Company")
-        or frappe.defaults.get_user_default("Company", frappe.session.user)
-        or frappe.db.get_single_value("Global Defaults", "default_company")
-    )
+    return van_default("Company") or get_user_company(throw=throw)
 
 
 def _set_additional_discount(doc, discount_amount) -> None:
@@ -250,7 +250,7 @@ def save(
             "idempotent_replay": True,
         }
 
-    company = _user_company()
+    company = _user_company(throw=True)
     set_warehouse = warehouse or _get_default_warehouse(company)
 
     posting = document_datetime(posting_ts)

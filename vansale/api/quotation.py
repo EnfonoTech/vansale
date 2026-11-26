@@ -81,7 +81,7 @@ def save(
     if existing:
         return _result(frappe.get_doc("Quotation", existing), replay=True)
 
-    company = _user_company()
+    company = _user_company(throw=True)
     doc = frappe.new_doc("Quotation")
     doc.quotation_to = quotation_to
     doc.party_name = party

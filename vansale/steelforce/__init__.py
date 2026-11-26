@@ -59,7 +59,7 @@ def on_new_customer(doc, company: Optional[str] = None) -> None:
     if doc.meta.has_field("custom_company") and not doc.get("custom_company"):
         from vansale.api.invoice import _user_company
 
-        doc.custom_company = company or _user_company()
+        doc.custom_company = company or _user_company(throw=True)
 
 
 # The desk's Create Customer dialog lets only these make a B2B customer

@@ -703,7 +703,7 @@ def build_bulk_return(customer: str, items: list[dict[str, Any]], references: Op
     if not preview and frappe.get_meta("Sales Invoice").has_field(ZATCA_REFERENCES_FIELD):
         refs = _check_references(customer, references or [])
 
-    company = _user_company()
+    company = _user_company(throw=True)
     warehouse = _get_default_warehouse(company)
     posting = posting or frappe.utils.now_datetime()
     doc = frappe.new_doc("Sales Invoice")

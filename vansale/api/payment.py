@@ -303,7 +303,7 @@ def save(
     # reset the user's default Company and put the receipt in other books).
     from vansale.api.invoice import _user_company
 
-    company = _user_company()
+    company = _user_company(throw=True)
     posting = document_datetime(posting_ts)
     # ERPNext requires Reference No + Date on bank-type modes. The date was
     # never sent, so every bank collection failed; default it to the posting

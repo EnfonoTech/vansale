@@ -563,10 +563,11 @@ def print_formats(user: str | None = None) -> dict:
     doctype's default print format (Customize Form), else Standard.
     """
     from vansale import steelforce
+    from vansale.utils.company import get_user_company
 
     # Steel Force: what the company's desk prints (Company > Print Formats)
     # when the van and Vansale Settings choose nothing.
-    company = van_default("Company", user) or frappe.defaults.get_user_default("Company", user or frappe.session.user)
+    company = van_default("Company", user) or get_user_company(user)
 
     def company_or(doctype: str, fallback: str) -> str:
         return steelforce.company_print_format(company, doctype) or fallback
