@@ -13,7 +13,7 @@ import { ApiError } from "@/app/frappe";
 import { useSessionStore } from "@/stores/session";
 import { useToastStore } from "@/stores/toasts";
 import Icon from "@/components/Icon.vue";
-import { ksaAddressErrors } from "@/features/van/ksa";
+import { defaultCountry, ksaAddressErrors } from "@/features/van/ksa";
 
 const route = useRoute();
 const router = useRouter();
@@ -32,15 +32,24 @@ const district = ref("");
 const city = ref("");
 const pincode = ref("");
 const stateField = ref("");
-const country = ref("Saudi Arabia");
+// A new address starts in the company's country (else KSA).
+const country = ref(defaultCountry(session.customerForm?.country));
 const phone = ref("");
 const busy = ref(false);
+// Save stays off until the customer (and the address being edited) has
+// loaded: saving early sent blanks that replaced the stored address.
+const loaded = ref(false);
 
-const isB2B = computed(() => customer.value?.customer_type === "Company");
+// B2B address rules: a company, or any customer with a VAT number (sf_trading
+// and ZATCA treat a VAT buyer as B2B).
+const isB2B = computed(() =>
+  customer.value?.customer_type === "Company" || Boolean(customer.value?.vat_number || customer.value?.tax_id),
+);
 
 onMounted(async () => {
   try {
     customer.value = await detail(customerName.value);
+    loaded.value = true;
     const a = customer.value.addresses.find((x) => x.name === addressName.value);
     if (a) {
       addressLine1.value = a.address_line1 ?? "";
@@ -51,7 +60,7 @@ onMounted(async () => {
       city.value = a.city ?? "";
       pincode.value = a.pincode ?? "";
       stateField.value = a.state ?? "";
-      country.value = a.country || "Saudi Arabia";
+      country.value = a.country || defaultCountry(session.customerForm?.country);
       phone.value = a.phone ?? "";
     }
   } catch (e) {
@@ -163,7 +172,7 @@ async function submit() {
       </div>
     </section>
 
-    <button class="submit" type="button" :disabled="busy" @click="submit">
+    <button class="submit" type="button" :disabled="busy || !loaded" @click="submit">
       <Icon name="check" :size="18" /> {{ busy ? "Saving…" : "Save address" }}
     </button>
   </div>

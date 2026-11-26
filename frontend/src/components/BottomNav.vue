@@ -1,19 +1,29 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, watch } from "vue";
+import { useI18n } from "vue-i18n";
 import { useRoute, useRouter } from "vue-router";
+import { approvalsOnly } from "@/features/approvals/inbox";
+import { useApprovalsStore } from "@/stores/approvals";
 import { useSessionStore } from "@/stores/session";
 import Icon from "./Icon.vue";
 
 const router = useRouter();
 const route = useRoute();
 const session = useSessionStore();
+const approvals = useApprovalsStore();
+const { t } = useI18n();
 
 interface Tab {
   name: string;
-  icon: "home" | "route" | "stock" | "invoice" | "customer" | "more";
+  icon: "home" | "route" | "stock" | "invoice" | "customer" | "more" | "approval";
   label: string;
   routes: string[];
+  /** A number on the icon (the count waiting), or a plain dot, or nothing. */
+  count?: number;
+  dot?: boolean;
 }
+
+const showMoreDot = computed(() => session.approvalsEnabled && approvals.badge > 0);
 
 /**
  * Fourth slot is Route or Van Stock, never both — a van either follows a
@@ -22,12 +32,26 @@ interface Tab {
  * the More tab's, or whichever tab does not own it highlights wrongly.
  */
 const tabs = computed<Tab[]>(() => {
+  // No van setup: the app is Approvals and More, and no van screen is offered.
+  if (approvalsOnly(session)) {
+    return [
+      {
+        name: "approvals",
+        icon: "approval",
+        label: t("approvalsInbox.nav.approvals"),
+        routes: ["approvals", "approval-detail"],
+        count: approvals.badge,
+      },
+      { name: "more", icon: "more", label: "More", routes: ["more"] },
+    ];
+  }
   const fourth: Tab = session.routeEnabled
     ? { name: "route-today", icon: "route", label: "Route", routes: ["route-today"] }
     : { name: "van-stock", icon: "stock", label: "Stock", routes: ["van-stock"] };
+  // Approvals has no tab of its own for a van user: it lives under More.
   const moreRoutes = session.routeEnabled
-    ? ["more", "van-stock", "sync-errors"]
-    : ["more", "sync-errors"];
+    ? ["more", "van-stock", "sync-errors", "approvals", "approval-detail"]
+    : ["more", "sync-errors", "approvals", "approval-detail"];
   return [
     { name: "dashboard", icon: "home", label: "Home", routes: ["dashboard"] },
     {
@@ -38,11 +62,29 @@ const tabs = computed<Tab[]>(() => {
     },
     { name: "customers", icon: "customer", label: "Customers", routes: ["customers", "customer-detail"] },
     fourth,
-    { name: "more", icon: "more", label: "More", routes: moreRoutes },
+    // Approvals is reached from Home and from More: a dot on More says something waits there.
+    { name: "more", icon: "more", label: "More", routes: moreRoutes, dot: showMoreDot.value },
   ];
 });
 
 const activeName = computed(() => String(route.name ?? ""));
+
+// The nav shows how many approvals wait, so it asks for the number itself,
+// at most every 30 s and not on the Approvals screen (that one keeps it fresh).
+const COUNT_EVERY_MS = 30_000;
+let askedAt = 0;
+watch(
+  () => [route.name, session.approvalsEnabled],
+  () => {
+    if (!session.approvalsEnabled || !session.isAuthenticated) return;
+    const name = String(route.name ?? "");
+    if (name === "approvals" || name === "approval-detail") return;
+    if (Date.now() - askedAt < COUNT_EVERY_MS) return;
+    askedAt = Date.now();
+    void approvals.refreshCount();
+  },
+  { immediate: true },
+);
 
 function go(tab: Tab) {
   if (tab.routes.includes(activeName.value)) return;
@@ -51,14 +93,18 @@ function go(tab: Tab) {
 </script>
 
 <template>
-  <nav class="bottom-nav">
+  <nav class="bottom-nav" :style="{ '--tabs': tabs.length }">
     <button
       v-for="tab in tabs"
       :key="tab.name"
       :class="['tab', tab.routes.includes(activeName) && 'tab--active']"
       @click="go(tab)"
     >
-      <Icon :name="tab.icon" :size="22" />
+      <span class="tab-icon">
+        <Icon :name="tab.icon" :size="22" />
+        <span v-if="tab.count" class="tab-count">{{ tab.count > 99 ? "99+" : tab.count }}</span>
+        <span v-else-if="tab.dot" class="tab-dot" />
+      </span>
       <span>{{ tab.label }}</span>
     </button>
   </nav>
@@ -78,7 +124,7 @@ function go(tab: Tab) {
   -webkit-backdrop-filter: blur(14px);
   border-top: 1px solid var(--border);
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
+  grid-template-columns: repeat(var(--tabs, 5), 1fr);
   gap: 0.25rem;
 }
 
@@ -98,6 +144,31 @@ function go(tab: Tab) {
   min-height: 3.25rem;
 }
 .tab:active { transform: scale(0.97); }
+.tab-icon { position: relative; display: inline-flex; }
+.tab-dot {
+  position: absolute;
+  inset-block-start: -0.1rem;
+  inset-inline-end: -0.15rem;
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: var(--radius-pill);
+  background: var(--danger);
+  box-shadow: 0 0 0 2px var(--surface);
+}
+.tab-count {
+  position: absolute;
+  inset-block-start: -0.35rem;
+  inset-inline-start: 55%;
+  min-width: 1.05rem;
+  padding: 0 0.28rem;
+  border-radius: var(--radius-pill);
+  background: var(--danger);
+  color: #fff;
+  font-size: 0.62rem;
+  line-height: 1.05rem;
+  text-align: center;
+  box-shadow: 0 0 0 2px var(--surface);
+}
 .tab--active {
   color: var(--primary);
   background: var(--primary-soft);

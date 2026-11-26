@@ -24,6 +24,14 @@ VAN_MANAGER_ROLE = "Van Manager"
 VAN_USER_PERMISSIONS: list[dict] = [
     # Core sales flow — van users write these.
     {"parent": "Sales Invoice", "read": 1, "write": 1, "create": 1, "submit": 1, "cancel": 0, "delete": 0, "print": 1, "email": 1, "report": 1, "export": 1, "share": 1},
+    # Pre-invoice cycle: lead -> quotation -> sales order. Drafts are deleted
+    # through `vansale.api.selling.delete_draft` (own drafts only), so no
+    # delete right: with one a salesman could delete anyone's draft.
+    {"parent": "Lead", "read": 1, "write": 1, "create": 1, "submit": 0, "cancel": 0, "delete": 0, "print": 1, "email": 1, "report": 1, "export": 1, "share": 0},
+    {"parent": "Quotation", "read": 1, "write": 1, "create": 1, "submit": 1, "cancel": 0, "delete": 0, "print": 1, "email": 1, "report": 1, "export": 1, "share": 1},
+    {"parent": "Sales Order", "read": 1, "write": 1, "create": 1, "submit": 1, "cancel": 0, "delete": 0, "print": 1, "email": 1, "report": 1, "export": 1, "share": 1},
+    {"parent": "Lead Source", "read": 1, "write": 0, "create": 0, "submit": 0, "cancel": 0, "delete": 0, "print": 0, "email": 0, "report": 0, "export": 0, "share": 0},
+    {"parent": "Quotation Lost Reason", "read": 1, "write": 0, "create": 0, "submit": 0, "cancel": 0, "delete": 0, "print": 0, "email": 0, "report": 0, "export": 0, "share": 0},
     {"parent": "Payment Entry", "read": 1, "write": 1, "create": 1, "submit": 1, "cancel": 0, "delete": 0, "print": 1, "email": 1, "report": 1, "export": 1, "share": 1},
     {"parent": "Customer", "read": 1, "write": 1, "create": 1, "submit": 0, "cancel": 0, "delete": 0, "print": 1, "email": 1, "report": 1, "export": 1, "share": 0},
     {"parent": "Address", "read": 1, "write": 1, "create": 1, "submit": 0, "cancel": 0, "delete": 0, "print": 1, "email": 0, "report": 1, "export": 0, "share": 0},
@@ -80,6 +88,9 @@ APP_INDEXES = (
     ("Sales Invoice", ["owner", "modified"], "vansale_owner_modified"),
     ("Payment Entry", ["owner", "posting_date", "modified"], "vansale_owner_posting"),
     ("Payment Entry", ["owner", "modified"], "vansale_owner_modified"),
+    ("Quotation", ["owner", "modified"], "vansale_owner_modified"),
+    ("Sales Order", ["owner", "modified"], "vansale_owner_modified"),
+    ("Lead", ["owner", "modified"], "vansale_owner_modified"),
 )
 
 
@@ -188,6 +199,11 @@ VANSALE_CUSTOM_FIELDS: dict[str, list[dict]] = {
             "insert_after": "is_pos",
             "read_only": 1,
             "no_copy": 1,
+            # A memo, not a branch gate. Without this a User Permission marked "is default"
+            # copies the raiser's default mode into every new invoice, credit sales included,
+            # and a user of another branch whose permissions lack that mode is then refused
+            # the invoice ("Not permitted ... linked to Mode of Payment 'Cash-SFSS'").
+            "ignore_user_permissions": 1,
             "module": "Vansale",
         },
         {
@@ -224,6 +240,68 @@ VANSALE_CUSTOM_FIELDS: dict[str, list[dict]] = {
 }
 
 
+# Custom fields the app creates ONLY when the site has no field of that name.
+# They are never updated afterwards, and are not fixtures either (fixtures are
+# re-imported over a site's own row on install-app and every migrate).
+#
+# `custom_return_reason`: Steel Force already owns one, a Data field with a
+# "mandatory on return / debit note" rule that sf_trading reads as free text
+# ("Other" + text). Taking it over as a Select would drop that rule. Sites
+# without the field get the Select below. `RETURN_REASONS` in
+# `vansale.api.sales_return` must list the same options (a test checks it).
+CREATE_ONLY_CUSTOM_FIELDS: dict[str, list[dict]] = {
+    "Sales Invoice": [
+        {
+            "fieldname": "custom_return_reason",
+            "label": "Return Reason",
+            "fieldtype": "Select",
+            "insert_after": "return_against",
+            "depends_on": "eval:doc.is_return",
+            "options": "\nDamaged\nExpired\nWrong Item\nCustomer Refused\nShort Delivery\nOther",
+            "no_copy": 1,
+            "description": (
+                "Why the goods came back. Structured so returns can be reported on by reason — "
+                "the free-text detail goes in Remarks. Mandatory for app returns (enforced in "
+                "vansale.api.sales_return.save) rather than via reqd, so desk users amending "
+                "historical credit notes are not blocked."
+            ),
+            "module": "Vansale",
+        },
+    ],
+}
+
+
+def after_install() -> None:
+    """install-app hook. Only the create-only fields: the rest of the setup
+    (roles, perms, other custom fields, print formats) stays on `after_migrate`."""
+    ensure_create_only_custom_fields()
+
+
+def ensure_create_only_custom_fields() -> None:
+    """Create each `CREATE_ONLY_CUSTOM_FIELDS` field the site does not have.
+
+    A field counts as present when a Custom Field row exists for that
+    doctype + fieldname (whoever owns it: another app, sf_trading, a site
+    admin) or the doctype itself already defines the fieldname. Present
+    fields are left exactly as they are; `update=False` makes
+    `create_custom_fields` skip them too, so a race cannot rewrite one.
+    """
+    try:
+        from frappe.custom.doctype.custom_field.custom_field import create_custom_fields
+    except ImportError:
+        return
+    missing: dict[str, list[dict]] = {}
+    for doctype, fields in CREATE_ONLY_CUSTOM_FIELDS.items():
+        for df in fields:
+            if frappe.db.exists("Custom Field", {"dt": doctype, "fieldname": df["fieldname"]}):
+                continue
+            if frappe.get_meta(doctype).has_field(df["fieldname"]):
+                continue
+            missing.setdefault(doctype, []).append(df)
+    if missing:
+        create_custom_fields(missing, update=False)
+
+
 def _ensure_custom_fields() -> None:
     """Create or update the app's custom fields on every migrate."""
     try:
@@ -231,6 +309,7 @@ def _ensure_custom_fields() -> None:
     except ImportError:
         return
     create_custom_fields(VANSALE_CUSTOM_FIELDS, update=True)
+    ensure_create_only_custom_fields()
 
 
 def _store_settings_defaults() -> None:

@@ -91,3 +91,13 @@ export async function verifyPinOffline(user: string, pin: string): Promise<boole
 export function forgetPin(): void {
   save(null);
 }
+
+/**
+ * Forget the stored PIN hash unless it is `user`'s: someone else signing in on
+ * this phone must not inherit the last person's offline unlock, but the same
+ * person signing in again keeps theirs (it only says "this PIN was accepted").
+ */
+export function forgetPinOfOthers(user: string): void {
+  const v = load();
+  if (v && v.user !== user) save(null);
+}

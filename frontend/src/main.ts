@@ -4,6 +4,7 @@ import App from "./app/App.vue";
 import { router } from "./app/router";
 import { i18n, setLocale } from "./app/i18n";
 import { isNative, loadSiteUrl } from "./app/platform";
+import { webScope } from "./app/web-base";
 
 // Bundled web fonts — self-hosted so the Capacitor APK stays fully offline.
 // `@fontsource-variable/*` ships a single woff2 with the whole weight axis
@@ -16,6 +17,7 @@ import "@fontsource/cairo/700.css";
 
 import "./styles/tokens.css";
 import "./styles/base.css";
+import "./styles/auth-styles.css";
 import "./styles/saudi-riyal.css";
 
 const app = createApp(App);
@@ -60,10 +62,12 @@ if (isNative()) {
 }
 
 // Service worker registered only on web, and only in production. It is the
-// app's own (vansale/pwa.py), scoped to /vansale — not the site-wide /sw.js,
+// app's own (vansale/pwa.py), scoped to the address the app was opened at
+// (/vansale or /sf-connect) — not the site-wide /sw.js,
 // which on some sites is another app's (POS Awesome) and blocked installing.
 if (!isNative() && "serviceWorker" in navigator && import.meta.env.PROD) {
-  void navigator.serviceWorker.register("/vansale/sw.js", { scope: "/vansale" }).catch(() => {
+  const scope = webScope();
+  void navigator.serviceWorker.register(`${scope}/sw.js`, { scope }).catch(() => {
     /* not fatal: the app works without it, it just can't be installed */
   });
 }

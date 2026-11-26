@@ -9,26 +9,70 @@ import Icon from "@/components/Icon.vue";
 import { useRouteVisitStore } from "@/stores/routeVisit";
 import { useOnline } from "@/app/online";
 import { useSessionStore } from "@/stores/session";
+import { useApprovalsStore } from "@/stores/approvals";
 import { warmCaches } from "@/offline/warm";
+import { useSyncStore } from "@/stores/sync";
+import { useToastStore } from "@/stores/toasts";
+import { SESSION_EXPIRED_EVENT } from "@/app/frappe";
 
 const route = useRoute();
 const router = useRouter();
 const visit = useRouteVisitStore();
 const online = useOnline();
 const session = useSessionStore();
+const sync = useSyncStore();
+const approvals = useApprovalsStore();
+
+/**
+ * Send what was saved offline. Nothing did this on its own: the badge that
+ * synced on reconnect was never placed on a screen, so queued sales waited
+ * until the salesman opened the sync screen and tapped Retry. Safe to call
+ * often — one drain at a time, each entry waits out its own backoff, and the
+ * server ignores a sale it already has (client_id).
+ */
+function syncPending() {
+  // Reads only the local queue and drains when something is waiting, so it is
+  // safe for any signed-in user (a user without the van app has an empty
+  // queue). It must not wait on who the user is: a van user whose settings
+  // have not loaded, or who has a van without either van role, still has
+  // sales saved offline to send.
+  if (!session.isAuthenticated) return;
+  void sync.refresh().then(() => {
+    if (sync.pending > 0) void sync.requestDrain();
+  });
+}
+
+/**
+ * The number on the Approvals entry points is only read when a screen opens,
+ * so an approval that arrived while the app sat in the background would not
+ * show until the next navigation. Reading it when the app comes back to the
+ * front keeps the badge honest. Numbers only (no inbox), and nothing at all
+ * on a site without approvals; offline it asks nothing.
+ */
+function refreshApprovalsBadge() {
+  if (!session.isAuthenticated || !session.approvalsEnabled) return;
+  void approvals.refreshCount();
+}
 
 // Offline→online transition: opportunistically warm the item + customer
 // caches so the next screen the driver opens has fresh data. The warm
 // helper internally rate-limits to once per 10 min so this never spams.
 // Also re-read config: a van that was offline while the office changed a
 // module toggle should pick it up the moment it has signal again.
-watch(online, (isNow, wasNow) => {
+watch(online, async (isNow, wasNow) => {
   if (isNow && !wasNow && session.isAuthenticated) {
-    void session.refreshDefaults();
-    void warmCaches({
-      warehouse: session.defaultWarehouse ?? undefined,
-      force: true,
-    }).catch(() => {});
+    // Who the user is comes first: the warm-up reads van endpoints, which a
+    // user without the van app must never trigger. Unknown settings (never
+    // loaded) warm nothing.
+    await session.refreshDefaults();
+    syncPending();
+    refreshApprovalsBadge();
+    if (session.defaults !== null && session.hasVanShell) {
+      void warmCaches({
+        warehouse: session.defaultWarehouse ?? undefined,
+        force: true,
+      }).catch(() => {});
+    }
   }
 });
 
@@ -41,14 +85,34 @@ watch(online, (isNow, wasNow) => {
  * indefinitely. Refresh on start and whenever Android brings the app back to
  * the foreground, which is when a driver would notice a change anyway.
  */
+// The web session ended (every call came back 403 and the app looked stuck):
+// say so once and go to sign-in. Queued work stays on the phone and is sent
+// after the same user signs in again.
+let expiryShown = false;
+function onSessionExpired() {
+  if (expiryShown || route.name === "login") return;
+  expiryShown = true;
+  useToastStore().warn("Your session has ended — sign in again. Unsent work stays on this phone.", 6000);
+  session.logout();
+  void router.replace({ name: "login" }).finally(() => {
+    expiryShown = false;
+  });
+}
+
 onMounted(() => {
+  window.addEventListener(SESSION_EXPIRED_EVENT, onSessionExpired);
   if (session.isAuthenticated) void session.refreshDefaults();
+  syncPending();
 
   void (async () => {
     try {
       const { App: CapApp } = await import("@capacitor/app");
       await CapApp.addListener("appStateChange", ({ isActive }) => {
-        if (isActive && session.isAuthenticated) void session.refreshDefaults();
+        if (isActive && session.isAuthenticated) {
+          void session.refreshDefaults();
+          syncPending();
+          refreshApprovalsBadge();
+        }
       });
     } catch {
       /* web build — @capacitor/app not bundled */
@@ -59,6 +123,8 @@ onMounted(() => {
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "visible" && session.isAuthenticated) {
       void session.refreshDefaults();
+      syncPending();
+      refreshApprovalsBadge();
     }
   });
 });

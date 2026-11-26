@@ -12,7 +12,14 @@ from frappe.utils import flt
 from vansale.api.access import check_read
 from vansale.api.outbox import claim
 from vansale.api.datetime_util import naive_site_to_utc_iso, parse_client_ts
-from vansale.api.me import current_user_sales_person, customer_name_2_field, is_office_user, user_to_van_config
+from vansale.api.me import (
+    cr_number_field,
+    current_user_sales_person,
+    customer_name_2_field,
+    is_office_user,
+    user_to_van_config,
+)
+from vansale import steelforce
 
 
 def _record_customer_outbox(
@@ -298,6 +305,75 @@ def _outstanding(customer: str) -> float:
     return _outstanding_by_customer([customer]).get(customer, 0.0)
 
 
+def _credit_status(customer: str, company: Optional[str] = None) -> dict:
+    """The customer's credit as ERPNext's own credit-limit check sees it, for
+    the sale screens and the customer screen.
+
+    credit_limit    the limit for the company (customer, else its group, else
+                    the company's default); 0 = no limit
+    used            what the check counts: unpaid invoices + unbilled orders
+                    and delivery notes (whole company, every van)
+    available       limit − used, None without a limit
+    overdue         unpaid invoices past their due date: count, amount, oldest due date
+    credit_allowed  False when the "Credit sale only for customers with a credit
+                    limit" setting refuses this customer; `credit_problem` says why
+    + site extras (Steel Force: cash_exempt, blocking_overdue, approval, branch)
+    """
+    from erpnext.selling.doctype.customer.customer import get_credit_limit, get_customer_outstanding
+
+    from vansale.api.invoice import _user_company
+    from vansale.api.precheck import credit_limit_problem
+
+    company = company or _user_company()
+    precision = frappe.get_precision("Sales Invoice", "outstanding_amount") or 2
+    limit = flt(get_credit_limit(customer, company), precision)
+    used = flt(get_customer_outstanding(customer, company), precision)
+    count, amount, oldest = frappe.db.sql(
+        """SELECT COUNT(*), COALESCE(SUM(outstanding_amount), 0), MIN(due_date)
+           FROM `tabSales Invoice`
+           WHERE customer = %s AND company = %s AND docstatus = 1
+             AND outstanding_amount > 0 AND due_date < CURDATE()""",
+        (customer, company),
+    )[0]
+    problem = credit_limit_problem(customer, company)
+    out = {
+        "customer": customer,
+        "credit_limit": limit,
+        "used": used,
+        "available": flt(limit - used, precision) if limit > 0 else None,
+        "overdue": (
+            {"count": int(count), "amount": flt(amount, precision), "oldest_due": str(oldest)}
+            if count else None
+        ),
+        "credit_allowed": problem is None,
+        "credit_problem": problem,
+        "cash_exempt": False,
+        "blocking_overdue": None,
+        "approval": None,
+        "branch": None,
+    }
+    out.update(steelforce.credit_extras(customer, company))
+    return out
+
+
+def _credit_status_or_none(customer: str) -> Optional[dict]:
+    """For the customer screen: a credit lookup that fails must not hide the customer."""
+    try:
+        return _credit_status(customer)
+    except Exception:
+        frappe.log_error(title="vansale: customer credit status")
+        return None
+
+
+@frappe.whitelist(methods=["GET"])
+def credit_status(customer: str) -> dict:
+    """Credit limit, used, available and overdue for a customer being sold to."""
+    if not customer:
+        frappe.throw(_("Customer required"))
+    check_read("Customer", customer)
+    return _credit_status(customer)
+
+
 def outstanding_breakdown(customer: str) -> dict:
     """The customer's whole balance by warehouse (van), plus what no invoice
     carries (advances, unallocated payments, journal entries), so the lines
@@ -344,11 +420,17 @@ def list_mine(limit: int = 50, search: Optional[str] = None) -> list[dict]:
     # Settings "Office roles", default System / Van Manager) see all.
     # Computed up front because get_list's or_filters are AND-ed with
     # filters; search stays an AND-layer over that set.
-    if not is_office_user(default_roles={"System Manager", "Van Manager"}):
-        allowed = _sales_person_customers(current_user_sales_person())
-        if not allowed:
+    office = is_office_user(default_roles={"System Manager", "Van Manager"})
+    own = None if office else _sales_person_customers(current_user_sales_person())
+    # Setting "Customers a salesman finds" = "Own list, search all": a search
+    # reaches every customer the desk lets him see (company / branch access,
+    # sf_trading's rule) — a branch customer nobody assigned to him can still
+    # be sold to, as on the desk. The list itself stays his own customers.
+    search_all = bool(search) and _search_all_customers()
+    if own is not None and not search_all:
+        if not own:
             return []
-        filters["name"] = ["in", list(allowed)]
+        filters["name"] = ["in", list(own)]
 
     name_2, vat, title = customer_name_2_field(), _vat_field(), _title_field()
     fields = _LIST_FIELDS + [f for f in {name_2, vat, title} if f]
@@ -390,7 +472,15 @@ def list_mine(limit: int = 50, search: Optional[str] = None) -> list[dict]:
         r["customer_name_2"] = r.get(name_2) if name_2 else None
         r["vat_number"] = (r.get(vat) if vat else None) or r.get("tax_id")
         r["display_name"], r["secondary_name"] = _display_names(r)
+        # Found by the wider search, not one of his own customers.
+        r["not_assigned"] = own is not None and r.name not in own
     return rows
+
+
+def _search_all_customers() -> bool:
+    from vansale.vansale.doctype.vansale_settings.vansale_settings import global_flags
+
+    return global_flags().get("customer_scope") == "Own list, search all"
 
 
 @frappe.whitelist(methods=["POST"])
@@ -453,12 +543,16 @@ def save_address(
 
 
 @frappe.whitelist(methods=["POST"])
-def save_contact(customer: str, mobile_no: str | None = None, email_id: str | None = None) -> dict:
-    """Set the customer's mobile / email.
+def save_contact(
+    customer: str, mobile_no: str | None = None, email_id: str | None = None, phone_2: str | None = None
+) -> dict:
+    """Set the customer's mobile / email, and a second phone number.
 
     In ERPNext these live on the customer's primary Contact (Customer.mobile_no
     and email_id only copy it), so update that Contact, or create one and make
-    it primary when the customer has none.
+    it primary when the customer has none. `phone_2` (None = leave as is,
+    "" = remove) is a second number on that Contact: Steel Force bills a
+    credit customer only with two numbers on file.
     """
     check_read("Customer", customer)
     cust = frappe.get_doc("Customer", customer)
@@ -488,6 +582,15 @@ def save_contact(customer: str, mobile_no: str | None = None, email_id: str | No
             contact.add_email(email_id, is_primary=1)
     else:
         contact.set("email_ids", [e for e in contact.email_ids if not e.is_primary])
+    if phone_2 is not None:
+        phone_2 = phone_2.strip()
+        other = next((p for p in contact.phone_nos if not p.is_primary_mobile_no), None)
+        if phone_2 and other:
+            other.phone = phone_2
+        elif phone_2:
+            contact.add_phone(phone_2, is_primary_phone=1)
+        elif other:
+            contact.phone_nos.remove(other)
     contact.save()
 
     # Customer copies the primary contact's mobile / email (fetch_from).
@@ -496,7 +599,36 @@ def save_contact(customer: str, mobile_no: str | None = None, email_id: str | No
         customer,
         {"customer_primary_contact": contact.name, "mobile_no": mobile_no or None, "email_id": email_id or None},
     )
-    return {"contact": contact.name, "mobile_no": mobile_no, "email_id": email_id}
+    return {"contact": contact.name, "mobile_no": mobile_no, "email_id": email_id, "phone_2": _second_phone(contact.name)}
+
+
+def _second_phone(contact: str | None) -> str | None:
+    """The primary Contact's other number (not its mobile), if any."""
+    if not contact:
+        return None
+    return frappe.db.get_value(
+        "Contact Phone", {"parent": contact, "parenttype": "Contact", "is_primary_mobile_no": 0}, "phone",
+        order_by="idx asc",
+    )
+
+
+@frappe.whitelist(methods=["POST"])
+def attach_document(customer: str, attachment: dict, document_type: str | None = None) -> dict:
+    """A photo / PDF of a customer document (CR, VAT certificate, ID …),
+    attached to the Customer (private). Steel Force bills a credit customer only
+    with a document on file, and wants a VAT customer's certificate on its VAT
+    Certificate row; the salesman can add it from the van. The Customer itself
+    is not saved, so an approved customer is not sent back for approval."""
+    check_read("Customer", customer)
+    frappe.has_permission("Customer", "write", customer, throw=True)
+    if not attachment:
+        frappe.throw(_("Choose a file"))
+    file_url = _attach_document(customer, attachment)
+    vat = _vat_field()
+    if vat and frappe.db.get_value("Customer", customer, vat):
+        steelforce.link_vat_document(customer, file_url)
+    frappe.db.commit()
+    return {"file_url": file_url}
 
 
 @frappe.whitelist(methods=["GET"])
@@ -539,6 +671,8 @@ def detail(name: str) -> dict:
         "territory": doc.territory,
         "mobile_no": doc.mobile_no,
         "email_id": doc.email_id,
+        "phone_2": _second_phone(doc.customer_primary_contact),
+        "documents": frappe.db.count("File", {"attached_to_doctype": "Customer", "attached_to_name": doc.name}),
         "tax_id": doc.tax_id,
         "default_currency": doc.default_currency,
         "addresses": addresses,
@@ -548,6 +682,8 @@ def detail(name: str) -> dict:
         # shown beside the balance, not taken off it.
         "pending": pending,
         "modified": naive_site_to_utc_iso(doc.modified),
+        # Credit limit / used / overdue (+ Steel Force approval, credit days).
+        "credit": _credit_status_or_none(doc.name),
     }
 
 
@@ -573,6 +709,7 @@ def create(
     posting_ts: str | None = None,
     cr_number: str | None = None,
     customer_name_2: str | None = None,
+    attachment: dict | None = None,  # {"filename", "data": base64 / data URL}: CR / VAT certificate photo
 ) -> dict:
     """Create a Customer + optional primary Address.
 
@@ -611,6 +748,9 @@ def create(
             }
     ctype = (customer_type or "b2c").lower()
     is_b2b = ctype == "b2b"
+    # Steel Force: the desk dialog's rules (B2B Creator only, mobile, no second
+    # customer of the same name).
+    steelforce.check_new_customer(customer_name, is_b2b, mobile_no, tax_id, bool(attachment))
 
     # Resolve country once — used for both Customer.custom_country (a
     # site-custom reqd Link field added on trading-demo) and the primary
@@ -623,6 +763,10 @@ def create(
         or "Saudi Arabia"
     )
 
+    if resolved_country == _KSA and tax_id and not is_b2b:
+        # A buyer with a VAT number gets a standard (B2B) tax invoice, which
+        # ZATCA refuses without the buyer's address.
+        frappe.throw(_("A customer with a VAT number is a B2B (company) customer."))
     if resolved_country == _KSA:
         _validate_ksa(resolved_country, is_b2b, tax_id, building_number, pincode, district, address_line1, city)
     elif is_b2b:
@@ -665,8 +809,9 @@ def create(
     vat_field = _vat_field()
     if vat_field and tax_id:
         customer_payload[vat_field] = tax_id
-    if cr_number and customer_meta.has_field("custom_cr_number"):
-        customer_payload["custom_cr_number"] = cr_number
+    cr_field = cr_number_field()
+    if cr_number and cr_field:
+        customer_payload[cr_field] = cr_number
     name_2_field = customer_name_2_field()
     if name_2_field and customer_name_2:
         customer_payload[name_2_field] = customer_name_2
@@ -680,6 +825,7 @@ def create(
         doc.append("sales_team", {"sales_person": sp, "allocated_percentage": 100})
         if customer_meta.has_field("custom_sales_person"):
             doc.custom_sales_person = sp
+    steelforce.on_new_customer(doc)
     doc.insert(ignore_permissions=False)
 
     # Create Address if fields provided (mandatory for B2B, optional for B2C).
@@ -687,7 +833,8 @@ def create(
     if address_line1:
         addr_data = {
             "doctype": "Address",
-            "address_title": customer_name,
+            # The name as saved (some sites put it in Title Case).
+            "address_title": doc.customer_name,
             "address_type": "Billing",
             "address_line1": address_line1,
             "address_line2": address_line2,
@@ -717,6 +864,10 @@ def create(
 
     # Outbox row in the same transaction as the Customer (claimed above), so
     # a retry can never create a second customer and a rollback drops both.
+    if attachment:
+        file_url = _attach_document(doc.name, attachment)
+        if tax_id:
+            steelforce.link_vat_document(doc.name, file_url)
     if client_id:
         _record_customer_outbox(
             client_id,
@@ -737,6 +888,38 @@ def create(
         "customer_type": doc.customer_type,
         "address": address_name,
     }
+
+
+_MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024
+
+
+def _attach_document(customer: str, attachment: dict) -> str | None:
+    """A photo of the customer's CR / VAT certificate, attached to the Customer
+    (private). Some sites refuse to bill a VAT-registered customer without one.
+    Returns the file's URL."""
+    import base64
+
+    filename = (attachment.get("filename") or "document.jpg").strip()[:140]
+    data = attachment.get("data") or ""
+    if "," in data and data.startswith("data:"):
+        data = data.split(",", 1)[1]
+    try:
+        content = base64.b64decode(data, validate=True)
+    except Exception:
+        frappe.throw(_("The attached document could not be read"))
+    if not content:
+        return None
+    if len(content) > _MAX_ATTACHMENT_BYTES:
+        frappe.throw(_("The attached document is too large (8 MB at most)"))
+    file = frappe.get_doc({
+        "doctype": "File",
+        "file_name": filename,
+        "attached_to_doctype": "Customer",
+        "attached_to_name": customer,
+        "is_private": 1,
+        "content": content,
+    }).insert()
+    return file.file_url
 
 
 # Statement labels: English with the Arabic underneath (KSA statements).

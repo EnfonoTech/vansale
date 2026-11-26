@@ -15,6 +15,8 @@ export interface PaymentPayload {
   remarks?: string;
   /** 1 = advance: nothing allocated, the amount stays as customer credit. */
   advance?: 0 | 1;
+  /** Steel Force "Loyalty" written off on the last invoice paid. */
+  write_off_amount?: number;
 }
 
 export interface SavedPayment {
@@ -48,24 +50,31 @@ export interface ModeOfPayment {
   type: string | null;
   /** Account is a Bank account → ERPNext requires a reference number. */
   needs_reference?: boolean;
+  /** A post-dated cheque mode of the branch (Steel Force); used for Cheque sales only. */
+  pdc?: boolean;
 }
 
 const MOP_CACHE_KEY = "vansale.modesOfPayment";
 
-/** Modes with an account for the user's company; last list kept for offline use. */
-export async function modesOfPayment(): Promise<ModeOfPayment[]> {
+/** Modes with an account for the user's company; last list kept for offline use.
+ *  `forRefund`: modes for paying a customer back (Steel Force: the branch's return modes). */
+export async function modesOfPayment(forRefund = false): Promise<ModeOfPayment[]> {
+  const cacheKey = forRefund ? `${MOP_CACHE_KEY}.refund` : MOP_CACHE_KEY;
   const fromCache = (): ModeOfPayment[] => {
     try {
-      return JSON.parse(localStorage.getItem(MOP_CACHE_KEY) || "[]") as ModeOfPayment[];
+      return JSON.parse(localStorage.getItem(cacheKey) || "[]") as ModeOfPayment[];
     } catch {
       return [];
     }
   };
   if (!isOnline()) return fromCache();
   try {
-    const rows = await apiCall<ModeOfPayment[]>("GET", "vansale.api.payment.modes_of_payment");
+    const rows = await apiCall<ModeOfPayment[]>(
+      "GET",
+      `vansale.api.payment.modes_of_payment${forRefund ? "?is_return=1" : ""}`,
+    );
     try {
-      localStorage.setItem(MOP_CACHE_KEY, JSON.stringify(rows));
+      localStorage.setItem(cacheKey, JSON.stringify(rows));
     } catch {
       /* storage full / blocked — the live list still works */
     }
@@ -130,9 +139,10 @@ export async function save(payload: PaymentPayload): Promise<SavedPayment> {
 
   if (isOnline()) {
     try {
+      // Online: no time sent, the server dates it. The queued copy keeps
+      // the time of the collection (accepted within limits).
       const res = await apiCall<SavedPayment>("POST", "vansale.api.payment.save", {
         client_id: clientId,
-        posting_ts: clientTs,
         ...payload,
       });
       const sync = useSyncStore();

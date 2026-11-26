@@ -45,3 +45,25 @@ export function ksaAddressErrors(a: {
   }
   return errors;
 }
+
+/** Countries offered on the customer form: the GCC, plus the company's own
+ *  country when it is elsewhere (first in the list). */
+export const GCC_COUNTRIES = ["Saudi Arabia", "United Arab Emirates", "Kuwait", "Bahrain", "Qatar", "Oman"] as const;
+
+export function countryOptions(companyCountry?: string | null): string[] {
+  const list: string[] = [...GCC_COUNTRIES];
+  return companyCountry && !list.includes(companyCountry) ? [companyCountry, ...list] : list;
+}
+
+/** A new customer / address starts in the company's country (else KSA). */
+export function defaultCountry(companyCountry?: string | null): string {
+  return companyCountry || KSA;
+}
+
+/** The mobile number's problem, or null. `minDigits` 0 = no length rule. */
+export function mobileProblem(mobile: string | null | undefined, required: boolean, minDigits: number): string | null {
+  const digits = (mobile || "").replace(/\D/g, "");
+  if (!digits) return required ? "Mobile number is required" : null;
+  if (minDigits > 0 && digits.length < minDigits) return `Mobile number needs at least ${minDigits} digits`;
+  return null;
+}

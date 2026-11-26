@@ -41,7 +41,8 @@ type IconName =
   | "logout"
   | "tag"
   | "trash"
-  | "share";
+  | "share"
+  | "approval";
 
 const sizePx = computed(() => (typeof props.size === "number" ? `${props.size}` : props.size));
 </script>
@@ -190,6 +191,11 @@ const sizePx = computed(() => (typeof props.size === "number" ? `${props.size}` 
     <template v-else-if="name === 'tag'">
       <path d="M20 12l-8 8-9-9V3h8z" />
       <circle cx="7.5" cy="7.5" r="1.2" fill="currentColor" />
+    </template>
+    <template v-else-if="name === 'approval'">
+      <path d="M6 2h9l5 5v13a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z" />
+      <path d="M14 2v5h5" />
+      <path d="M8.5 14.5l2.5 2.5 4.5-5" />
     </template>
     <template v-else-if="name === 'trash'">
       <path d="M3 6h18" />

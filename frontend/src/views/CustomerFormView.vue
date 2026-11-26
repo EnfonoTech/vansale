@@ -3,10 +3,13 @@
  * New customer form — Phase C.
  *
  * Per PDF 2026-04-20 §2:
- *  - B2B / B2C toggle
+ *  - B2B / B2C toggle (only where the user may make a B2B customer; Steel
+ *    Force: the B2B Creator role — others never see it and make B2C only)
  *  - Address mandatory for B2B (address_line1 + city)
  *  - Address optional for B2C
- *  - Email, mobile, tax id optional
+ *  - VAT / CR number on B2B only: a buyer with a VAT number is a B2B buyer
+ *    (standard tax invoice, which needs the address)
+ *  - Email, mobile optional (Steel Force: mobile required)
  *
  * Entry points:
  *  - Bottom-nav Customers → "New" button
@@ -16,9 +19,10 @@ import { ref, computed } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { create as createCustomer } from "@/api/customer";
 import { ApiError } from "@/app/frappe";
-import { isKsa, ksaAddressErrors, ksaVatError } from "@/features/van/ksa";
+import { countryOptions, defaultCountry, isKsa, ksaAddressErrors, ksaVatError, mobileProblem } from "@/features/van/ksa";
 import { useSessionStore } from "@/stores/session";
 import { useToastStore } from "@/stores/toasts";
+import { genUuid } from "@/offline/queue";
 import Icon from "@/components/Icon.vue";
 
 const router = useRouter();
@@ -34,38 +38,59 @@ const taxId = ref("");
 // Shown only when the site has the field (session.customerForm).
 const customerName2 = ref("");
 const crNumber = ref("");
+// Photo of the CR / VAT certificate (data URL), attached to the customer.
+const documentFile = ref<{ filename: string; data: string } | null>(null);
+function onDocumentPicked(ev: Event) {
+  const file = (ev.target as HTMLInputElement).files?.[0];
+  if (!file) { documentFile.value = null; return; }
+  if (file.size > 8 * 1024 * 1024) { toasts.warn("The document is too large (8 MB at most)"); return; }
+  const reader = new FileReader();
+  reader.onload = () => { documentFile.value = { filename: file.name, data: String(reader.result) }; };
+  reader.readAsDataURL(file);
+}
 
 const addressLine1 = ref("");
 const addressLine2 = ref("");
 const city = ref("");
 const stateField = ref("");
 const pincode = ref("");
-// Default to KSA because that's where 99% of our customers are (and the
-// site-level Customer.custom_country field is Reqd on trading-demo).
-// GCC-only list keeps the dropdown short + meaningful for the driver.
-const country = ref("Saudi Arabia");
-const GCC_COUNTRIES = [
-  "Saudi Arabia",
-  "United Arab Emirates",
-  "Kuwait",
-  "Bahrain",
-  "Qatar",
-  "Oman",
-] as const;
+// Starts in the company's country (a Bahrain company's van: Bahrain), else
+// KSA; the KSA / ZATCA rules below follow the country chosen. GCC list (plus
+// the company's own country) keeps the dropdown short for the driver.
+const country = ref(defaultCountry(session.customerForm?.country));
+const COUNTRIES = countryOptions(session.customerForm?.country);
 // KSA ZATCA Phase 2 — building number is mandatory on B2B addresses.
 const buildingNumber = ref("");
 const additionalNumber = ref("");
 const district = ref("");
 
 const busy = ref(false);
+// One id for this new customer, kept across retries: a create that timed out
+// (a large photo) and is tapped again returns the first customer instead of
+// making "Name - 1" or failing on its own VAT number.
+const clientId = genUuid();
 
-const isB2B = computed(() => customerType.value === "b2b");
+// B2B is offered only where the user may make one (older servers: always).
+const canB2B = computed(() => session.customerForm?.b2b !== false);
+const isB2B = computed(() => canB2B.value && customerType.value === "b2b");
 // Field-level problems (KSA / ZATCA rules + B2B required address), shown
 // in the toast so the driver knows what to fix. The server checks again.
 const problems = computed(() => {
   const list: string[] = [];
   if (!customerName.value.trim()) list.push("Customer name is required");
-  const vatError = ksaVatError(taxId.value, country.value);
+  const rules = session.customerForm;
+  // Steel Force: required, and 10 digits for a Saudi company's customer.
+  const mobileError = mobileProblem(
+    mobileNo.value,
+    Boolean(rules?.mobile_required),
+    rules?.mobile_min_digits ?? (rules?.mobile_required ? 10 : 0),
+  );
+  if (mobileError) list.push(mobileError);
+  if (isB2B.value && rules?.vat_needs_cr_and_document && taxId.value.trim()) {
+    if (!crNumber.value.trim()) list.push("CR number is required with a VAT number");
+    if (!documentFile.value) list.push("Add a photo of the CR / VAT certificate");
+  }
+  const vatError = isB2B.value ? ksaVatError(taxId.value, country.value) : null;
   if (vatError) list.push(vatError);
   if (isKsa(country.value)) {
     list.push(
@@ -93,11 +118,13 @@ async function submit() {
   busy.value = true;
   try {
     const res = await createCustomer({
+      client_id: clientId,
       customer_name: customerName.value.trim(),
-      customer_type: customerType.value,
+      customer_type: isB2B.value ? "b2b" : "b2c",
       mobile_no: mobileNo.value || undefined,
       email_id: emailId.value || undefined,
-      tax_id: taxId.value || undefined,
+      // VAT / CR / certificate belong to a B2B customer only.
+      tax_id: (isB2B.value && taxId.value) || undefined,
       address_line1: addressLine1.value || undefined,
       address_line2: addressLine2.value || undefined,
       city: city.value || undefined,
@@ -107,12 +134,14 @@ async function submit() {
       building_number: buildingNumber.value || undefined,
       additional_number: additionalNumber.value || undefined,
       district: district.value || undefined,
-      cr_number: crNumber.value || undefined,
+      cr_number: (isB2B.value && crNumber.value) || undefined,
       customer_name_2: customerName2.value || undefined,
+      attachment: (isB2B.value && documentFile.value) || undefined,
     });
     toasts.success(`Customer ${res.customer_name} created`);
     if (redirectTo === "invoice") {
-      router.replace({ name: "invoice-new", query: { customer: res.name } });
+      // restore=1: the invoice form puts back the cart left for this customer.
+      router.replace({ name: "invoice-new", query: { customer: res.name, restore: "1" } });
     } else {
       router.replace({ name: "customer-detail", params: { name: res.name } });
     }
@@ -129,7 +158,7 @@ async function submit() {
 
 <template>
   <div class="stack">
-    <section class="card stack">
+    <section v-if="canB2B" class="card stack">
       <span class="label">Customer type</span>
       <div class="seg">
         <button type="button" class="seg-btn" :data-active="customerType === 'b2c'"
@@ -155,7 +184,7 @@ async function submit() {
       </label>
       <div class="two-col">
         <label class="field">
-          <span class="tiny">Mobile</span>
+          <span class="tiny">Mobile{{ session.customerForm?.mobile_required ? " *" : "" }}</span>
           <input type="tel" v-model="mobileNo" inputmode="tel" placeholder="+966…" />
         </label>
         <label class="field">
@@ -163,13 +192,18 @@ async function submit() {
           <input type="email" v-model="emailId" inputmode="email" />
         </label>
       </div>
-      <label class="field">
+      <label v-if="isB2B" class="field">
         <span class="tiny">VAT number</span>
         <input type="text" v-model="taxId" inputmode="numeric" />
       </label>
-      <label v-if="session.customerForm?.cr_number" class="field">
+      <label v-if="isB2B && session.customerForm?.cr_number" class="field">
         <span class="tiny">CR number</span>
         <input type="text" v-model="crNumber" inputmode="numeric" />
+      </label>
+      <label v-if="isB2B && session.customerForm?.vat_needs_cr_and_document && taxId.trim()" class="field">
+        <span class="tiny">Photo of the CR / VAT certificate</span>
+        <input type="file" accept="image/*,application/pdf" capture="environment" @change="onDocumentPicked" />
+        <span v-if="documentFile" class="muted xsmall">{{ documentFile.filename }}</span>
       </label>
     </section>
 
@@ -231,7 +265,7 @@ async function submit() {
       <label class="field">
         <span class="tiny">Country *</span>
         <select v-model="country">
-          <option v-for="c in GCC_COUNTRIES" :key="c" :value="c">{{ c }}</option>
+          <option v-for="c in COUNTRIES" :key="c" :value="c">{{ c }}</option>
         </select>
       </label>
     </section>

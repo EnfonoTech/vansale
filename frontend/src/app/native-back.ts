@@ -7,6 +7,8 @@
  * See fatehhr lesson #8 (`PARENT_BY_ROUTE_NAME`).
  */
 import type { Router } from "vue-router";
+import { approvalsOnly } from "@/features/approvals/inbox";
+import { useSessionStore } from "@/stores/session";
 
 const PARENT_BY_ROUTE_NAME: Record<string, string | null> = {
   dashboard: null, // root — exit on next back
@@ -20,9 +22,12 @@ const PARENT_BY_ROUTE_NAME: Record<string, string | null> = {
   "route-today": "dashboard",
   "van-stock": "dashboard",
   "sync-errors": "dashboard",
+  "approval-detail": "approvals",
 };
 
-const EXIT_ROUTES = new Set(["dashboard", "setup", "login", "pin"]);
+// `approvals` is the root of a user without the van app (Home sends them there);
+// for the others it is handled in the listener below.
+const EXIT_ROUTES = new Set(["dashboard", "approvals", "setup", "login", "pin"]);
 
 let lastExitPromptAt = 0;
 const EXIT_WINDOW_MS = 2000;
@@ -37,6 +42,13 @@ export async function installNativeBack(router: Router): Promise<void> {
       const current = router.currentRoute.value;
       const name = current.name ? String(current.name) : "";
       const parent = PARENT_BY_ROUTE_NAME[name];
+
+      // Approvals is the root only for a user without the van app; for anyone
+      // else it sits one level below Home, so back goes there instead of out.
+      if (name === "approvals" && !approvalsOnly(useSessionStore())) {
+        await router.replace({ name: "dashboard" });
+        return;
+      }
 
       if (parent) {
         await router.replace({ name: parent });

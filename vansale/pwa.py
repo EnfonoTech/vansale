@@ -6,7 +6,8 @@ at /sw.js (POS Awesome on Badria); registering that one made the phone see
 POS Awesome's manifest, and Van Sale had none, so it could not be installed.
 
   /vansale/manifest.webmanifest  name, icons, start URL, standalone display
-  /vansale/sw.js                 service worker (no caching, see SW_JS)
+  /vansale/sw.js                 service worker (offline start, shows approval pushes, see SW_JS)
+  /vansale/shell-files.json      the built app's files, for the worker to keep (offline start)
   /vansale/icon-<size>.png       Vansale Settings "App icon", else the default
 """
 
@@ -20,31 +21,171 @@ import frappe
 from werkzeug.wrappers import Response
 
 SCOPE = "/vansale"
+# The app is also served at /sf-connect (same page, same built files). Each path has its
+# own manifest, worker and icons, so an app installed at /vansale keeps working and an
+# install made at /sf-connect is scoped to /sf-connect.
+ALIAS_SCOPES = ("/sf-connect",)
+SCOPES = (SCOPE, *ALIAS_SCOPES)
+INSTALL_FILES = ("manifest.webmanifest", "sw.js", "shell-files.json")
+
+
+def scope_of(path: str | None) -> str:
+    """The scope a request path belongs to: an alias under its own folder, else /vansale."""
+    path = (path or "").split("?")[0]
+    for alias in ALIAS_SCOPES:
+        if path == alias or path.startswith(alias + "/"):
+            return alias
+    return SCOPE
 ICON_SIZES = (192, 512)
 DEFAULT_NAME = "Van Sale"
 DEFAULT_THEME = "#2563eb"
 BACKGROUND = "#f8fafc"
 
-# No caching on purpose: the app keeps its offline data in IndexedDB, and a
-# cached app shell outlives a rebuild (old JS chunk names 404). Navigations
-# go to the network, with a short message when there is none.
-SW_JS = """/* Van Sale service worker: makes the web app installable. */
+# Offline start: the app keeps its data in IndexedDB, and the worker keeps the
+# built app files so the app opens (and every screen loads) without a
+# connection. The page is fetched first (always the newest online; the last
+# one offline). Built files carry a hash in their name, so a kept copy never
+# goes stale; each build is kept in a cache of its own and older ones are
+# dropped (a cached page of an old build used to 404 on its JS chunks).
+def _shell_files() -> dict:
+    """The built app's files under /assets/vansale/spa/ (offline start), and
+    a version that changes with every build (a hash of the file names, which
+    carry content hashes)."""
+    import hashlib
+    import os
+
+    root = frappe.get_app_path("vansale", "public", "spa")
+    files = []
+    for folder, _dirs, names in os.walk(os.path.join(root, "assets")):
+        for n in names:
+            rel = os.path.relpath(os.path.join(folder, n), root).replace(os.sep, "/")
+            files.append(f"/assets/vansale/spa/{rel}")
+    files.sort()
+    version = hashlib.sha1("\n".join(files).encode()).hexdigest()[:12]
+    return {"version": version, "files": files}
+
+
+_SW_TEMPLATE = """/* Van Sale service worker: makes the web app installable. */
 const OFFLINE_HTML = '<!doctype html><meta charset="utf-8">' +
   '<meta name="viewport" content="width=device-width,initial-scale=1">' +
   '<title>Van Sale</title><body style="font-family:sans-serif;padding:2rem;text-align:center">' +
   '<h2>No connection</h2><p>Connect to the internet and try again.</p></body>';
 
 self.addEventListener("install", () => self.skipWaiting());
+
+const SHELL_URL = "__SCOPE__";
+const PAGE_CACHE = "vansale-page";
+const FILES_PREFIX = "vansale-files-";
+
+/* Keep every file of the current build (listed by the server), then drop the
+   caches of older builds. A file that fails is tried again on the next visit. */
+async function keepAppFiles() {
+  const res = await fetch("__SCOPE__/shell-files.json", { cache: "no-store" });
+  if (!res.ok) return;
+  const list = await res.json();
+  const name = FILES_PREFIX + list.version;
+  const cache = await caches.open(name);
+  for (const file of list.files || []) {
+    if (await cache.match(file)) continue;
+    try {
+      await cache.add(file);
+    } catch (e) {
+      /* next visit */
+    }
+  }
+  for (const key of await caches.keys()) {
+    if (key.startsWith(FILES_PREFIX) && key !== name) await caches.delete(key);
+  }
+}
+self.addEventListener("install", (event) => event.waitUntil(keepAppFiles().catch(() => {})));
 self.addEventListener("activate", (event) => event.waitUntil(self.clients.claim()));
 self.addEventListener("fetch", (event) => {
   if (event.request.mode !== "navigate") return;
   event.respondWith(
-    fetch(event.request).catch(
-      () => new Response(OFFLINE_HTML, { headers: { "Content-Type": "text/html; charset=utf-8" } }),
-    ),
+    fetch(event.request)
+      .then((res) => {
+        if (res.ok) {
+          // The newest page is kept for an offline start, and the build's files with it.
+          const copy = res.clone();
+          event.waitUntil(
+            caches.open(PAGE_CACHE).then((c) => c.put(SHELL_URL, copy)).then(keepAppFiles).catch(() => {}),
+          );
+        }
+        return res;
+      })
+      .catch(() =>
+        caches.match(SHELL_URL).then(
+          (kept) => kept || new Response(OFFLINE_HTML, { headers: { "Content-Type": "text/html; charset=utf-8" } }),
+        ),
+      ),
+  );
+});
+
+/* The app's built files: from the kept copy when there is one (offline, and
+   a screen not opened yet), else the network. */
+self.addEventListener("fetch", (event) => {
+  const req = event.request;
+  if (req.method !== "GET") return;
+  const url = new URL(req.url);
+  if (url.origin !== self.location.origin || !url.pathname.startsWith("/assets/vansale/spa/")) return;
+  event.respondWith(caches.match(req).then((kept) => kept || fetch(req)));
+});
+
+/* Web Push for approvals (vansale/steelforce/approvals_push.py). The payload
+   is {title, body, url, tag}: a document's name at most, never its content. */
+self.addEventListener("push", (event) => {
+  let data = {};
+  try {
+    data = event.data ? event.data.json() : {};
+  } catch (e) {
+    data = {};
+  }
+  if (!data || typeof data !== "object") data = {};
+  event.waitUntil(
+    self.registration.showNotification(data.title || "Approval needed", {
+      body: data.body || "",
+      tag: data.tag,
+      data: { url: data.url || "__SCOPE__/approvals" },
+      icon: "__SCOPE__/icon-192.png",
+    }),
+  );
+});
+
+/* A tap opens the document's approval screen. Only a path of this app is
+   followed (same origin, under /vansale/): a payload can never send the
+   phone anywhere else. */
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const origin = self.location.origin;
+  let target = origin + "__SCOPE__/approvals";
+  try {
+    const url = new URL((event.notification.data && event.notification.data.url) || "", origin);
+    if (url.origin === origin && url.pathname.startsWith("__SCOPE__/")) target = url.href;
+  } catch (e) {
+    /* not a URL: the approvals list it is */
+  }
+  event.waitUntil(
+    self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((windows) => {
+      const open = windows.find((w) => w.url.startsWith(origin + "__SCOPE__"));
+      if (open && typeof open.navigate === "function") {
+        return open.navigate(target).then(
+          (moved) => (moved || open).focus(),
+          () => self.clients.openWindow(target),
+        );
+      }
+      return self.clients.openWindow(target);
+    }),
   );
 });
 """
+
+
+SW_JS = _SW_TEMPLATE.replace("__SCOPE__", SCOPE)
+
+
+def sw_js(scope: str = SCOPE) -> str:
+    """The service worker for one scope (/vansale or an alias)."""
+    return _SW_TEMPLATE.replace("__SCOPE__", scope)
 
 
 def _settings() -> dict:
@@ -68,35 +209,35 @@ def theme_color() -> str:
         return DEFAULT_THEME
 
 
-def head_tags() -> str:
-    """Tags added to the SPA page so browsers offer to install it."""
+def head_tags(scope: str = SCOPE) -> str:
+    """Tags added to the SPA page so browsers offer to install it (the manifest and icons of `scope`)."""
     name = frappe.utils.escape_html(app_name())
     return (
-        f'<link rel="manifest" href="{SCOPE}/manifest.webmanifest">'
+        f'<link rel="manifest" href="{scope}/manifest.webmanifest">'
         # Tab icon; without one the browser asks for /favicon.ico (404).
-        f'<link rel="icon" type="image/png" href="{SCOPE}/icon-192.png">'
-        f'<link rel="apple-touch-icon" href="{SCOPE}/icon-192.png">'
+        f'<link rel="icon" type="image/png" href="{scope}/icon-192.png">'
+        f'<link rel="apple-touch-icon" href="{scope}/icon-192.png">'
         '<meta name="mobile-web-app-capable" content="yes">'
         '<meta name="apple-mobile-web-app-capable" content="yes">'
         f'<meta name="apple-mobile-web-app-title" content="{name}">'
     )
 
 
-def _manifest() -> dict:
+def _manifest(scope: str = SCOPE) -> dict:
     name = app_name()
     icons = [
-        {"src": f"{SCOPE}/icon-{s}.png", "sizes": f"{s}x{s}", "type": "image/png", "purpose": "any"}
+        {"src": f"{scope}/icon-{s}.png", "sizes": f"{s}x{s}", "type": "image/png", "purpose": "any"}
         for s in ICON_SIZES
     ]
     icons.append(
-        {"src": f"{SCOPE}/icon-512-maskable.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable"}
+        {"src": f"{scope}/icon-512-maskable.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable"}
     )
     return {
-        "id": SCOPE,
+        "id": scope,
         "name": name,
         "short_name": name if len(name) <= 12 else name.split()[0][:12],
-        "start_url": SCOPE,
-        "scope": SCOPE,
+        "start_url": scope,
+        "scope": scope,
         "display": "standalone",
         # Phones and tablets, either way up (a portrait lock kept tablets
         # from turning to landscape once installed).
@@ -158,7 +299,7 @@ def _cached_icon(size: int, maskable: bool) -> bytes:
     return data
 
 
-_ICON_RE = re.compile(r"^/vansale/icon-(\d+)(-maskable)?\.png$")
+_ICON_RE = re.compile(r"^(?:" + "|".join(re.escape(s) for s in SCOPES) + r")/icon-(\d+)(-maskable)?\.png$")
 
 
 class VansalePWARenderer:
@@ -172,23 +313,30 @@ class VansalePWARenderer:
 
     def can_render(self) -> bool:
         p = self.path
-        return p in (f"{SCOPE}/manifest.webmanifest", f"{SCOPE}/sw.js") or bool(_ICON_RE.match(p))
+        return p in {f"{s}/{name}" for s in SCOPES for name in INSTALL_FILES} or bool(_ICON_RE.match(p))
 
     def render(self) -> Response:
         p = self.path
         if p.endswith("manifest.webmanifest"):
             return Response(
-                json.dumps(_manifest()),
+                json.dumps(_manifest(scope_of(p))),
                 content_type="application/manifest+json",
                 headers={"Cache-Control": "no-cache"},
             )
-        if p.endswith("sw.js"):
+        if p.endswith("shell-files.json"):
             return Response(
-                SW_JS,
+                json.dumps(_shell_files()),
+                content_type="application/json",
+                headers={"Cache-Control": "no-cache"},
+            )
+        if p.endswith("sw.js"):
+            scope = scope_of(p)
+            return Response(
+                sw_js(scope),
                 content_type="application/javascript",
-                # The worker lives at /vansale/sw.js but controls /vansale
+                # The worker lives at <scope>/sw.js but controls <scope>
                 # itself (no trailing slash), one level above its folder.
-                headers={"Service-Worker-Allowed": SCOPE, "Cache-Control": "no-cache"},
+                headers={"Service-Worker-Allowed": scope, "Cache-Control": "no-cache"},
             )
         m = _ICON_RE.match(p)
         size = int(m.group(1))

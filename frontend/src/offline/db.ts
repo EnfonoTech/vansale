@@ -53,6 +53,9 @@ export interface QueuedBase {
   id?: number;
   clientId: string;
   clientTs: string;
+  /** The user who did the work offline; only they may send it (missing on
+   *  entries queued before this field existed: sent by whoever is signed in). */
+  owner?: string | null;
   createdAt: number;
   attempts: number;
   lastError?: string;

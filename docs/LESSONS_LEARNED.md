@@ -27,6 +27,13 @@ Studied both `EnfonoTech/Van-Sales` (first-gen backend, 477-line `api.py`) and `
 
 ---
 
+## Steel Force prod install (2026-11-22)
+
+- **A fixture overwrites a site's own field of the same name, on install-app and on every migrate.** Custom Field names are `<doctype>-<fieldname>`, so shipping `Sales Invoice-custom_return_reason` as a fixture replaced Steel Force's own Data field (mandatory on return / debit note) with our Select, and would have again on each later deploy. Fields a client may already own are not fixtures: `setup.CREATE_ONLY_CUSTOM_FIELDS` creates them when missing and never updates them (`after_install` for install-app, `after_migrate` for the rest). `hooks.fixtures` excludes the name so `export-fixtures` does not add it back. Code that writes the field handles either type (`sales_return.reason_field_value`).
+- **A standard Print Format saves only in developer mode, a migrate/install or a test.** Anywhere else (`bench execute`, a console) Frappe raises "Standard Print Format cannot be updated". With developer mode off the upsert writes a custom format (`standard = No`, `custom_format = 1`); without `custom_format` printview ignores the format's HTML and prints the generic layout.
+
+---
+
 ## Standing rules (inherited)
 
 Full list lives in `~/.claude/skills/frappe-vue-pwa/SKILL.md` §5 (20 commandments) — read it. The highlights every Van Sale commit must honour:

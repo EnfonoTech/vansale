@@ -175,19 +175,16 @@ def warehouses(company: Optional[str] = None) -> list[dict]:
         )
         return rows
 
-    company = (
-        company
-        or frappe.db.get_value(
-            "User Permission",
-            {"user": user, "allow": "Company", "is_default": 1},
-            "for_value",
-        )
-        or frappe.defaults.get_user_default("Company", user)
-        or frappe.db.get_single_value("Global Defaults", "default_company")
-    )
+    from vansale.utils.company import get_user_company, permitted_companies
+
+    company = company or get_user_company(user)
     filters: dict = {"is_group": 0, "disabled": 0}
+    permitted = [] if company else permitted_companies(user)
     if company:
         filters["company"] = company
+    elif permitted:
+        # no company of their own: their permitted companies' warehouses, never every company's
+        filters["company"] = ["in", permitted]
     return frappe.get_all(
         "Warehouse",
         filters=filters,

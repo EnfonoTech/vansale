@@ -32,5 +32,6 @@ export default defineConfig({
   define: {
     __BUILD_TARGET__: JSON.stringify("web"),
     __APP_VERSION__: JSON.stringify("test"),
+    __APP_TITLE__: JSON.stringify("Van Sale"),
   },
 });

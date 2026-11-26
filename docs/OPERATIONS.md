@@ -48,6 +48,12 @@ Check the remote name first — on at least one server the vansale checkout's
 remote is called `upstream`, not `origin`, so `git pull origin develop` fails
 there.
 
+> **Steel Force sites ship from `develop_2`.** This app's Steel Force work is on
+> branch `develop_2`, not `develop`. On sft-uat and the other Steel Force sites
+> read `develop_2` wherever this file says `develop` (`git fetch upstream
+> develop_2`, `upstream/develop_2`, `--branch develop_2` in §1); on sft-uat the
+> remote is `upstream`.
+
 `bench migrate` runs `setup.after_migrate`, which is idempotent: roles, DocPerms,
 User Permissions, custom fields, the dashboard, and per-van series all
 re-provision. `patches.txt` runs in sequence — append, never reorder.
@@ -70,6 +76,137 @@ chown -R v15:v15 $SPA
 
 `sites/assets/vansale` is a symlink to `apps/vansale/vansale/public`, so no
 `bench build` is needed for this app's assets.
+
+### Enabling approval notifications (needs one migrate)
+
+Web Push for approvals (`steelforce/approvals_push.py`) adds the "Vansale Push
+Subscription" DocType, so this release, unlike the approvals feature below,
+needs `bench migrate` once. Push stays off until the key pair exists, so a pull
+without the steps below changes nothing for users.
+
+```bash
+bench --site <site> backup                       # restore point first
+cd apps/vansale && git merge --ff-only upstream/develop_2
+bench --site <site> migrate                      # creates the subscription table
+bench --site <site> execute vansale.steelforce.approvals_push.setup_keys
+#   prints the public key; the private key is written to site_config.json only.
+#   Idempotent. `force=1` makes a NEW pair and deletes every subscription.
+bench --site <site> clear-cache
+# swap the SPA as below, then restart the web process (the new doc_events hook)
+```
+
+`pywebpush` is a dependency (`pyproject.toml`); install it in the bench env
+(`./env/bin/pip install "pywebpush>=1.14"`) on a bench that lacks it. Each user
+turns it on from More > Approval notifications; it works in the web app and an
+installed iPhone web app, not in the native Android app. To test, enable it on a
+device, then run `send_for_action` for an open action name with `bench execute`.
+
+### Deploying the approvals feature (no migrate)
+
+The approvals feature (the Permission Manager approvals screens and endpoints)
+changed no DocType, patch, hook, fixture or setup code and added no dependency,
+so it deploys without `bench migrate`: new Python files, a changed upload
+endpoint and a new SPA. This is the sequence used on sft-uat on 2026-11-19
+(branch `develop_2`, remote `upstream`, bench user `frappe`), inside the
+02:00–05:00 IST window. Step 1 checks that the range you are deploying holds the
+same before it skips the migrate.
+
+```bash
+# 1. On the server, as the bench user: note where you are, then take the code.
+cd /home/v15/frappe-bench/apps/vansale
+git rev-parse HEAD > ~/vansale-rollback-head-$(date +%Y%m%d%H%M).txt
+git fetch upstream develop_2
+git diff --stat HEAD..upstream/develop_2 -- vansale/hooks.py vansale/patches.txt \
+  vansale/setup.py vansale/install.py vansale/fixtures vansale/patches vansale/vansale
+#   no output = no schema, patch, hook or fixture change: no migrate needed
+git merge --ff-only upstream/develop_2     # refuses if the checkout has diverged: stop and look
+
+# 2. Locally: build the SPA with the default environment (the same build the
+#    old one was). Output goes to vansale/public/spa, which is gitignored.
+cd frontend && pnpm build
+tar czf /tmp/vansale-spa.tgz -C ../vansale/public/spa .
+shasum -a 256 /tmp/vansale-spa.tgz         # compare after copying
+
+# 3. Copy the tarball to the server, then, as the bench user, keep the old SPA
+#    as a tarball OUTSIDE the served directory, extract the new one beside the
+#    old, and swap.
+PUB=/home/v15/frappe-bench/apps/vansale/vansale/public
+STAMP=$(date +%Y%m%d%H%M)
+curl -s https://<site>/vansale | grep -o 'index-[A-Za-z0-9_-]*\.js'   # note the old entry file
+tar czf ~/vansale-spa-before-$STAMP.tgz -C $PUB/spa .
+mkdir $PUB/spa.new && tar xzf /tmp/vansale-spa.tgz -C $PUB/spa.new
+mv $PUB/spa $PUB/spa.old-$STAMP && mv $PUB/spa.new $PUB/spa
+
+# 4. Restart ONLY the web process of the bench group that serves the site.
+sudo supervisorctl restart frappe-bench-web:frappe-bench-frappe-web
+```
+
+Do **not** run `bench migrate` (nothing to migrate) and leave the workers alone:
+nothing in this change is a hook, a scheduler entry or a background job. On
+sft-uat the web process is shared with other dev and demo sites on the same box,
+which see a short blip; do not restart web and workers in one call, as the web
+process then stays down until the long jobs end.
+
+Then verify (see also §6):
+
+```bash
+# the app answers
+curl -s https://<site>/api/method/vansale.api.auth.site_info
+
+# the new endpoints exist and refuse an anonymous caller: 403 ...
+curl -s -o /dev/null -w '%{http_code}\n' \
+  https://<site>/api/method/vansale.steelforce.approvals.availability
+# ... while a method that does not exist answers 417
+curl -s -o /dev/null -w '%{http_code}\n' \
+  https://<site>/api/method/vansale.steelforce.approvals.no_such_endpoint
+
+# the SPA entry file name changed from the one you noted before the swap
+curl -s https://<site>/vansale | grep -o 'index-[A-Za-z0-9_-]*\.js'
+```
+
+Then run the read-only parity report for an administrator and a few real
+approvers. It compares the app's inbox, counts, sent-back list and "my requests"
+with Permission Manager's own for that user (it writes nothing, apart from an
+Error Log row an enrichment read may defer). Run it while nothing is moving: a
+document decided between its reads shows as a difference.
+
+```bash
+bench --site <site> execute vansale.steelforce.approvals_parity.parity_report \
+  --kwargs "{'user': '<user>'}"
+```
+
+A pass has `'ok': True` and `'differences': []`. `'skipped'` naming `sent_back`
+is expected for a user whom Permission Manager's own sent-back list refuses (the
+app then says the list is not available for that user); it does not fail the
+report. `bench execute` hides the real exception, so when it fails run the report
+from a small script that prints the traceback, as in §6:
+
+```python
+# /tmp/parity.py  -> cd /home/v15/frappe-bench/sites && ../env/bin/python /tmp/parity.py
+import traceback
+
+import frappe
+
+frappe.init(site="<site>")
+frappe.connect()
+try:
+    from vansale.steelforce.approvals_parity import parity_report
+
+    print(parity_report("<user>"))
+except Exception:
+    traceback.print_exc()
+finally:
+    frappe.destroy()
+```
+
+Once everything checks out, delete `$PUB/spa.old-<stamp>`: it sits under `public/`,
+which is served at `/assets/vansale/`.
+
+**Rollback** (no migration to undo, so §7's warning does not apply): `git reset
+--hard <commit id from ~/vansale-rollback-head-<stamp>.txt>` in the app
+directory, put the old SPA back from `~/vansale-spa-before-<stamp>.tgz` (or swap
+`spa.old-<stamp>` back in, if you have not deleted it), and restart the web
+process only.
 
 ---
 

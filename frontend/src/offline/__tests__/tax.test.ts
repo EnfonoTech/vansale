@@ -3,7 +3,7 @@
  * charged. It shipped for months as a hardcoded 15% with no test.
  */
 import { describe, expect, it } from "vitest";
-import { computeTaxTotals } from "@/features/van/tax";
+import { computeTaxTotals, netRateFactor } from "@/features/van/tax";
 
 const round = (n: number) => Math.round(n * 100) / 100;
 
@@ -90,5 +90,33 @@ describe("computeTaxTotals", () => {
       expect(round(t.netOfTax)).toBe(100);
       expect(round(t.grand)).toBe(115);
     });
+  });
+});
+
+describe("net rate for the minimum-price check", () => {
+  it("is the line rate when there is no discount and tax is added on top", () => {
+    const t = computeTaxTotals({ net: 200, discount: 0, ratePercent: 15, inclusive: false, applyOn: "Grand Total" });
+    expect(netRateFactor(200, t)).toBeCloseTo(1, 6);
+  });
+
+  it("takes off a Net Total discount", () => {
+    const t = computeTaxTotals({ net: 200, discount: 20, ratePercent: 15, inclusive: false, applyOn: "Net Total" });
+    expect(netRateFactor(200, t)).toBeCloseTo(0.9, 6);
+  });
+
+  it("takes off a Grand Total discount without the tax part", () => {
+    // 200 + 15% = 230, less 23 = 207 → 180 net of tax
+    const t = computeTaxTotals({ net: 200, discount: 23, ratePercent: 15, inclusive: false, applyOn: "Grand Total" });
+    expect(netRateFactor(200, t)).toBeCloseTo(0.9, 6);
+  });
+
+  it("leaves tax out of a tax-inclusive price", () => {
+    const t = computeTaxTotals({ net: 115, discount: 0, ratePercent: 15, inclusive: true, applyOn: "Grand Total" });
+    expect(netRateFactor(115, t)).toBeCloseTo(100 / 115, 6);
+  });
+
+  it("is 1 with no lines", () => {
+    const t = computeTaxTotals({ net: 0, discount: 0, ratePercent: 15, inclusive: false });
+    expect(netRateFactor(0, t)).toBe(1);
   });
 });

@@ -13,13 +13,18 @@ from frappe.model.document import Document
 
 CACHE_KEY = "vansale_settings_flags"
 
+# (field on Vansale Settings / Vansale Configuration, doctype it prints)
+PRINT_FORMAT_FIELDS = (
+    ("invoice_print_format", "Sales Invoice"),
+    ("receipt_print_format", "Payment Entry"),
+    ("quotation_print_format", "Quotation"),
+    ("sales_order_print_format", "Sales Order"),
+)
+
 
 def validate_print_formats(doc) -> None:
-    """The invoice / receipt print format must be one for that doctype."""
-    for fieldname, doctype in (
-        ("invoice_print_format", "Sales Invoice"),
-        ("receipt_print_format", "Payment Entry"),
-    ):
+    """Each print format must be one for its doctype."""
+    for fieldname, doctype in PRINT_FORMAT_FIELDS:
         fmt = doc.get(fieldname)
         if fmt and frappe.db.get_value("Print Format", fmt, "doc_type") != doctype:
             frappe.throw(
@@ -72,6 +77,8 @@ def global_flags() -> dict:
         "stock_source": "Bin",
         "invoice_print_format": None,
         "receipt_print_format": None,
+        "quotation_print_format": None,
+        "sales_order_print_format": None,
         "allow_split_payment": False,
         "allow_return_without_invoice": False,
         "direct_print": False,
@@ -83,6 +90,14 @@ def global_flags() -> dict:
         # App PDFs printed by Chromium like the browser prints (off: Frappe's PDF).
         "pdf_like_browser_print": False,
         "print_copies": 1,
+        # Selling flow. Defaults are the behaviour before these settings existed.
+        "update_stock_on_invoice": True,
+        "quotation_next_step": "Sales Order",
+        "credit_needs_limit": False,
+        # A salesman's customers: his own (Sales Team), or his own list with a
+        # search over every customer the desk lets him see.
+        "customer_scope": "Own customers",
+        "ask_driver": False,
     }
     try:
         row = frappe.db.get_singles_dict("Vansale Settings") or {}
@@ -103,6 +118,10 @@ def global_flags() -> dict:
             "default_payment_type",
             "invoice_print_format",
             "receipt_print_format",
+            "quotation_print_format",
+            "sales_order_print_format",
+            "quotation_next_step",
+            "customer_scope",
         ):
             if row.get(key):
                 flags[key] = row[key]
@@ -118,6 +137,9 @@ def global_flags() -> dict:
             "allow_delete_draft_payment",
             "confirm_before_submit",
             "pdf_like_browser_print",
+            "update_stock_on_invoice",
+            "credit_needs_limit",
+            "ask_driver",
         ):
             if key in row:
                 flags[key] = bool(int(row.get(key) or 0))

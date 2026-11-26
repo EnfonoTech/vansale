@@ -30,7 +30,7 @@ cannot make a document disappear.
 ## 2. The public HTTP surface
 
 **Every `@frappe.whitelist()` is a public HTTP endpoint** at
-`/api/method/<dotted.path>`. There are currently **67**.
+`/api/method/<dotted.path>`. There are currently **123**.
 
 Adding an endpoint adds attack surface. Before merging one, confirm:
 
@@ -60,7 +60,7 @@ five are structurally pre-login and none returns tenant data:
 second pair of eyes — it is the only category of change here that can expose data
 to the open internet.
 
-### Endpoints with no explicit permission call — 47
+### Endpoints with no explicit permission call — 98
 
 `gen-docs.py` flags these. **Absence is not proof of a hole.** Most are safe
 because every query is scoped to `frappe.session.user`, or because they only read
@@ -75,6 +75,83 @@ audited if it appears there:
   controls that name;
 - anything an admin-only screen calls (`api/admin.py`), which must verify the role
   rather than assume the UI hid the button.
+
+### Approvals endpoints — 13
+
+`steelforce.approvals` (6) and `steelforce.approvals_extra` (7) front
+`permission_manager` (PM). PM owns who may approve what, so these call PM
+(`approvals._pm()`) for every decision and never copy its rules. None is guest
+reachable. Stock Entry and any type whose workflow PM flags
+`hide_from_approval_inbox` are refused (or left out of a list) in every one,
+whatever case the type name is written in (the database finds a type without
+regard to case). Eight of the thirteen are on the generated "no explicit
+permission call" list because their check is in a helper or in PM, which the
+generator cannot see (`apply_bulk` and `sent_back` are off it only because their
+code names `PermissionError`; their checks are in `apply`'s helper and in PM).
+The last column says what each is scoped by. The table ends with one older
+endpoint, `file_upload.upload`, which `attach` used to be able to go around.
+
+| Endpoint | Verb | Scoped by |
+| --- | --- | --- |
+| `approvals.availability` | GET | Nothing to scope: it answers only whether PM is installed. |
+| `approvals.inbox` | GET | **Session user, through PM**: only what PM's `get_my_pending_approvals` returns for them, the desk's own list. Party, amount and currency are read with `frappe.get_list` as the user, so a document they may not read shows without them. |
+| `approvals.count` | GET | **Session user, through PM**: the same list as `inbox`, numbers only. |
+| `approvals.detail` | GET | **Read permission** on the document. A user who cannot read it but holds an open PM action on it (PM's `_can_act_on`) gets a bare record (state, priority, creator) and nothing of the document; anyone else is refused. Fields are cut to what the user may read. |
+| `approvals.apply` | POST | **PM action ownership**, after read permission: the action must be one PM's `get_transitions` offers the session user for the document's state, less PM's self-approval rule (a person asked for advice by a "return to me" forward may only recommend: the document does not move). `expected_state`, the state the user saw when they opened the document, is compared with its state now, after the read check (so whether it moved is never told to someone who cannot read it) and before PM is asked: a document that has moved is refused with "This document changed since you opened it. Review it again." Blank means no check; no lock is taken, so this is a check, not a guard against two decisions in the same instant. A blank `priority` leaves the transition's own priority (PM is passed none); a chosen one must be Low, Medium, High or Critical. The comment is trimmed. The comment or attachment the transition requires is enforced here (PM does not enforce `require_comment`); PM's `apply_workflow` then checks again and runs the document's own hooks. |
+| `approvals.apply_bulk` | POST | As `apply`, document by document: at most 20 (a JSON list, duplicates dropped), each committed or rolled back on its own, a hidden type refuses the whole batch. `expected_states` is a JSON object of document name to state: a document that moved fails, a name missing from it is not checked, anything that is not an object is refused before the first document. A document where the caller could only recommend ("return to me") fails with "Answer this one from its own screen" and PM is not called, so a batch never records advice as a decision. A failed row shows a refusal's own words as plain text (tags removed); any other error shows one fixed text ("Could not apply this document. It was logged.") and goes to the Error Log, so an internal message never reaches a row. A commit that fails fails that row only, and a rollback that fails is logged without stopping the batch. |
+| `approvals_extra.forward_targets` | GET | **Read permission** on the document for the caller. Offers up to 20 enabled system users who can read it (user id, full name and the workflow role they hold, nothing else), never the caller; the users are listed with `get_all` on purpose, since a desk user may pick a colleague but not read the User list. |
+| `approvals_extra.forward` | POST | **PM action ownership, checked first**: before anything about the recipient is looked at, the caller must hold the approval, meaning it exists, names a document, is not of a hidden type, is still Open, and PM's `_can_act_on` lets the caller act on it. A missing id, an id the caller does not hold, a hidden type and an empty reference all get the same answer, "Approval not found" (a `PermissionError`), so an id cannot be used to learn whether it exists, what it is about, or whether a colleague can read it. Only then is the recipient checked: an enabled system user other than the caller who can read the document (a forward does not share it). PM's `forward_workflow_action` runs last. |
+| `approvals_extra.return_to_originator` | POST | **PM action ownership, checked first**: the same held-and-open check and the same "Approval not found" as `forward`. PM's `return_adhoc_to_originator` then checks the action is ad hoc. |
+| `approvals_extra.attach` | POST | **PM action ownership and read permission**: the caller must hold an open action they may act on for that document and be able to read it, otherwise "You cannot attach files to this document". Write permission on the document is not needed. After this guard it calls the private `file_upload._save_file`, never the whitelisted `upload` (which asks for write permission, below); the file is always private and the user's own File permissions apply to it. |
+| `approvals_extra.my_requests` | GET | **Session user**: only PM Workflow Actions with `for_submitter` = the caller (`get_all` is safe for that reason). The documents are not read, only whether each still exists and is not cancelled. |
+| `approvals_extra.sent_back` | GET | **Session user, through PM**: PM's `get_sent_back_documents` for the caller's own list (`all_users` is never passed). Answers `{items, unavailable}`. PM reads each sent-back document type with the user's own permissions and raises `PermissionError` at the first one they may not read, a known PM bug: that answers no items and `unavailable: true`, the refusal's queued message is cleared (no error toast on the phone) and one deferred Error Log row is written. Any other error is not caught. |
+| `approvals_extra.history` | GET | **Session user, through PM**: PM's `get_my_approval_history` for the caller (`all_users` is never passed, so never anybody else's). |
+| `file_upload.upload` (not an approvals endpoint) | POST | **Write permission on the target document, whenever one is given.** `attach_to_doctype` and `attach_to_name` must come together, and `frappe.has_permission(attach_to_doctype, "write", doc=attach_to_name)` must hold, otherwise `PermissionError` "You cannot attach files to this document"; this is checked before the payload is decoded. An upload with no target, which is what the offline photo and signature flow sends, is unchanged and needs only the right to create a File. This closed a hole: until then any logged-in user could attach a file to any document, because the endpoint never looked at the target and creating a File needs no right on the document it is attached to. The generated review list never showed it: the old body contained `ignore_permissions=False`, which the generator reads as a check. |
+
+All thirteen are inert when `permission_manager` is not installed: the reads
+(`availability`, `inbox`, `count`, `forward_targets`, `my_requests`, `sent_back`,
+`history`) answer "disabled", empty or zero without calling PM, and the writes
+and `detail` refuse with "Approvals are not available on this site" before
+reading or changing anything.
+
+`me.config_defaults` also returns `approvals.enabled` (PM is installed) and
+`is_system_manager` (true for Administrator, whose own role rows are not its full
+list of roles). They only decide which screens the app shows (the van screens
+stay for a Van User, a Van Manager, a System Manager or anyone with a van code;
+anyone else on a site with approvals gets an approvals-only app). They grant
+nothing: every endpoint above checks on the server.
+
+`steelforce/approvals_parity.py` is not an endpoint: it is a developer check run
+from `bench execute` that compares these lists with PM's own for one user.
+
+### Approval notifications (Web Push) — 3 endpoints and one hook
+
+`steelforce.approvals_push` lets a browser that opted in be told when a new PM
+Workflow Action reaches its user. None of the three is guest reachable
+(`_session_user()` refuses Guest), and the user is always the session user:
+no endpoint takes a user as an argument.
+
+| Endpoint | Verb | Scoped by |
+| --- | --- | --- |
+| `approvals_push.push_config` | GET | **Session user**: whether push is on for this site, the public VAPID key (public by design) and whether the given endpoint is stored for the caller. |
+| `approvals_push.push_subscribe` | POST | **Session user**: stores or moves one subscription to the caller (the same device with another person signed in). The endpoint must be https, at most 1000 characters and on a known browser push service (FCM, Mozilla, Apple, Windows), so a user cannot make the server POST to an address of their choosing; keys are length- and character-checked; at most 10 per user. |
+| `approvals_push.push_unsubscribe` | POST | **Session user**: deletes only the caller's own row for that endpoint. |
+
+- The "Vansale Push Subscription" DocType is System Manager only; the endpoints
+  write it with `ignore_permissions=True` after fixing the user to the session.
+- `notify_new_action` (hook `PM Workflow Action` `after_insert`) never raises into
+  PM's save and queues `send_for_action`. The worker pushes only to opted-in,
+  enabled System Users that PM's `_can_act_on` lets act on the action (a System
+  Manager who opted in therefore hears about everything, as their inbox lists),
+  never for a hidden type. Only the document type and name leave the server, and
+  only for a recipient who may read that document; anyone else gets a generic line.
+- The VAPID private key lives in the site config (`vansale_vapid_private_key`),
+  never in a response or a log; the VAPID subject is the site's https URL, never a
+  person's email. `setup_keys(force=1)` deletes every subscription.
+- The service worker follows a notification's link only if it is a path under
+  `/vansale/` on the same origin. Every logout path drops the device's
+  subscription (best effort), so a signed-out device stops receiving the
+  previous user's approvals.
 
 ---
 

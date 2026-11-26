@@ -1,12 +1,17 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { totalPending } from "@/offline/queue";
+import { useConfirmStore } from "@/stores/confirm";
+import { computed, onMounted, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { changePin, loginWithPin, setupPin } from "@/api/auth";
 import { configDefaults } from "@/api/me";
+import { useApprovalsStore } from "@/stores/approvals";
+import { usePushStore } from "@/stores/push";
 import { useSessionStore } from "@/stores/session";
 import { ApiError, NetworkError } from "@/app/frappe";
+import { authStyleClass, useBranding } from "@/app/branding";
 import { isOnline } from "@/app/online";
-import { canUnlockOffline, forgetPin, rememberPin, verifyPinOffline } from "@/app/pin-offline";
+import { canUnlockOffline, rememberPin, verifyPinOffline } from "@/app/pin-offline";
 import { useToastStore } from "@/stores/toasts";
 import Icon from "@/components/Icon.vue";
 import BrandMark from "@/components/BrandMark.vue";
@@ -14,6 +19,8 @@ import BrandMark from "@/components/BrandMark.vue";
 const router = useRouter();
 const route = useRoute();
 const session = useSessionStore();
+const approvals = useApprovalsStore();
+const push = usePushStore();
 const toasts = useToastStore();
 
 if (!session.email) {
@@ -43,6 +50,9 @@ const busy = ref(false);
 const shake = ref(false);
 
 const PIN_LEN = 4;
+
+const { branding, refreshBranding } = useBranding();
+onMounted(() => void refreshBranding());
 
 const heading = computed(() => {
   if (mode.value === "unlock") return "Enter PIN";
@@ -173,10 +183,30 @@ async function unlockOffline(email: string) {
   pin.value = "";
 }
 
-function signInAgain() {
-  forgetPin();
+async function signInAgain() {
+  // Work still queued on this phone stays theirs: it is sent only when the
+  // same user signs in again (never as the next one). Say so first.
+  const pending = await totalPending();
+  if (pending > 0) {
+    const ok = await useConfirmStore().ask({
+      title: "Unsent work on this phone",
+      message: `${pending} item${pending === 1 ? "" : "s"} have not reached the server yet. They will be sent when this user signs in again.`,
+      confirmText: "Sign in anyway",
+    });
+    if (!ok) return;
+  }
+  // The offline PIN hash is kept: the login screen drops it if the server has
+  // no PIN any more or another user signs in, and a password sign-in cannot
+  // make a new one (it never sees the PIN).
+  // The approvals held in memory (and the poll) are the previous user's: they go with them.
+  approvals.reset();
+  // Nor may this device keep receiving their approvals; best effort, so the sign-in screen never waits for it.
+  void push.detach();
+  push.reset();
   session.logout();
-  void router.replace({ name: "login" });
+  // `from=pin` tells the login screen the password replaces the PIN, so a
+  // user who already has a PIN is not asked for it again.
+  void router.replace({ name: "login", query: { from: "pin" } });
 }
 
 function cancelChange() {
@@ -200,7 +230,7 @@ const cta = computed(() => {
 </script>
 
 <template>
-  <div class="auth-wrap" @keydown="onKey" tabindex="-1">
+  <div class="auth-wrap" :class="authStyleClass(branding.style)" @keydown="onKey" tabindex="-1">
     <div class="auth">
       <div class="brand">
         <div class="brand-mark"><BrandMark :size="24" /></div>

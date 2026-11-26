@@ -1,6 +1,9 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
+import { useI18n } from "vue-i18n";
 import { useRouter } from "vue-router";
+import { approvalsOnly } from "@/features/approvals/inbox";
+import { useApprovalsStore } from "@/stores/approvals";
 import { useSessionStore } from "@/stores/session";
 import {
   todaySales,
@@ -19,6 +22,8 @@ import CustomerName from "@/components/CustomerName.vue";
 
 const router = useRouter();
 const session = useSessionStore();
+const approvals = useApprovalsStore();
+const { t } = useI18n();
 
 const sales = ref<TodaySales | null>(null);
 const collection = ref<TodayCollection | null>(null);
@@ -86,7 +91,24 @@ async function load() {
   void warmCaches({ warehouse: session.defaultWarehouse ?? undefined }).catch(() => {});
 }
 
-onMounted(load);
+// A user with no van setup has no Home: it reads van endpoints. The router
+// sends them to Approvals once their settings are known; this covers the
+// start-up where the settings arrive after Home has opened, and keeps Home
+// from reading anything before that.
+onMounted(async () => {
+  if (!session.defaults) await session.refreshDefaults();
+  if (approvalsOnly(session)) {
+    void router.replace({ name: "approvals" });
+    return;
+  }
+  void load();
+});
+watch(
+  () => approvalsOnly(session),
+  (only) => {
+    if (only) void router.replace({ name: "approvals" });
+  },
+);
 
 function fmt(n: number | undefined | null): string {
   return new Intl.NumberFormat(undefined, { maximumFractionDigits: session.currencyPrecision }).format(Number(n) || 0);
@@ -102,13 +124,16 @@ const timeOfDay = computed(() => {
   return "Good evening";
 });
 
-interface Quick { icon: "invoice" | "payment" | "customer" | "route" | "stock" | "receipt"; label: string; to: string; tone: string }
+interface Quick { icon: "invoice" | "payment" | "customer" | "route" | "stock" | "receipt" | "user" | "bag"; label: string; to: string; tone: string }
 // Fourth card mirrors the fourth nav tab: route-driven vans get their stop
 // list, free-selling vans get what is on board instead.
 const quickActions = computed<Quick[]>(() => [
   { icon: "invoice", label: "New invoice", to: "invoice-new", tone: "primary" },
   { icon: "payment", label: "Collect payment", to: "payment-new", tone: "success" },
   { icon: "customer", label: "Customers", to: "customers", tone: "info" },
+  { icon: "user", label: "Leads", to: "leads", tone: "info" },
+  { icon: "receipt", label: "Quotation", to: "quotations", tone: "primary" },
+  { icon: "bag", label: "Sales order", to: "orders", tone: "success" },
   session.routeEnabled
     ? { icon: "route", label: "Today's route", to: "route-today", tone: "warning" }
     : { icon: "stock", label: "Van stock", to: "van-stock", tone: "warning" },
@@ -166,6 +191,29 @@ function onActivityClick(row: ActivityRow) {
           <SarSymbol :code="currency" />{{ fmt(sales?.returned) }} returned
         </span>
       </div>
+    </section>
+
+    <section
+      v-if="session.approvalsEnabled"
+      class="card approvals-card"
+      role="button"
+      tabindex="0"
+      @click="router.push({ name: 'approvals' })"
+      @keyup.enter="router.push({ name: 'approvals' })"
+    >
+      <span class="avatar" data-kind="approval"><Icon name="approval" :size="20" /></span>
+      <div class="approvals-main">
+        <strong>{{ t("approvalsInbox.home.title") }}</strong>
+        <span v-if="approvals.counts" class="muted xsmall">
+          {{
+            approvals.needsYou > 0
+              ? t("approvalsInbox.home.waiting", { count: approvals.needsYou })
+              : t("approvalsInbox.home.none")
+          }}
+        </span>
+      </div>
+      <span v-if="approvals.needsYou > 0" class="pill" data-tone="danger">{{ approvals.needsYou }}</span>
+      <Icon name="chevron-right" :size="18" class="muted chev" />
     </section>
 
     <section class="quick">
@@ -359,6 +407,21 @@ function onActivityClick(row: ActivityRow) {
   background: var(--primary-soft); color: var(--primary);
 }
 .avatar[data-kind="payment"] { background: var(--success-soft); color: var(--success); }
+.avatar[data-kind="approval"] { background: var(--warning-soft); color: var(--warning); }
+
+.approvals-card {
+  display: grid;
+  grid-template-columns: auto 1fr auto auto;
+  gap: 0.7rem;
+  align-items: center;
+  cursor: pointer;
+  transition: transform var(--dur-fast) var(--ease);
+}
+.approvals-card:active { transform: scale(0.99); }
+.approvals-card:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+.approvals-main { display: flex; flex-direction: column; min-width: 0; gap: 0.1rem; }
+.approvals-card .chev { transform: scaleX(var(--flip, 1)); }
+[dir="rtl"] .approvals-card .chev { --flip: -1; }
 .activity-main { display: flex; flex-direction: column; min-width: 0; gap: 0.1rem; }
 .activity-amt { font-variant-numeric: tabular-nums; }
 .truncate { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

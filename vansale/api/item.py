@@ -56,6 +56,13 @@ def check_item_allowed(item_code: str) -> None:
     groups = permitted_item_groups()
     if groups is not None and frappe.db.get_value("Item", item_code, "item_group") not in groups:
         frappe.throw(_("You are not permitted to sell item {0}").format(item_code), frappe.PermissionError)
+    # Steel Force: only the company's items (sf_trading hides the rest from branch users).
+    from vansale import steelforce
+    from vansale.api.invoice import _user_company
+
+    company = _user_company()
+    if not steelforce.item_in_company(item_code, company):
+        frappe.throw(_("Item {0} is not set up for {1}").format(item_code, company), frappe.PermissionError)
 
 
 def warehouse_stock(warehouse: str, item_codes: list[str] | None = None) -> dict[str, dict]:
@@ -165,6 +172,16 @@ def list_mine(
         if not groups:
             return []
         filters["item_group"] = ["in", list(groups)]
+    # Steel Force: only the company's items, as sf_trading shows branch users.
+    from vansale import steelforce
+    from vansale.api.invoice import _user_company
+
+    company_codes = steelforce.company_items(_user_company())
+    if company_codes is not None:
+        names = company_codes & set(filters["name"][1]) if "name" in filters else company_codes
+        if not names:
+            return []
+        filters["name"] = ["in", list(names)]
     rows = frappe.get_all(
         "Item",
         filters=filters,
@@ -231,19 +248,26 @@ def _customer_price_list(customer: Optional[str]) -> Optional[str]:
     if customer:
         cust_pl = frappe.db.get_value("Customer", customer, "default_price_list")
         if cust_pl:
-            return cust_pl
+            return _branch_list(cust_pl)
 
     van_pl = current_user_van_price_list()
     if van_pl:
-        return van_pl
+        return _branch_list(van_pl)
 
     if customer:
         cg = frappe.db.get_value("Customer", customer, "customer_group")
         if cg:
             cg_pl = frappe.db.get_value("Customer Group", cg, "default_price_list")
             if cg_pl:
-                return cg_pl
-    return frappe.db.get_single_value("Selling Settings", "selling_price_list")
+                return _branch_list(cg_pl)
+    return _branch_list(frappe.db.get_single_value("Selling Settings", "selling_price_list"))
+
+
+def _branch_list(price_list: Optional[str]) -> Optional[str]:
+    """Steel Force: a list the van's branch may use (else its default)."""
+    from vansale import steelforce
+
+    return steelforce.branch_selling_list(price_list)
 
 
 def _item_price(
@@ -257,7 +281,7 @@ def _item_price(
     """
     rows = frappe.db.sql(
         """
-        SELECT price_list_rate FROM `tabItem Price`
+        SELECT name, price_list_rate FROM `tabItem Price`
         WHERE item_code = %(item_code)s
           AND price_list = %(price_list)s
           AND selling = 1
@@ -266,7 +290,7 @@ def _item_price(
           AND IFNULL(valid_from, '1900-01-01') <= %(today)s
           AND IFNULL(valid_upto, '2999-12-31') >= %(today)s
         ORDER BY valid_from DESC, modified DESC
-        LIMIT 1
+        LIMIT 20
         """,
         {
             "item_code": item_code,
@@ -277,7 +301,12 @@ def _item_price(
             "today": nowdate(),
         },
     )
-    return flt(rows[0][0]) if rows else None
+    # Steel Force: prices limited to other branches are not this van's; the
+    # branch's own price comes before the general one (sf_trading's rule).
+    from vansale import steelforce
+
+    rows = steelforce.branch_prices(list(rows))
+    return flt(rows[0][1]) if rows else None
 
 
 def _fetch_price(
@@ -336,6 +365,7 @@ def detail(item_code: str, customer: Optional[str] = None) -> dict:
         if uom == doc.stock_uom:
             stock_uom_rate = rate
         uoms.append({"uom": uom, "conversion_factor": conv, "price_list_rate": flt(rate)})
+    _add_min_rates(item_code, uoms, price_list)
 
     return {
         "name": doc.name,
@@ -356,22 +386,45 @@ def detail(item_code: str, customer: Optional[str] = None) -> dict:
 
 
 @frappe.whitelist(methods=["GET"])
-def price_for(item_code: str, customer: Optional[str] = None, uom: Optional[str] = None) -> dict:
-    """Light-weight price lookup used when the user changes UOM on a line."""
+def price_for(
+    item_code: str, customer: Optional[str] = None, uom: Optional[str] = None, price_list: Optional[str] = None
+) -> dict:
+    """Light-weight price lookup used when the user changes UOM on a line, or
+    prices a line from its own list (`price_list`, an offer list of the branch)."""
+    from vansale import steelforce
+
     if not item_code:
         frappe.throw(_("Item code required"))
     doc = frappe.get_doc("Item", item_code)
     uom = uom or doc.stock_uom
     conv = dict(_item_uoms(doc)).get(uom, 1.0)
-    price_list = _customer_price_list(customer)
+    price_list = steelforce.row_price_list(price_list) or _customer_price_list(customer)
     rate, is_customer = _fetch_price(item_code, price_list, uom, doc.stock_uom, conv, customer)
+    row = {"uom": uom, "conversion_factor": conv}
+    _add_min_rates(item_code, [row], price_list)
     return {
         "item_code": item_code,
         "uom": uom,
         "price_list": price_list,
         "price_list_rate": flt(rate),
         "customer_specific": is_customer,
+        "min_rate": row.get("min_rate"),
     }
+
+
+def _add_min_rates(item_code: str, uoms: list[dict], price_list: Optional[str]) -> None:
+    """The lowest rate the site accepts per UOM (`min_rate`), where it has such
+    a rule (Steel Force: sf_trading's minimum selling price). Unset elsewhere."""
+    from vansale import steelforce
+    from vansale.api.me import van_default
+
+    if not steelforce.is_active():
+        return
+    warehouse, branch = van_default("Warehouse"), van_default("Branch")
+    for row in uoms:
+        floor = steelforce.min_rate(item_code, row.get("conversion_factor") or 1, price_list, warehouse, branch)
+        if floor:
+            row["min_rate"] = floor
 
 
 @frappe.whitelist(methods=["GET"])
@@ -396,3 +449,193 @@ def stock_balance(warehouse: str, limit: int = 500) -> list[dict]:
         r["actual_qty"] = stock.get(r["item_code"], {}).get("qty", 0.0)
     add_sales_units(rows)
     return rows
+
+
+# ─── Selling help on a line: last price, stock (the desk's Last Selling Rate
+#     and Stock Availability, for the salesman) ─────────────────────────────
+
+
+def _codes(item_codes) -> list[str]:
+    if not item_codes:
+        return []
+    if isinstance(item_codes, str):
+        item_codes = frappe.parse_json(item_codes)
+    return [str(c) for c in item_codes if c][:200]
+
+
+def _sale_scope() -> tuple[list[str], dict, Optional[str]]:
+    """The invoices a salesman may learn prices from: submitted sales (no
+    returns) of the user's company, within the companies / cost centres their
+    User Permissions allow. On Steel Force, as the desk's Last Selling Rate:
+    the salesman's branch (cost centre) only. Third value: that cost centre,
+    or None for the whole company."""
+    from vansale import steelforce
+    from vansale.api.invoice import _user_company
+
+    where = ["si.docstatus = 1", "si.is_return = 0", "si.company = %(company)s"]
+    params: dict = {"company": _user_company()}
+    sf = steelforce.sale_history_conditions()
+    extra = (*_permitted_sale_conditions(), None) if sf is None else sf
+    where.extend(extra[0])
+    params.update(extra[1])
+    return where, params, extra[2]
+
+
+def _permitted_sale_conditions() -> tuple[list[str], dict]:
+    from frappe.core.doctype.user_permission.user_permission import get_permitted_documents
+
+    where: list[str] = []
+    params: dict = {}
+    companies = get_permitted_documents("Company")
+    if companies:
+        where.append("si.company IN %(permitted_companies)s")
+        params["permitted_companies"] = tuple(companies)
+    cost_centers = get_permitted_documents("Cost Center")
+    if cost_centers:
+        where.append(
+            "(sii.cost_center IN %(permitted_cost_centers)s "
+            "OR (IFNULL(sii.cost_center, '') = '' AND si.cost_center IN %(permitted_cost_centers)s))"
+        )
+        params["permitted_cost_centers"] = tuple(cost_centers)
+    return where, params
+
+
+_SALE_COLUMNS = """sii.item_code, sii.rate, sii.uom, sii.qty, sii.conversion_factor,
+    si.posting_date, si.name AS invoice, si.customer, si.customer_name"""
+
+
+def _sale_row(r) -> dict:
+    return {
+        "rate": flt(r.rate),
+        "uom": r.uom,
+        "qty": flt(r.qty),
+        "conversion_factor": flt(r.conversion_factor) or 1.0,
+        "posting_date": str(r.posting_date),
+        "invoice": r.invoice,
+        "customer": r.customer,
+        "customer_name": r.customer_name or r.customer,
+    }
+
+
+@frappe.whitelist(methods=["GET"])
+def last_sales(customer: str, item_codes=None) -> dict:
+    """Item → the last sale of it to this customer (rate, unit, qty, date)."""
+    codes = _codes(item_codes)
+    if not customer or not codes:
+        return {}
+    check_read("Customer", customer)
+    where, params, _scope = _sale_scope()
+    where += ["si.customer = %(customer)s", "sii.item_code IN %(codes)s"]
+    params.update(customer=customer, codes=tuple(codes))
+    rows = frappe.db.sql(
+        f"""SELECT * FROM (
+              SELECT {_SALE_COLUMNS},
+                ROW_NUMBER() OVER (PARTITION BY sii.item_code
+                  ORDER BY si.posting_date DESC, si.posting_time DESC, si.name DESC, sii.idx ASC) AS rn
+              FROM `tabSales Invoice Item` sii
+              JOIN `tabSales Invoice` si ON si.name = sii.parent
+              WHERE {" AND ".join(where)}
+            ) t WHERE t.rn = 1""",
+        params,
+        as_dict=True,
+    )
+    return {r.item_code: _sale_row(r) for r in rows}
+
+
+@frappe.whitelist(methods=["GET"])
+def stock_levels(item_codes=None, warehouse: Optional[str] = None) -> dict:
+    """Item → stock in the salesman's warehouse (stock unit), and whether the
+    item keeps stock at all — for the "only N in stock" warning on a line."""
+    from vansale.api.invoice import _get_default_warehouse, _user_company
+
+    codes = _codes(item_codes)
+    wh = warehouse or _get_default_warehouse(_user_company())
+    if not codes or not wh:
+        return {}
+    balances = warehouse_stock(wh, codes)
+    stocked = set(frappe.get_all("Item", {"name": ["in", codes], "is_stock_item": 1}, pluck="name"))
+    return {
+        c: {"qty": balances.get(c, {}).get("qty", 0.0), "is_stock_item": int(c in stocked)}
+        for c in codes
+    }
+
+
+@frappe.whitelist(methods=["GET"])
+def insight(item_code: str, customer: Optional[str] = None) -> dict:
+    """One item, on tap: its last sales to this customer, its recent sales to
+    anyone (a year back), and its stock in every warehouse of the company."""
+    if not item_code:
+        frappe.throw(_("Item required"))
+    check_item_allowed(item_code)
+    if customer:
+        check_read("Customer", customer)
+    where, params, scope = _sale_scope()
+    params["item"] = item_code
+    order = "ORDER BY si.posting_date DESC, si.posting_time DESC, si.name DESC LIMIT %(n)s"
+
+    def sales(extra: list[str], extra_params: dict, n: int) -> list[dict]:
+        rows = frappe.db.sql(
+            f"""SELECT {_SALE_COLUMNS}
+                FROM `tabSales Invoice Item` sii
+                JOIN `tabSales Invoice` si ON si.name = sii.parent
+                WHERE {" AND ".join(where + ["sii.item_code = %(item)s"] + extra)} {order}""",
+            {**params, **extra_params, "n": n},
+            as_dict=True,
+        )
+        return [_sale_row(r) for r in rows]
+
+    to_customer = sales(["si.customer = %(customer)s"], {"customer": customer}, 5) if customer else []
+    others = ["si.posting_date >= %(since)s"] + (["si.customer != %(customer)s"] if customer else [])
+    recent = sales(others, {"since": frappe.utils.add_days(nowdate(), -365), "customer": customer}, 6)
+
+    item = frappe.db.get_value("Item", item_code, ["stock_uom", "is_stock_item"], as_dict=True) or {}
+    unit = sales_units([item_code]).get(item_code)
+    return {
+        "item_code": item_code,
+        "stock_uom": item.get("stock_uom"),
+        "sales_uom": unit[0] if unit else None,
+        "sales_cf": unit[1] if unit else None,
+        "is_stock_item": cint(item.get("is_stock_item")),
+        # Sales shown are this cost centre's (the branch) only; None = the whole company.
+        "sales_scope": scope,
+        "to_customer": to_customer,
+        "recent": recent,
+        "warehouses": _stock_by_warehouse(item_code) if cint(item.get("is_stock_item")) else [],
+    }
+
+
+def _stock_by_warehouse(item_code: str) -> list[dict]:
+    """Stock in each warehouse of the company holding some, the salesman's own
+    first (always listed). Steel Force: sf_trading's Stock Availability."""
+    from vansale import steelforce
+    from vansale.api.invoice import _get_default_warehouse, _user_company
+
+    company = _user_company()
+    own = _get_default_warehouse(company)
+    rows = steelforce.warehouse_stock(item_code, company, own)
+    if rows is None:
+        rows = [
+            {"warehouse": r.warehouse, "warehouse_name": r.warehouse_name, "qty": flt(r.actual_qty)}
+            for r in frappe.db.sql(
+                """SELECT b.warehouse, w.warehouse_name, b.actual_qty
+                   FROM `tabBin` b JOIN `tabWarehouse` w ON w.name = b.warehouse
+                   WHERE b.item_code = %(item)s AND w.company = %(company)s
+                     AND w.is_group = 0 AND w.disabled = 0
+                     AND (b.actual_qty > 0 OR b.warehouse = %(own)s)""",
+                {"item": item_code, "company": company, "own": own or ""},
+                as_dict=True,
+            )
+        ]
+    if own:
+        # The salesman's own figure as the catalog shows it ("Stock figures from").
+        own_qty = warehouse_stock(own, [item_code]).get(item_code, {}).get("qty", 0.0)
+        rows = [r for r in rows if r["warehouse"] != own]
+        rows.insert(0, {
+            "warehouse": own,
+            "warehouse_name": frappe.db.get_value("Warehouse", own, "warehouse_name") or own,
+            "qty": own_qty,
+        })
+    for r in rows:
+        r["own"] = r["warehouse"] == own
+    rest = sorted(rows[1:] if own else rows, key=lambda r: -r["qty"])
+    return (rows[:1] if own else []) + rest[:15]

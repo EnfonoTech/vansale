@@ -1,0 +1,17 @@
+{
+  "approvalsPush": {
+    "label": "Approval notifications",
+    "status": {
+      "checking": "Checking",
+      "off": "Off",
+      "on": "On",
+      "working": "Working",
+      "blocked": "Blocked in browser settings",
+      "unsupported": "Not supported on this device",
+      "unsupportedIos": "Add this app to your Home Screen first (iOS 16.4 or later)",
+      "needsConnection": "Needs a connection",
+      "turnOnFailed": "Could not turn on. Try again",
+      "turnOffFailed": "Could not turn off. Try again"
+    }
+  }
+}

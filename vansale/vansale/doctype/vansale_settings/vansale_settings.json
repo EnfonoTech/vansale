@@ -18,6 +18,12 @@
   "default_payment_type",
   "confirm_before_submit",
   "stock_source",
+  "section_break_selling_flow",
+  "update_stock_on_invoice",
+  "quotation_next_step",
+  "column_break_selling_flow",
+  "credit_needs_limit",
+  "ask_driver",
   "section_break_cash_sale",
   "cash_sale_posting",
   "cash_payment_entry_status",
@@ -28,8 +34,10 @@
   "allow_delete_draft_payment",
   "section_break_print",
   "invoice_print_format",
+  "quotation_print_format",
   "column_break_print",
   "receipt_print_format",
+  "sales_order_print_format",
   "section_break_print_behaviour",
   "direct_print",
   "print_after_submit",
@@ -42,10 +50,14 @@
   "pwa_app_name",
   "column_break_install",
   "pwa_icon",
+  "login_logo",
+  "login_style",
   "section_break_access",
   "office_roles",
   "section_break_customer",
   "customer_name_2_field",
+  "cr_number_field",
+  "customer_scope",
   "section_break_help",
   "help_html"
  ],
@@ -194,6 +206,12 @@
    "options": "Print Format"
   },
   {
+   "fieldname": "quotation_print_format",
+   "fieldtype": "Link",
+   "label": "Quotation print format",
+   "options": "Print Format"
+  },
+  {
    "fieldname": "column_break_print",
    "fieldtype": "Column Break"
   },
@@ -201,6 +219,12 @@
    "fieldname": "receipt_print_format",
    "fieldtype": "Link",
    "label": "Receipt print format",
+   "options": "Print Format"
+  },
+  {
+   "fieldname": "sales_order_print_format",
+   "fieldtype": "Link",
+   "label": "Sales Order print format",
    "options": "Print Format"
   },
   {
@@ -251,7 +275,7 @@
   {
    "fieldname": "section_break_install",
    "fieldtype": "Section Break",
-   "label": "Install on phone (web app)"
+   "label": "Branding and install on phone"
   },
   {
    "fieldname": "pwa_app_name",
@@ -266,6 +290,20 @@
    "fieldname": "pwa_icon",
    "fieldtype": "Attach Image",
    "label": "App icon"
+  },
+  {
+   "description": "Shown on the sign-in and PIN screens. Leave blank to use the App icon. Upload it as a public file.",
+   "fieldname": "login_logo",
+   "fieldtype": "Attach Image",
+   "label": "Login logo"
+  },
+  {
+   "default": "Classic",
+   "description": "How the sign-in and PIN screens look.",
+   "fieldname": "login_style",
+   "fieldtype": "Select",
+   "label": "Login style",
+   "options": "Classic\nSplit\nDark glass"
   },
   {
    "fieldname": "section_break_access",
@@ -296,12 +334,58 @@
    "fieldname": "help_html",
    "fieldtype": "HTML",
    "options": "<p class=\"text-muted small\">Override order, most specific wins: <b>Assigned User row</b> &rarr; <b>Vansale Configuration (van)</b> &rarr; these global settings. Anything left on <i>Follow Global</i> falls through to here.</p>"
+  },
+  {
+   "fieldname": "section_break_selling_flow",
+   "fieldtype": "Section Break",
+   "label": "Selling flow"
+  },
+  {
+   "fieldname": "update_stock_on_invoice",
+   "fieldtype": "Check",
+   "label": "Invoice updates stock (sale from the van)",
+   "default": "1"
+  },
+  {
+   "fieldname": "quotation_next_step",
+   "fieldtype": "Select",
+   "label": "Quotation becomes",
+   "options": "Sales Order\nSales Invoice\nBoth",
+   "default": "Sales Order"
+  },
+  {
+   "fieldname": "column_break_selling_flow",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "cr_number_field",
+   "fieldtype": "Data",
+   "label": "CR number field"
+  },
+  {
+   "default": "Own customers",
+   "fieldname": "customer_scope",
+   "fieldtype": "Select",
+   "label": "Customers a salesman finds",
+   "options": "Own customers\nOwn list, search all"
+  },
+  {
+   "fieldname": "credit_needs_limit",
+   "fieldtype": "Check",
+   "label": "Credit sale only for customers with a credit limit",
+   "default": "0"
+  },
+  {
+   "fieldname": "ask_driver",
+   "fieldtype": "Check",
+   "label": "Ask for the delivery person on cash sales",
+   "default": "0"
   }
  ],
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-11-10 12:00:00.000000",
+ "modified": "2026-11-21 12:00:00.000000",
  "modified_by": "Administrator",
  "module": "Vansale",
  "name": "Vansale Settings",

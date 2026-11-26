@@ -11,23 +11,40 @@
  * build targets use different bases (`/assets/vansale/spa/` for the
  * Frappe-served PWA, `./` for the Capacitor WebView).
  */
-import { ref } from "vue";
+import { computed, ref, watch } from "vue";
+import { useBranding } from "@/app/branding";
 import Icon from "./Icon.vue";
 
 const props = withDefaults(defineProps<{ size?: number }>(), { size: 28 });
 
-const logoUrl = `${import.meta.env.BASE_URL}brand-logo.png`;
-const useFallback = ref(false);
+const { branding } = useBranding();
+const buildLogoUrl = `${import.meta.env.BASE_URL}brand-logo.png`;
+
+// The Login logo from Vansale Settings first, then the logo staged at build time,
+// then the built-in truck: a file that fails to load steps down to the next.
+const configuredFailed = ref(false);
+const buildFailed = ref(false);
+watch(() => branding.value.logoUrl, () => { configuredFailed.value = false; });
+
+const logoUrl = computed(() => {
+  if (branding.value.logoUrl && !configuredFailed.value) return branding.value.logoUrl;
+  return buildFailed.value ? "" : buildLogoUrl;
+});
+
+function onLogoError() {
+  if (branding.value.logoUrl && !configuredFailed.value) configuredFailed.value = true;
+  else buildFailed.value = true;
+}
 </script>
 
 <template>
-  <Icon v-if="useFallback" name="truck" :size="props.size" />
+  <Icon v-if="!logoUrl" name="truck" :size="props.size" />
   <img
     v-else
     :src="logoUrl"
     alt=""
     class="brand-logo"
-    @error="useFallback = true"
+    @error="onLogoError"
   />
 </template>
 
@@ -36,9 +53,14 @@ const useFallback = ref(false);
    rounded frame, so insetting them inside another tinted tile reads as a
    mistake. `inherit` picks up the tile's radius; parents set overflow. */
 .brand-logo {
+  /* A square box whatever the file's shape: `height: 100%` does not resolve inside
+     the tile's grid, so a taller logo (the Steel Force emblem is 512x593) ran past
+     the tile and its bottom was clipped. The white shows around a logo that is not
+     square; a logo with its own background fills the box. */
   width: 100%;
-  height: 100%;
+  aspect-ratio: 1 / 1;
   object-fit: contain;
+  background: #fff;
   border-radius: inherit;
   display: block;
 }

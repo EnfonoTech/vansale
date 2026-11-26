@@ -1,0 +1,92 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "field:endpoint_hash",
+ "creation": "2026-11-19 00:00:00",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "endpoint_hash",
+  "user",
+  "endpoint",
+  "p256dh",
+  "auth",
+  "user_agent",
+  "last_ok",
+  "failures"
+ ],
+ "fields": [
+  {
+   "fieldname": "endpoint_hash",
+   "fieldtype": "Data",
+   "label": "Endpoint Hash",
+   "unique": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "user",
+   "fieldtype": "Link",
+   "label": "User",
+   "options": "User",
+   "reqd": 1,
+   "in_list_view": 1,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "endpoint",
+   "fieldtype": "Long Text",
+   "label": "Endpoint",
+   "reqd": 1
+  },
+  {
+   "fieldname": "p256dh",
+   "fieldtype": "Small Text",
+   "label": "P256DH Key",
+   "reqd": 1
+  },
+  {
+   "fieldname": "auth",
+   "fieldtype": "Small Text",
+   "label": "Auth Secret",
+   "reqd": 1
+  },
+  {
+   "fieldname": "user_agent",
+   "fieldtype": "Small Text",
+   "label": "User Agent"
+  },
+  {
+   "fieldname": "last_ok",
+   "fieldtype": "Datetime",
+   "label": "Last Delivered",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "failures",
+   "fieldtype": "Int",
+   "label": "Consecutive Failures",
+   "default": "0",
+   "in_list_view": 1
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-11-19 00:00:00",
+ "modified_by": "Administrator",
+ "module": "Vansale",
+ "name": "Vansale Push Subscription",
+ "naming_rule": "By fieldname",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "read": 1,
+   "write": 1,
+   "delete": 1,
+   "export": 1,
+   "role": "System Manager"
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

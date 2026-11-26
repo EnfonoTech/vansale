@@ -1,0 +1,110 @@
+<style>
+  .row{display:flex;gap:22px;flex-wrap:wrap;align-items:flex-start}
+  .opt{cursor:pointer;border-radius:18px;padding:8px;border:3px solid transparent;transition:.15s}
+  .opt.selected{border-color:#4f7cff;background:rgba(79,124,255,.08)}
+  .opt h3{margin:10px 6px 2px}
+  .opt p{margin:0 6px 6px;font-size:13px;opacity:.8;max-width:290px}
+  .phone{width:290px;height:560px;background:#f4f6f9;border-radius:26px;border:6px solid #1c2230;overflow:hidden;position:relative;color:#1b2333;font:13px/1.35 -apple-system,Segoe UI,Roboto,sans-serif;display:flex;flex-direction:column}
+  .bar{background:#1c2230;color:#fff;padding:12px 14px 10px;display:flex;justify-content:space-between;align-items:center}
+  .bar b{font-size:16px}
+  .bar .badge{background:#ff6b4a;border-radius:10px;padding:1px 8px;font-size:12px;font-weight:700}
+  .tabs{display:flex;background:#fff;border-bottom:1px solid #e3e7ee}
+  .tabs span{flex:1;text-align:center;padding:9px 0;font-size:12px;color:#6b7686}
+  .tabs span.on{color:#1c2230;font-weight:700;border-bottom:3px solid #4f7cff}
+  .chips{display:flex;gap:6px;padding:8px 10px;overflow:hidden;background:#fff}
+  .chip{background:#eef1f6;border-radius:14px;padding:3px 10px;font-size:11.5px;white-space:nowrap;color:#44506a}
+  .chip.on{background:#4f7cff;color:#fff}
+  .list{padding:8px 10px;display:flex;flex-direction:column;gap:8px;overflow:hidden;flex:1}
+  .card{background:#fff;border-radius:12px;padding:9px 10px 9px 12px;box-shadow:0 1px 2px rgba(20,30,50,.08);border-left:5px solid #cfd6e2;position:relative}
+  .card.hi{border-left-color:#e5484d}.card.md{border-left-color:#f5a524}.card.lo{border-left-color:#2fa56a}
+  .card .t{display:flex;justify-content:space-between;gap:6px;font-weight:700}
+  .card .amt{white-space:nowrap}
+  .card .s{color:#566179;margin-top:1px;font-size:12px}
+  .card .m{display:flex;gap:6px;margin-top:6px;align-items:center;flex-wrap:wrap}
+  .tag{font-size:10.5px;background:#eef1f6;border-radius:8px;padding:1px 7px;color:#44506a}
+  .tag.age{background:#fdeceb;color:#b3282d}
+  .grp{display:flex;justify-content:space-between;align-items:center;background:#e9edf4;border-radius:10px;padding:8px 10px;font-weight:700}
+  .grp small{font-weight:600;color:#566179}
+  .qa{display:flex;gap:6px;margin-top:8px}
+  .qa i{flex:1;text-align:center;font-style:normal;border-radius:8px;padding:6px 0;font-weight:700;font-size:12px}
+  .qa .no{background:#fdeceb;color:#b3282d}.qa .yes{background:#e3f6ec;color:#1b7a4c}
+  .nav{display:flex;background:#fff;border-top:1px solid #e3e7ee}
+  .nav span{flex:1;text-align:center;padding:8px 0 9px;font-size:10.5px;color:#7b8699}
+  .nav span.on{color:#4f7cff;font-weight:700}
+  .big{background:#fff;border-radius:16px;margin:10px;padding:14px;box-shadow:0 4px 14px rgba(20,30,50,.12);flex:1;display:flex;flex-direction:column}
+  .big .amtbig{font-size:24px;font-weight:800;margin:8px 0 2px}
+  .kv{display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px dashed #e3e7ee;font-size:12.5px}
+  .kv span:first-child{color:#6b7686}
+  .act{display:flex;gap:8px;padding:10px}
+  .act i{flex:1;text-align:center;font-style:normal;border-radius:12px;padding:12px 0;font-weight:800}
+  .act .no{background:#fdeceb;color:#b3282d}.act .yes{background:#1b7a4c;color:#fff}.act .skip{background:#eef1f6;color:#44506a;flex:.6}
+  .prog{height:5px;background:#e3e7ee;border-radius:3px;margin:8px 10px 0}.prog b{display:block;height:5px;width:25%;background:#4f7cff;border-radius:3px}
+  .sel{position:absolute;left:-1px;top:-1px}
+</style>
+
+<h2>Approvals inbox: which layout?</h2>
+<p class="subtitle">One approver can hold 60+ open items (Journal Entries mostly). Which layout lets them clear a queue fastest without approving blind? Sample data is invented.</p>
+
+<div class="row">
+
+  <div class="opt" data-choice="a" onclick="toggleSelect(this)">
+    <div class="phone">
+      <div class="bar"><b>Approvals</b><span class="badge">12</span></div>
+      <div class="tabs"><span class="on">To approve</span><span>Waiting</span><span>My requests</span><span>History</span></div>
+      <div class="list">
+        <div class="grp"><span>Journal Entry</span><small>6 ▾</small></div>
+        <div class="card hi"><div class="t"><span>ACC-JV-2026-02580</span><span class="amt">749.820</span></div><div class="s">Cheque clearing · Al Noor Trading</div><div class="m"><span class="tag age">3 days</span><span class="tag">Accounts Mgr</span></div></div>
+        <div class="card md"><div class="t"><span>ACC-JV-2026-02591</span><span class="amt">1,200.000</span></div><div class="s">Rent accrual · Dammam</div><div class="m"><span class="tag">1 day</span><span class="tag">Accounts Mgr</span></div></div>
+        <div class="grp"><span>Purchase Invoice</span><small>3 ▸</small></div>
+        <div class="grp"><span>Customer</span><small>1 ▸</small></div>
+        <div class="grp"><span>Sales Invoice return</span><small>2 ▸</small></div>
+      </div>
+      <div class="nav"><span class="on">Approvals</span><span>Sales</span><span>Customers</span><span>More</span></div>
+    </div>
+    <h3>A. Grouped by document type</h3>
+    <p>Sections collapse like folders. Good when the queue is huge and one type dominates. Costs an extra tap to reach urgent items of a small type.</p>
+  </div>
+
+  <div class="opt" data-choice="b" onclick="toggleSelect(this)">
+    <div class="phone">
+      <div class="bar"><b>Approvals</b><span class="badge">12</span></div>
+      <div class="tabs"><span class="on">To approve</span><span>Waiting</span><span>My requests</span><span>History</span></div>
+      <div class="chips"><span class="chip on">All 12</span><span class="chip">Accounts 6</span><span class="chip">Purchase 3</span><span class="chip">Sales 3</span></div>
+      <div class="list">
+        <div class="card hi"><div class="t"><span>Journal Entry</span><span class="amt">749.820</span></div><div class="s">ACC-JV-2026-02580 · Al Noor Trading</div><div class="m"><span class="tag age">3 days</span><span class="tag">High</span><span class="tag">Mohammed</span></div></div>
+        <div class="card hi"><div class="t"><span>Customer · credit</span><span class="amt">5,000</span></div><div class="s">Torbo Contracting · new credit limit</div><div class="m"><span class="tag age">2 days</span><span class="tag">High</span><span class="tag">Arathi</span></div></div>
+        <div class="card md"><div class="t"><span>Purchase Invoice</span><span class="amt">2,939.700</span></div><div class="s">ACC-PINV-2026-01044 · Hardware Source</div><div class="m"><span class="tag">1 day</span><span class="tag">Medium</span><span class="tag">Sijo</span></div></div>
+        <div class="card lo"><div class="t"><span>Sales return</span><span class="amt">522.850</span></div><div class="s">SINV-RET-00071 · Damaged</div><div class="m"><span class="tag">5 h</span><span class="tag">Low</span><span class="tag">Fahad</span></div></div>
+      </div>
+      <div class="nav"><span class="on">Approvals</span><span>Sales</span><span>Customers</span><span>More</span></div>
+    </div>
+    <h3>B. One list, urgency first, filter chips</h3>
+    <p>Everything sorted by priority then age. Colour bar = priority. Chips narrow by area. Tap a card to review, then decide on the detail screen. Long-press to select several for bulk approve.</p>
+  </div>
+
+  <div class="opt" data-choice="c" onclick="toggleSelect(this)">
+    <div class="phone">
+      <div class="bar"><b>Approve</b><span class="badge">3 / 12</span></div>
+      <div class="prog"><b></b></div>
+      <div class="big">
+        <div class="tag" style="align-self:flex-start">Purchase Invoice · 1 day</div>
+        <div class="amtbig">2,939.700 BHD</div>
+        <div style="color:#566179;margin-bottom:8px">Hardware Source Land · raised by Sijo</div>
+        <div class="kv"><span>Document</span><span>ACC-PINV-2026-01044</span></div>
+        <div class="kv"><span>Items</span><span>4 lines</span></div>
+        <div class="kv"><span>VAT</span><span>0.000</span></div>
+        <div class="kv"><span>Attachment</span><span>Supplier bill.pdf</span></div>
+        <div class="kv"><span>Your role</span><span>Purchase Manager</span></div>
+        <div style="margin-top:auto;color:#6b7686;font-size:11.5px">Swipe or tap Skip to leave it for later</div>
+      </div>
+      <div class="act"><i class="no">Reject</i><i class="skip">Skip</i><i class="yes">Approve</i></div>
+    </div>
+    <h3>C. Focus queue, one at a time</h3>
+    <p>Full-screen card with the facts and big Approve / Reject buttons, then the next one appears. Fastest for clearing, but no overview, and harder to find one specific document.</p>
+  </div>
+
+</div>
+
+<div class="section" style="margin-top:18px">
+  <p><b>My lean:</b> B as the inbox, with the one-at-a-time view (C) opened from it as "Review next" once you are inside a detail. A is the fallback if one type (Journal Entry) swamps everything else.</p>
+</div>

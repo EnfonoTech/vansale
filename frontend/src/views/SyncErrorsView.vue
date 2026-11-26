@@ -10,7 +10,7 @@
  * classify + age formatting + retry/edit eligibility are decided in the
  * pure helper and covered by unit tests.
  */
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import { useSyncStore } from "@/stores/sync";
 import {
@@ -20,6 +20,8 @@ import {
   type PendingEntry,
 } from "@/offline/observability";
 import { purgeDismissed, queueUtilization } from "@/offline/capacity";
+import { clearBackoff } from "@/offline/queue";
+import { useConfirmStore } from "@/stores/confirm";
 import { db, type QueueStoreName } from "@/offline/db";
 
 const rows = ref<EntryDescriptor[]>([]);
@@ -54,8 +56,19 @@ async function load() {
 }
 
 onMounted(load);
+// A send finished (Retry, or a fixed entry saved): show what is left, not
+// the list as it was when the screen opened.
+watch(() => sync.lastDrainAt, () => void load());
 
 async function dismiss(row: EntryDescriptor) {
+  // Dismissing means the work is NOT sent: ask first.
+  const ok = await useConfirmStore().ask({
+    title: "Dismiss this item?",
+    message: `${row.summary} will not be sent to the server. Enter it again if it is still needed.`,
+    confirmText: "Dismiss",
+    danger: true,
+  });
+  if (!ok) return;
   const d = await db();
   const fresh = (await (d.get as (s: QueueStoreName, k: number) => Promise<unknown>)(
     row.store,
@@ -70,6 +83,8 @@ async function dismiss(row: EntryDescriptor) {
 }
 
 async function retryAll() {
+  // A tap means "now": the backoff wait no longer applies.
+  await clearBackoff();
   await sync.requestDrain();
   await load();
 }
@@ -115,7 +130,7 @@ function kindLabel(kind: EntryDescriptor["kind"]): string {
       return "Needs admin";
     case "unknown":
     default:
-      return "Error";
+      return "Not sent";
   }
 }
 

@@ -17,21 +17,37 @@ after_migrate = [
 ]
 
 # /vansale and every /vansale/<path> render www/vansale (the SPA's index.html),
-# so the web app has clean URLs and a refresh on a deep link works.
+# so the web app has clean URLs and a refresh on a deep link works. /sf-connect and
+# /sf-connect/<path> render the same page: the app's second address (see pwa.ALIAS_SCOPES).
 website_route_rules = [
     {"from_route": "/vansale/<path:app_path>", "to_route": "vansale"},
+    {"from_route": "/sf-connect", "to_route": "vansale"},
+    {"from_route": "/sf-connect/<path:app_path>", "to_route": "vansale"},
 ]
 
 # Install files for the web app (manifest, service worker, icons) under /vansale.
 page_renderer = ["vansale.pwa.VansalePWARenderer"]
 
 # Fixtures exported on `bench export-fixtures --app vansale`.
+# `Sales Invoice-custom_return_reason` is deliberately NOT a fixture: Frappe
+# re-imports fixtures on install-app and on every migrate, so a site that
+# already owns a field of that name (Steel Force: Data, mandatory on return)
+# would have it overwritten each time. setup.CREATE_ONLY_CUSTOM_FIELDS creates
+# it only when missing; the filter keeps `export-fixtures` from adding it back
+# on a dev site where vansale made it.
 fixtures = [
     {
         "dt": "Custom Field",
-        "filters": [["module", "=", "Vansale"]],
+        "filters": [
+            ["module", "=", "Vansale"],
+            ["name", "!=", "Sales Invoice-custom_return_reason"],
+        ],
     },
 ]
+
+# Runs once on install-app (install does not run after_migrate), so a fresh
+# site gets the create-only custom fields straight away.
+after_install = "vansale.setup.after_install"
 
 # Inject Van User defaults + sidebar restrictions into the desk session.
 boot_session = "vansale.boot.boot_session"
@@ -84,5 +100,10 @@ doc_events = {
     "Stock Entry": {
         "before_insert": "vansale.van_series.set_naming_series_from_van",
         "before_validate": "vansale.van_defaults.override_cost_center_from_van",
+    },
+    # Web Push to subscribed approvers (Permission Manager registers its own
+    # after_insert for the same doctype; Frappe runs both). Never raises.
+    "PM Workflow Action": {
+        "after_insert": "vansale.steelforce.approvals_push.notify_new_action",
     },
 }
