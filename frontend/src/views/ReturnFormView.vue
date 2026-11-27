@@ -10,14 +10,16 @@
  * customer's last invoice for it (items never sold to the customer are
  * refused). Online only, like returns against an invoice.
  */
-import { computed, onMounted, ref, watch } from "vue";
-import { useRouter } from "vue-router";
+import { computed, nextTick, onMounted, ref, watch } from "vue";
+import { useRoute, useRouter } from "vue-router";
 import { listMine as listCustomers, customerLabel, type CustomerRow } from "@/api/customer";
 import { listMine as listItems, detail as itemDetail, type ItemRow, type ItemUom } from "@/api/item";
 import {
   referenceOptions,
+  returnDraft,
   returnPreview,
   returnWithoutInvoice,
+  updateReturnDraft,
   type ReferenceOptions,
   type ReturnTotals,
 } from "@/api/invoice";
@@ -33,7 +35,11 @@ import { revealOnFocus } from "@/components/reveal";
 import { inputValue } from "@/components/liveInput";
 import { confirmSubmit, withCurrency } from "@/stores/confirm";
 
+const route = useRoute();
 const router = useRouter();
+// Editing a draft credit note (?draft=<name>): the form is filled from it
+// and saving changes that draft instead of making a new one.
+const draftName = computed(() => String(route.query.draft ?? ""));
 const session = useSessionStore();
 const toasts = useToastStore();
 
@@ -212,7 +218,54 @@ function removeLine(i: number) {
   lines.value.splice(i, 1);
 }
 
-async function submit() {
+/** Submit (posts stock and credit, refund now if chosen), or save a draft
+ *  to submit later from the credit note (refund after it is submitted). */
+/** After saving an edited draft: back to its screen when we came from it
+ *  (it reloads), else open it in place of this one. */
+function backToDraft(name: string) {
+  const back = (window.history.state as { back?: unknown } | null)?.back;
+  if (typeof back === "string" && back.startsWith(`/invoice/${encodeURIComponent(name)}`)) router.back();
+  else void router.replace({ name: "invoice-detail", params: { name } });
+}
+
+async function fillFromDraft(name: string) {
+  const d = await returnDraft(name);
+  if (d.return_against) {
+    toasts.error(`${name} is a return against ${d.return_against}`);
+    void router.replace({ name: "invoice-detail", params: { name } });
+    return;
+  }
+  if (!customers.value.some((c) => c.name === d.customer)) {
+    customers.value.push({ name: d.customer, customer_name: d.customer_name });
+  }
+  customer.value = d.customer;
+  // The customer watcher clears the references; set them after it ran.
+  await nextTick();
+  references.value = [...d.references];
+  reason.value = d.reason;
+  note.value = d.note;
+  discountAmount.value = d.discount_amount || null;
+  if (d.refund) {
+    refund.value = { on: true, mode: d.refund.mode_of_payment, amount: d.refund.amount ?? null, reference: d.refund.reference_no ?? "" };
+  }
+  const loaded: Line[] = [];
+  for (const it of d.items) {
+    let uoms: ItemUom[];
+    try {
+      uoms = (await itemDetail(it.item_code, d.customer)).uoms;
+    } catch {
+      uoms = [{ uom: it.uom, conversion_factor: it.conversion_factor, price_list_rate: it.rate }];
+    }
+    if (!uoms.some((u) => u.uom === it.uom)) {
+      uoms.push({ uom: it.uom, conversion_factor: it.conversion_factor, price_list_rate: it.rate });
+    }
+    loaded.push({ item_code: it.item_code, item_name: it.item_name, qty: it.qty, uom: it.uom, rate: roundRate(it.rate), uoms });
+  }
+  lines.value = loaded;
+}
+
+async function submit(submitNow = true) {
+  if (busy.value) return;
   if (!customer.value) { toasts.warn("Pick a customer"); return; }
   const picked = lines.value.filter((l) => Number(l.qty) > 0);
   if (!picked.length) { toasts.warn("Add at least one item with a quantity"); return; }
@@ -223,28 +276,42 @@ async function submit() {
     toasts.warn("Choose at least one original invoice (ZATCA needs a reference)");
     return;
   }
+  // A draft keeps the refund too (paid when it is submitted).
   const refundErr = refundAmountError();
   if (refundErr) { toasts.warn(refundErr); return; }
-  const cust = customers.value.find((c) => c.name === customer.value);
-  const ok = await confirmSubmit("Submit return?", [
-    cust ? customerLabel(cust) : customer.value,
-    `${picked.length} item${picked.length === 1 ? "" : "s"}${totals.value ? ` · ${withCurrency(money(Math.abs(totals.value.grand_total)))}` : ""}`,
-    refund.value.on
-      ? `Refund ${refund.value.amount != null ? money(refund.value.amount) : "in full"} · ${refund.value.mode}`
-      : "Kept as customer credit",
-  ]);
-  if (!ok) return;
+  // Locked from the first tap (a double tap made two credit notes).
   busy.value = true;
+  if (submitNow) {
+    const cust = customers.value.find((c) => c.name === customer.value);
+    const ok = await confirmSubmit("Submit return?", [
+      cust ? customerLabel(cust) : customer.value,
+      `${picked.length} item${picked.length === 1 ? "" : "s"}${totals.value ? ` · ${withCurrency(money(Math.abs(totals.value.grand_total)))}` : ""}`,
+      refund.value.on
+        ? `Refund ${refund.value.amount != null ? money(refund.value.amount) : "in full"} · ${refund.value.mode}`
+        : "Kept as customer credit",
+    ]);
+    if (!ok) { busy.value = false; return; }
+  }
   try {
-    const res = await returnWithoutInvoice({
-      customer: customer.value,
+    const payload = {
       items: picked.map((l) => ({ item_code: l.item_code, qty: Number(l.qty), uom: l.uom, rate: Number(l.rate) })),
       reason: reason.value,
       note: note.value || undefined,
       references: refOptions.value?.enabled ? references.value : undefined,
       refund: refundPayload(),
       discount_amount: discountValue() || undefined,
-    });
+      submit: (submitNow ? 1 : 0) as 0 | 1,
+    };
+    const res = draftName.value
+      ? await updateReturnDraft({ name: draftName.value, ...payload })
+      : await returnWithoutInvoice({ customer: customer.value, ...payload });
+    if (!submitNow) {
+      const planned = refundPayload();
+      toasts.success(`Draft credit note ${res.name} saved${planned ? ` · refund ${planned.amount != null ? money(planned.amount) : "in full"} (${planned.mode_of_payment}) when submitted` : ""}`);
+      if (draftName.value) backToDraft(draftName.value);
+      else void router.replace({ name: "invoice-detail", params: { name: res.name } });
+      return;
+    }
     toasts.success(`Credit Note ${res.name} · ${session.currency} ${money(Math.abs(res.grand_total))}`);
     const autoprint = session.printBehaviour?.after_submit ? { autoprint: "1" } : undefined;
     void router.replace({ name: "invoice-detail", params: { name: res.name }, query: autoprint });
@@ -266,11 +333,19 @@ onMounted(async () => {
     customers.value = [];
   }
   await searchItems();
+  if (draftName.value) {
+    try {
+      await fillFromDraft(draftName.value);
+    } catch (e) {
+      toasts.error(e instanceof ApiError ? e.serverMessage ?? e.message : e instanceof Error ? e.message : String(e));
+    }
+  }
 });
 </script>
 
 <template>
   <div class="stack form-split">
+    <p v-if="draftName" class="draft-note">Editing draft {{ draftName }}</p>
     <section class="card stack">
       <span class="label">Customer</span>
       <SearchSelect
@@ -400,13 +475,29 @@ onMounted(async () => {
       />
     </section>
 
-    <button class="submit" type="button" :disabled="busy" @click="submit">
-      <Icon name="check" :size="18" /> {{ busy ? "Creating…" : "Create credit note" }}
-    </button>
+    <div class="actions">
+      <button class="btn-ghost" type="button" :disabled="busy" @click="submit(false)">
+        <Icon name="edit" :size="18" /> Save draft
+      </button>
+      <button class="submit" type="button" :disabled="busy" @click="submit(true)">
+        <Icon name="check" :size="18" /> {{ busy ? "Creating…" : "Create credit note" }}
+      </button>
+    </div>
   </div>
 </template>
 
 <style scoped>
+/* Save draft + Create, as on the invoice form. */
+.actions { display: grid; grid-template-columns: 1fr 1.4fr; gap: 0.5rem; }
+.btn-ghost {
+  all: unset; cursor: pointer; box-sizing: border-box;
+  min-height: 3.25rem; border-radius: var(--radius);
+  background: var(--surface-muted); text-align: center;
+  display: inline-flex; justify-content: center; align-items: center; gap: 0.4rem;
+  font-weight: 600;
+}
+.btn-ghost:disabled { opacity: 0.5; cursor: not-allowed; }
+.draft-note { margin: 0; padding: 0.5rem 0.75rem; border-radius: var(--radius); background: var(--info-soft); color: var(--info); font-size: var(--text-sm); font-weight: 600; }
 .label { font-size: var(--text-sm); color: var(--text-muted); font-weight: 500; }
 .lines { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.75rem; }
 .line { border-top: 1px solid var(--border); padding-top: 0.6rem; }

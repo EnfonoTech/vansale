@@ -12,10 +12,10 @@
  */
 import { computed, onMounted, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
-import { detail, deletePayment, type PaymentDetail } from "@/api/payment";
+import { detail, deletePayment, submitDraft, type PaymentDetail } from "@/api/payment";
 import { useSessionStore } from "@/stores/session";
 import { useToastStore } from "@/stores/toasts";
-import { useConfirmStore } from "@/stores/confirm";
+import { confirmSubmit, useConfirmStore, withCurrency } from "@/stores/confirm";
 import { ApiError, NetworkError } from "@/app/frappe";
 import { openPrint, printDocument, defaultPrintFormat } from "@/api/print";
 import { shareDocument } from "@/app/share";
@@ -143,6 +143,48 @@ onMounted(async () => {
   await autoPrint();
 });
 
+// A draft collection where collections are submitted from the app: Submit
+// it, or Edit it on the payment screen. (With "Payment collection status"
+// Draft the office takes the drafts over, as before.)
+const canWorkDraft = computed(
+  () => !!doc.value && doc.value.docstatus === 0 && doc.value.payment_type === "Receive" && session.collectionSubmit,
+);
+
+function editDraft() {
+  if (!doc.value) return;
+  void router.push({ name: "payment-new", query: { draft: doc.value.name } });
+}
+
+async function submitThis() {
+  if (!doc.value || busy.value) return;
+  busy.value = true;
+  const ok = await confirmSubmit(`Submit ${doc.value.name}?`, [
+    customerLine(doc.value.party_title, doc.value.party_name, doc.value.party),
+    `${withCurrency(fmt(doc.value.paid_amount))} · ${doc.value.mode_of_payment ?? ""}`,
+  ]);
+  if (!ok) { busy.value = false; return; }
+  try {
+    await submitDraft(doc.value.name);
+    toasts.success(`Submitted ${doc.value.name}`);
+    await load();
+    if (session.printBehaviour?.after_submit) {
+      await printDocument(
+        "Payment Entry",
+        doc.value.name,
+        defaultPrintFormat("Payment Entry", session.printFormats),
+        session.printBehaviour?.copies ?? 1,
+      );
+    }
+  } catch (e) {
+    toasts.error(
+      e instanceof ApiError ? e.serverMessage ?? e.message
+        : e instanceof Error ? e.message : String(e),
+    );
+  } finally {
+    busy.value = false;
+  }
+}
+
 // A "Pay" entry is a refund to the customer (a credit note paid back).
 const isRefund = computed(() => doc.value?.payment_type === "Pay");
 </script>
@@ -171,6 +213,14 @@ const isRefund = computed(() => doc.value?.payment_type === "Pay");
           <strong class="big"><SarSymbol :code="session.currency" />{{ fmt(doc.paid_amount) }}</strong>
         </div>
         <div class="row actions">
+          <template v-if="canWorkDraft">
+            <button class="primary" :disabled="busy" @click="submitThis">
+              <Icon name="check" :size="16" /> {{ busy ? "Submitting…" : "Submit" }}
+            </button>
+            <button class="ghost" :disabled="busy" @click="editDraft">
+              <Icon name="edit" :size="16" /> Edit
+            </button>
+          </template>
           <button class="ghost" @click="printEntry">
             <Icon name="receipt" :size="16" /> Print
           </button>

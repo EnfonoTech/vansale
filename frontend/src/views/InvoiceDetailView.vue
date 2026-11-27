@@ -199,6 +199,16 @@ function returnInvoice() {
 
 function editDraft() {
   if (!inv.value) return;
+  // A draft credit note opens on its return screen (against its invoice, or
+  // the bulk return), filled from the draft.
+  if (inv.value.is_return) {
+    void router.push(
+      inv.value.return_against
+        ? { name: "invoice-return", params: { name: inv.value.return_against }, query: { draft: inv.value.name } }
+        : { name: "return-new", query: { draft: inv.value.name } },
+    );
+    return;
+  }
   void router.push({ name: "invoice-edit", params: { name: inv.value.name } });
 }
 
@@ -217,14 +227,16 @@ async function submitInvoice() {
   if (!inv.value || busy.value) return;
   // Locked from the first tap (a double tap submitted twice).
   busy.value = true;
+  const plan = inv.value.planned_refund;
   const ok = await confirmSubmit(`Submit ${inv.value.name}?`, [
     customerLine(inv.value.customer_title, inv.value.customer_name, inv.value.customer),
     `${withCurrency(fmt(inv.value.grand_total))}`,
+    ...(plan ? [`Refund ${plan.amount != null ? fmt(plan.amount) : "in full"} · ${plan.mode_of_payment}`] : []),
   ]);
   if (!ok) { busy.value = false; return; }
   try {
-    await submitDraft(inv.value.name);
-    toasts.success(`Submitted ${inv.value.name}`);
+    const res = await submitDraft(inv.value.name);
+    toasts.success(`Submitted ${inv.value.name}${res.refund_entry ? ` · refund ${res.refund_entry}` : plan ? " · nothing left to refund" : ""}`);
     await load();
     if (session.printBehaviour?.after_submit) {
       await printDocument(
@@ -298,6 +310,10 @@ async function deleteInvoice() {
             <strong :class="inv.outstanding_amount > 0 ? 'warn' : ''"><SarSymbol :code="session.currency" />{{ fmt(inv.outstanding_amount) }}</strong>
           </div>
         </div>
+        <p v-if="inv.docstatus === 0 && inv.planned_refund" class="plan-note">
+          Refund on submit: <SarSymbol :code="session.currency" />{{ inv.planned_refund.amount != null ? fmt(inv.planned_refund.amount) : "in full" }}
+          · {{ inv.planned_refund.mode_of_payment }}
+        </p>
         <div class="row actions">
           <!-- Draft stage: submit or delete. Print is also allowed
                (useful to preview the invoice before committing stock). -->
@@ -469,6 +485,7 @@ async function deleteInvoice() {
 }
 .hero-total .big { display: block; font-size: var(--text-2xl); font-variant-numeric: tabular-nums; }
 .hero-sub { text-align: right; }
+.plan-note { margin: 0; font-size: var(--text-sm); color: var(--info); font-weight: 600; }
 .warn { color: var(--warning); }
 .refund-head { display: flex; justify-content: space-between; align-items: baseline; gap: 0.5rem; }
 .refund-grid { display: grid; grid-template-columns: 1fr 8rem; gap: 0.5rem; }

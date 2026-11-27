@@ -347,6 +347,15 @@ def _decide_outstanding(doc, original) -> None:
     doc.update_outstanding_for_self = 0 if flt(original.outstanding_amount) >= credit - 0.005 else 1
 
 
+def redecide_outstanding(doc) -> None:
+    """Before a draft credit note is submitted: the same choice as
+    `_decide_outstanding`, on what the original owes now (it may have been
+    paid since the draft was saved). Totals are the draft's own."""
+    owed = flt(frappe.db.get_value("Sales Invoice", doc.return_against, "outstanding_amount"))
+    credit = abs(flt(doc.rounded_total) or flt(doc.grand_total))
+    doc.update_outstanding_for_self = 0 if owed >= credit - 0.005 else 1
+
+
 def refund_owed(cn) -> float:
     """What may still be paid back on a credit note: its open credit less
     refunds already made as drafts (they don't reduce the balance until the
@@ -437,6 +446,54 @@ def refund_credit_note(cn, refund: Optional[dict]) -> Optional[str]:
     return pe.name
 
 
+def plan_refund(doc, refund: Optional[dict]) -> None:
+    """A draft credit note can't be paid yet (ERPNext refuses a Payment Entry
+    against a draft), so the refund the salesman chose is kept on it — in the
+    app's payment fields, as a cash sale keeps its payment — and paid when the
+    draft is submitted. No refund given = none planned."""
+    mode = (refund or {}).get("mode_of_payment")
+    row = None
+    if mode:
+        from vansale.api.payment import check_mode_allowed
+
+        check_mode_allowed(mode)
+        row = {
+            "mode_of_payment": mode,
+            "amount": flt(refund.get("amount")) or None,  # None = all that can be paid back
+            "reference_no": refund.get("reference_no") or None,
+        }
+    if doc.meta.has_field("custom_vansale_payment_mode"):
+        doc.custom_vansale_payment_mode = mode or None
+    if doc.meta.has_field("custom_vansale_payments"):
+        doc.custom_vansale_payments = frappe.as_json([row]) if row else None
+
+
+def planned_refund(doc) -> Optional[dict]:
+    """The refund kept on a credit note by `plan_refund`, or None."""
+    if not cint(doc.get("is_return")):
+        return None
+    if doc.get("custom_vansale_payments"):
+        rows = frappe.parse_json(doc.custom_vansale_payments) or []
+        return rows[0] if rows else None
+    if doc.get("custom_vansale_payment_mode"):
+        return {"mode_of_payment": doc.custom_vansale_payment_mode, "amount": None, "reference_no": None}
+    return None
+
+
+def pay_planned_refund(doc) -> Optional[str]:
+    """After a draft credit note is submitted: pay the refund planned on it,
+    never more than can still be paid back (none when the credit only
+    reduced what the invoice owes)."""
+    plan = planned_refund(doc)
+    if not plan:
+        return None
+    owed = refund_owed(doc)
+    if owed <= 0.005:
+        return None
+    amount = min(flt(plan.get("amount")) or owed, owed)
+    return refund_credit_note(doc, {**plan, "amount": amount})
+
+
 @frappe.whitelist(methods=["POST"])
 def refund(
     client_id: str,
@@ -518,6 +575,8 @@ def save(
     _set_reason(doc, reason_option, reason_text, note)
     doc.custom_client_id = client_id
 
+    if not submit:
+        plan_refund(doc, refund)
     doc.insert(ignore_permissions=False)
     refund_entry = None
     if submit:
@@ -725,6 +784,8 @@ def save_without_invoice(
     check_zero_rate(doc)  # bulk return: the rate is typed
     _set_reason(doc, reason_option, reason_text, note)
     doc.custom_client_id = client_id
+    if not submit:
+        plan_refund(doc, refund)
     doc.insert(ignore_permissions=False)
     refund_entry = None
     if submit:
@@ -749,6 +810,122 @@ def save_without_invoice(
         "refund_entry": refund_entry,
         "modified": naive_site_to_utc_iso(doc.modified),
         "idempotent_replay": False,
+    }
+
+
+def _editable_return_draft(name: str):
+    """A draft credit note the user may change: a salesman's own, any for
+    office users (as deleting a draft)."""
+    from vansale.api.me import is_office_user
+
+    doc = frappe.get_doc("Sales Invoice", name)
+    if not cint(doc.is_return) or cint(doc.docstatus) != 0:
+        frappe.throw(_("Only a draft credit note can be edited"))
+    if doc.owner != frappe.session.user and not is_office_user(default_roles={"System Manager", "Van Manager"}):
+        frappe.throw(_("You can only change your own drafts"), frappe.PermissionError)
+    return doc
+
+
+@frappe.whitelist(methods=["GET"])
+def draft(name: str) -> dict:
+    """A draft credit note as the return screens fill their form from it."""
+    doc = _editable_return_draft(name)
+    # Remarks were written as "<reason> — <note>" (`_set_reason`); older
+    # free-text reasons are "Other" with the text as the note.
+    remarks = (doc.remarks or "").strip()
+    reason = doc.get("custom_return_reason") or ("Other" if remarks else "")
+    prefix = f"{reason} — "
+    if remarks.startswith(prefix):
+        note = remarks[len(prefix):]
+    else:
+        note = "" if remarks == reason else remarks
+    return {
+        "name": doc.name,
+        "customer": doc.customer,
+        "customer_name": doc.customer_name,
+        "return_against": doc.return_against,
+        "reason": reason,
+        "note": note,
+        "discount_amount": abs(flt(doc.discount_amount)),
+        "references": [r.sales_invoice for r in doc.get(ZATCA_REFERENCES_FIELD) or []],
+        "refund": planned_refund(doc),
+        "items": [
+            {
+                "sales_invoice_item": i.get("sales_invoice_item"),
+                "item_code": i.item_code,
+                "item_name": i.item_name,
+                "qty": abs(flt(i.qty)),
+                "uom": i.uom,
+                "conversion_factor": flt(i.conversion_factor) or 1,
+                "rate": flt(i.rate),
+            }
+            for i in doc.items
+        ],
+    }
+
+
+def _copy_rows(target, source, fieldname: str) -> None:
+    target.set(fieldname, [])
+    for row in source.get(fieldname) or []:
+        target.append(fieldname, row.as_dict(no_default_fields=True))
+
+
+@frappe.whitelist(methods=["POST"])
+def update_draft(
+    name: str,
+    items: list[dict[str, Any]],
+    reason: Optional[str] = None,
+    note: Optional[str] = None,
+    discount_amount: Optional[float] = None,
+    references: Optional[list[str]] = None,
+    submit: int = 0,
+    refund: Optional[dict] = None,
+) -> dict:
+    """Change a draft credit note (lines, reason, discount, references) and
+    keep it as a draft or submit it. The lines are rebuilt by the same rules
+    as a new return (qty left on the invoice, the sale's rates, taxes); the
+    draft keeps its name, date and sales team."""
+    doc = _editable_return_draft(name)
+    reason_option, reason_text = resolve_return_reason(reason)
+    if doc.return_against:
+        original = readable_doc("Sales Invoice", doc.return_against)
+        fresh = build_return_against(original, items, None, discount_amount)
+    else:
+        from vansale.api.invoice import check_zero_rate
+
+        fresh = build_bulk_return(doc.customer, items, references, None, discount_amount=discount_amount)
+        check_zero_rate(fresh)
+        if doc.meta.has_field(ZATCA_REFERENCES_FIELD):
+            _copy_rows(doc, fresh, ZATCA_REFERENCES_FIELD)
+    _copy_rows(doc, fresh, "items")
+    _copy_rows(doc, fresh, "taxes")
+    for field in ("taxes_and_charges", "apply_discount_on", "additional_discount_percentage",
+                  "discount_amount", "update_outstanding_for_self"):
+        if doc.meta.has_field(field):
+            doc.set(field, fresh.get(field))
+    _set_reason(doc, reason_option, reason_text, note)
+    # The refund as now chosen: kept on the draft, or paid below on submit.
+    plan_refund(doc, refund)
+    doc.flags.ignore_version = True
+    doc.save()
+
+    refund_entry = None
+    if cint(submit):
+        if doc.return_against:
+            redecide_outstanding(doc)
+        doc.submit()
+        if doc.return_against:
+            _settle_against_original(doc)
+        refund_entry = refund_credit_note(doc, refund)
+    frappe.db.commit()
+    return {
+        "name": doc.name,
+        "grand_total": float(doc.grand_total or 0),
+        "status": doc.status,
+        "docstatus": int(doc.docstatus or 0),
+        "is_return": 1,
+        "refund_entry": refund_entry,
+        "modified": naive_site_to_utc_iso(doc.modified),
     }
 
 

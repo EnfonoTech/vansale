@@ -153,6 +153,9 @@ export async function detail(name: string): Promise<CustomerDetail> {
 
 export interface StatementPayload {
   html: string;
+  /** The period used (the server's default when none was sent). */
+  from_date?: string;
+  to_date?: string;
 }
 
 export async function statement(

@@ -47,6 +47,12 @@ def _customer_title(customer: str) -> Optional[str]:
     return customer_titles([customer]).get(customer)
 
 
+def _planned_refund(doc) -> Optional[dict]:
+    from vansale.api.sales_return import planned_refund
+
+    return planned_refund(doc)
+
+
 def check_zero_rate(doc) -> None:
     """Refuse lines with no price (rate 0, also after a 100% line discount)
     unless Vansale Settings allows free items. A forgotten price list entry
@@ -684,12 +690,32 @@ def submit_draft(name: str, mode_of_payment: Optional[str] = None) -> dict:
         })
         doc.save()
 
-    # A draft made in desk or before the setting may hold a free line.
-    check_zero_rate(doc)
+    # A draft made in desk or before the setting may hold a free line. A
+    # return against an invoice keeps the original's rates (not checked).
+    against = doc.return_against if cint(doc.is_return) else None
+    if not against:
+        check_zero_rate(doc)
+    else:
+        from vansale.api.sales_return import _settle_against_original, redecide_outstanding
+
+        redecide_outstanding(doc)
     doc.submit()
-    payment_entries = _cash_payment_entry(doc)
+    if against:
+        # A draft credit note submitted later: settle it against what the
+        # original still owes, as a return submitted at once does.
+        _settle_against_original(doc)
+    refund_entry = None
+    if cint(doc.is_return):
+        # The refund chosen when the draft was saved.
+        from vansale.api.sales_return import pay_planned_refund
+
+        refund_entry = pay_planned_refund(doc)
+        payment_entries = []
+    else:
+        payment_entries = _cash_payment_entry(doc)
     frappe.db.commit()
     return {
+        "refund_entry": refund_entry,
         "payment_entry": payment_entries[0] if payment_entries else None,
         "payment_entries": payment_entries,
         "name": doc.name,
@@ -746,7 +772,13 @@ def return_against(
             "idempotent_replay": True,
         }
 
-    from vansale.api.sales_return import _set_reason, _settle_against_original, build_return_against, refund_credit_note
+    from vansale.api.sales_return import (
+        _set_reason,
+        _settle_against_original,
+        build_return_against,
+        plan_refund,
+        refund_credit_note,
+    )
 
     original = readable_doc("Sales Invoice", original_name)
     posting = document_datetime(posting_ts)
@@ -754,6 +786,9 @@ def return_against(
     _set_reason(doc, reason_option, reason_text, note)
     doc.custom_client_id = client_id
 
+    if not submit:
+        # Kept on the draft, paid when it is submitted.
+        plan_refund(doc, refund)
     doc.insert(ignore_permissions=False)
     refund_entry = None
     if submit:
@@ -890,6 +925,9 @@ def detail(name: str) -> dict:
         "posting_time": str(doc.posting_time) if doc.posting_time else None,
         "due_date": str(doc.due_date) if doc.due_date else None,
         "is_return": int(doc.is_return or 0),
+        "return_against": doc.return_against if doc.is_return else None,
+        # Draft credit note: the refund paid when it is submitted.
+        "planned_refund": _planned_refund(doc) if doc.is_return and not doc.docstatus else None,
         "is_pos": int(doc.is_pos or 0),
         "payment_type": "cash" if (doc.is_pos or doc.get("custom_vansale_payment_mode")) else "credit",
         "payments": (

@@ -193,6 +193,9 @@ def config_defaults() -> dict:
         "cash_sale_posting": cash_sale_settings(user)["posting"],
         "split_payment": split_payment_allowed(user),
         "advance_payment": advance_payment_allowed(user),
+        # Collections submitted from the app: "Save draft" on the payment
+        # screen, and Edit / Submit on a draft collection.
+        "collection_submit": collection_payment_entry_status(user) == "Submit",
         "invoice_options": invoice_options(),
         "payment_delete": bool(global_flags().get("allow_delete_draft_payment", True)),
         "invoice_delete": bool(global_flags().get("allow_delete_draft_invoice", False)),

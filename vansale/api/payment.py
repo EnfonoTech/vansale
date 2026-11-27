@@ -117,11 +117,12 @@ def build_payment_entry(
     return doc
 
 
-def pending_by_invoice(invoices: list[str]) -> dict[str, float]:
+def pending_by_invoice(invoices: list[str], exclude: Optional[str] = None) -> dict[str, float]:
     """Amount allocated to each invoice by draft Payment Entries — collected
     in the field but not yet submitted by the office. ERPNext's
     outstanding_amount ignores drafts, so without this the app offered the
-    same money for collection again."""
+    same money for collection again. `exclude`: a draft being edited (its
+    own allocation is not "pending" for itself)."""
     if not invoices:
         return {}
     return {
@@ -132,10 +133,10 @@ def pending_by_invoice(invoices: list[str]) -> dict[str, float]:
             FROM `tabPayment Entry Reference` r
             JOIN `tabPayment Entry` p ON p.name = r.parent
             WHERE p.docstatus = 0 AND r.reference_doctype = 'Sales Invoice'
-              AND r.reference_name IN %(names)s
+              AND r.reference_name IN %(names)s AND p.name != %(exclude)s
             GROUP BY r.reference_name
             """,
-            {"names": tuple(invoices)},
+            {"names": tuple(invoices), "exclude": exclude or ""},
         )
     }
 
@@ -321,7 +322,50 @@ def save(
         remarks=remarks,
     )
 
-    # Build the list of invoices to allocate against (FIFO order).
+    # ERPNext replaces the remarks with "Amount … received from …" unless
+    # they are marked custom: the salesman's note was lost.
+    doc.custom_remarks = 1 if remarks else 0
+    target_invoices = _collection_targets(customer, amount, invoice_name, invoice_names, advance)
+    allocate(doc, target_invoices, amount)
+    doc.insert(ignore_permissions=False)
+    # Collections have their own Draft / Submit setting (default: same as
+    # the cash sale): some sites post at once, others leave drafts for the office.
+    if submit:
+        from vansale.api.me import collection_payment_entry_status
+
+        submit_if_configured(
+            doc, collection_payment_entry_status(), setting="Payment collection status"
+        )
+
+    _record_outbox(client_id, doc.name, posting_ts, {
+        "customer": customer,
+        "amount": amount,
+        "mode_of_payment": mode_of_payment,
+        "invoice_name": invoice_name,
+        "advance": advance,
+    })
+    frappe.db.commit()
+
+    return {
+        "name": doc.name,
+        "paid_amount": float(doc.paid_amount or 0),
+        "status": doc.status,
+        "modified": naive_site_to_utc_iso(doc.modified),
+        "idempotent_replay": False,
+    }
+
+
+def _collection_targets(
+    customer: str,
+    amount: float,
+    invoice_name: Optional[str],
+    invoice_names: Optional[list[str]],
+    advance: int,
+    exclude: Optional[str] = None,
+) -> list[dict]:
+    """The invoices a collection is allocated against (FIFO order), each with
+    what it still owes after other drafts; refuses more than they owe unless
+    advances are allowed. `exclude`: the draft being edited."""
     target_invoices: list[dict] = []
     if advance:
         pass  # advance: nothing allocated
@@ -359,7 +403,7 @@ def save(
         )
 
     # Allocate only what isn't already covered by draft Payment Entries.
-    pending = pending_by_invoice([inv["name"] for inv in target_invoices])
+    pending = pending_by_invoice([inv["name"] for inv in target_invoices], exclude)
     for inv in target_invoices:
         inv["outstanding_amount"] = max(flt(inv["outstanding_amount"]) - pending.get(inv["name"], 0.0), 0.0)
     # Paying more than the invoices leaves the rest as an unallocated advance:
@@ -376,33 +420,89 @@ def save(
                     fmt_money(amount), fmt_money(open_total)
                 )
             )
-    allocate(doc, target_invoices, amount)
-    doc.insert(ignore_permissions=False)
-    # Collections have their own Draft / Submit setting (default: same as
-    # the cash sale): some sites post at once, others leave drafts for the office.
-    if submit:
-        from vansale.api.me import collection_payment_entry_status
+    return target_invoices
 
-        submit_if_configured(
-            doc, collection_payment_entry_status(), setting="Payment collection status"
-        )
 
-    _record_outbox(client_id, doc.name, posting_ts, {
-        "customer": customer,
-        "amount": amount,
-        "mode_of_payment": mode_of_payment,
-        "invoice_name": invoice_name,
-        "advance": advance,
-    })
+def _editable_collection_draft(name: str):
+    """A draft collection the user may change or submit: only where
+    collections are submitted from the app ("Payment collection status" =
+    Submit; with Draft the office takes them over); a salesman's own, any
+    for office users (as deleting a draft)."""
+    from vansale.api.me import collection_payment_entry_status
+
+    if collection_payment_entry_status() != "Submit":
+        frappe.throw(_("Collections are saved as drafts for the office to submit"))
+    doc = frappe.get_doc("Payment Entry", name)
+    if cint(doc.docstatus) != 0 or doc.payment_type != "Receive":
+        frappe.throw(_("Only a draft collection can be changed"))
+    office = is_office_user(default_roles={"System Manager", "Van Manager", "Accounts Manager"})
+    if doc.owner != frappe.session.user and not office:
+        frappe.throw(_("You can only change your own drafts"), frappe.PermissionError)
+    return doc
+
+
+@frappe.whitelist(methods=["POST"])
+def update_draft(
+    name: str,
+    paid_amount: float,
+    mode_of_payment: str = "Cash",
+    reference_no: Optional[str] = None,
+    reference_date: Optional[str] = None,
+    invoice_names: Optional[list[str]] = None,
+    remarks: Optional[str] = None,
+    advance: int = 0,
+    submit: int = 0,
+) -> dict:
+    """Change a draft collection (amount, mode, reference, invoices) and keep
+    it as a draft or submit it. Allocation by the same rules as a new one;
+    the draft keeps its name, customer and date."""
+    doc = _editable_collection_draft(name)
+    amount = flt(paid_amount)
+    if amount <= 0:
+        frappe.throw(_("Amount must be positive"))
+    advance = cint(advance)
+    if advance:
+        from vansale.api.me import advance_payment_allowed
+
+        if not advance_payment_allowed():
+            frappe.throw(_("Advance payments are not enabled for your van"), frappe.PermissionError)
+    check_mode_allowed(mode_of_payment)
+    if not reference_no and _needs_reference(doc.company, mode_of_payment):
+        frappe.throw(_("Enter the reference number (transaction / cheque no.) for {0}").format(mode_of_payment))
+    fresh = build_payment_entry(
+        doc.company, doc.party, amount, mode_of_payment, doc.posting_date,
+        reference_no=reference_no,
+        reference_date=reference_date or (doc.posting_date if reference_no else None),
+        remarks=remarks,
+    )
+    for field in ("mode_of_payment", "paid_amount", "received_amount", "paid_from", "paid_to",
+                  "paid_from_account_currency", "paid_to_account_currency", "party_account",
+                  "party_account_currency", "reference_no", "reference_date", "remarks"):
+        doc.set(field, fresh.get(field))
+    doc.custom_remarks = 1 if remarks else 0
+    doc.set("references", [])
+    allocate(doc, _collection_targets(doc.party, amount, None, invoice_names, advance, exclude=doc.name), amount)
+    doc.flags.ignore_version = True
+    doc.save()
+    if cint(submit):
+        submit_if_configured(doc, "Submit", setting="Payment collection status")
     frappe.db.commit()
-
     return {
         "name": doc.name,
         "paid_amount": float(doc.paid_amount or 0),
         "status": doc.status,
+        "docstatus": int(doc.docstatus or 0),
         "modified": naive_site_to_utc_iso(doc.modified),
-        "idempotent_replay": False,
     }
+
+
+@frappe.whitelist(methods=["POST"])
+def submit_draft(name: str) -> dict:
+    """Submit a draft collection saved from the app."""
+    doc = _editable_collection_draft(name)
+    submit_if_configured(doc, "Submit", setting="Payment collection status")
+    frappe.db.commit()
+    return {"name": doc.name, "status": doc.status, "docstatus": int(doc.docstatus or 0)}
 
 
 @frappe.whitelist(methods=["GET"])
@@ -477,7 +577,7 @@ def delete_payment(name: str) -> dict:
 
 
 @frappe.whitelist(methods=["GET"])
-def outstanding(customer: str) -> list[dict]:
+def outstanding(customer: str, exclude: Optional[str] = None) -> list[dict]:
     """Return submitted, unpaid Sales Invoices for a customer.
 
     ``ignore_permissions=True`` because the Van User role may not have a
@@ -499,7 +599,9 @@ def outstanding(customer: str) -> list[dict]:
         order_by="posting_date asc",
         ignore_permissions=True,
     )
-    pending = pending_by_invoice([r["name"] for r in rows])
+    # `exclude`: a draft collection being edited — its own allocation is
+    # still on offer to it.
+    pending = pending_by_invoice([r["name"] for r in rows], exclude)
     for r in rows:
         r["posting_date"] = str(r["posting_date"]) if r.get("posting_date") else None
         r["due_date"] = str(r["due_date"]) if r.get("due_date") else None
@@ -549,6 +651,8 @@ def detail(name: str) -> dict:
         "reference_date": str(doc.reference_date) if doc.reference_date else None,
         "posting_date": str(doc.posting_date) if doc.posting_date else None,
         "remarks": doc.remarks,
+        # 1 = typed by the salesman / office; 0 = ERPNext's own "Amount … received from …".
+        "custom_remarks": int(doc.get("custom_remarks") or 0),
         "status": doc.status,
         "docstatus": int(doc.docstatus or 0),
         "references": refs,

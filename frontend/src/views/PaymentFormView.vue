@@ -2,7 +2,7 @@
 import { computed, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { listMine as listCustomers, customerLabel, type CustomerRow } from "@/api/customer";
-import { outstanding, save, modesOfPayment, type ModeOfPayment } from "@/api/payment";
+import { outstanding, save, modesOfPayment, detail as paymentDetail, updateDraft, type ModeOfPayment } from "@/api/payment";
 import { ApiError, NetworkError } from "@/app/frappe";
 import { useSessionStore } from "@/stores/session";
 import { useToastStore } from "@/stores/toasts";
@@ -22,6 +22,11 @@ const invoices = ref<Array<Record<string, unknown>>>([]);
 const mops = ref<ModeOfPayment[]>([]);
 const customer = ref(String(route.query.customer ?? ""));
 const preselectInvoice = String(route.query.invoice ?? "");
+// Editing a draft collection (?draft=<name>): filled from it, saved in place.
+const draftName = String(route.query.draft ?? "");
+// The draft's invoices, picked once its customer's invoices have loaded.
+let draftPicks: string[] | null = null;
+let draftAmount: number | null = null;
 const selected = ref<Set<string>>(new Set());
 const amount = ref<number | "">("");
 const mode = ref<string>("Cash");
@@ -43,8 +48,37 @@ onMounted(async () => {
       mode.value = mops.value[0].name;
     }
   } catch { /* fall back to hardcoded options */ }
+  if (draftName) {
+    await fillFromDraft();
+    return;
+  }
   if (customer.value) await loadOutstanding();
 });
+
+async function fillFromDraft() {
+  try {
+    const d = await paymentDetail(draftName);
+    if (d.docstatus !== 0 || d.payment_type !== "Receive") {
+      toasts.error(`${draftName} is not a draft collection`);
+      void router.replace({ name: "payment-detail", params: { name: draftName } });
+      return;
+    }
+    if (!customers.value.some((c) => c.name === d.party)) {
+      customers.value.push({ name: d.party, customer_name: d.party_name ?? d.party });
+    }
+    draftPicks = d.references.filter((r) => r.reference_doctype === "Sales Invoice").map((r) => r.reference_name);
+    draftAmount = d.paid_amount;
+    advance.value = session.advancePayment && draftPicks.length === 0;
+    if (d.mode_of_payment) mode.value = d.mode_of_payment;
+    reference.value = d.reference_no ?? "";
+    // Only a typed note; ERPNext's own text would go stale with the amount.
+    remarks.value = d.custom_remarks ? d.remarks ?? "" : "";
+    if (customer.value === d.party) await loadOutstanding();
+    else customer.value = d.party; // the watcher loads its invoices
+  } catch (e) {
+    toasts.error(e instanceof ApiError ? e.serverMessage ?? e.message : e instanceof Error ? e.message : String(e));
+  }
+}
 
 watch(customer, loadOutstanding);
 
@@ -76,8 +110,12 @@ async function loadOutstanding() {
   if (!customer.value) return;
   loadingOutstanding.value = true;
   try {
-    invoices.value = await outstanding(customer.value);
-    if (preselectInvoice) {
+    invoices.value = await outstanding(customer.value, draftName || undefined);
+    if (draftPicks) {
+      selected.value = new Set(draftPicks.filter((n) => invoices.value.some((r) => String(r.name) === n)));
+      amount.value = draftAmount ?? "";
+      draftPicks = null;
+    } else if (preselectInvoice) {
       const row = invoices.value.find((r) => String(r.name) === preselectInvoice);
       if (row) togglePick(row);
     }
@@ -145,7 +183,18 @@ const totalOutstanding = computed(() =>
 // Modes posting to a Bank account need a reference number (ERPNext requires No + Date).
 const needsReference = computed(() => Boolean(mops.value.find((m) => m.name === mode.value)?.needs_reference));
 
-async function submit() {
+/** After saving an edited draft: back to its screen when we came from it
+ *  (it reloads), else open it in place of this one. */
+function backToDraft(name: string) {
+  const back = (window.history.state as { back?: unknown } | null)?.back;
+  if (typeof back === "string" && back.startsWith(`/payment/${encodeURIComponent(name)}`)) router.back();
+  else void router.replace({ name: "payment-detail", params: { name } });
+}
+
+/** Save the collection — submitted per the setting, or (where collections
+ *  are submitted) kept as a draft to submit later. */
+async function submit(submitNow = true) {
+  if (busy.value) return;
   if (!customer.value) { toasts.warn("Select customer"); return; }
   const n = Number(amount.value);
   if (!Number.isFinite(n) || n <= 0) { toasts.warn("Amount must be positive"); return; }
@@ -159,17 +208,39 @@ async function submit() {
     toasts.warn(`That is ${fmt(over)} more than the ${hasPicks.value ? "picked " : ""}invoices (${fmt(openTotal.value)}). Collect up to that amount.`);
     return;
   }
-  const cust = customers.value.find((c) => c.name === customer.value);
-  const ok = await confirmSubmit("Save payment?", [
-    cust ? customerLabel(cust) : customer.value,
-    `${withCurrency(fmt(n))} · ${mode.value}`,
-    advance.value
-      ? "Advance (not allocated)"
-      : hasPicks.value ? `For ${selectedList.value.length} invoice${selectedList.value.length === 1 ? "" : "s"}` : "Oldest invoices first",
-  ], "Yes, save");
-  if (!ok) return;
+  // Locked from the first tap (a double tap saved two payments).
   busy.value = true;
+  if (submitNow) {
+    const cust = customers.value.find((c) => c.name === customer.value);
+    const ok = await confirmSubmit("Save payment?", [
+      cust ? customerLabel(cust) : customer.value,
+      `${withCurrency(fmt(n))} · ${mode.value}`,
+      advance.value
+        ? "Advance (not allocated)"
+        : hasPicks.value ? `For ${selectedList.value.length} invoice${selectedList.value.length === 1 ? "" : "s"}` : "Oldest invoices first",
+    ], "Yes, save");
+    if (!ok) { busy.value = false; return; }
+  }
   try {
+    if (draftName) {
+      const upd = await updateDraft({
+        name: draftName,
+        paid_amount: n,
+        mode_of_payment: mode.value,
+        reference_no: reference.value || undefined,
+        invoice_names: hasPicks.value && !advance.value ? selectedList.value : undefined,
+        remarks: remarks.value || undefined,
+        advance: advance.value ? 1 : undefined,
+        submit: submitNow ? 1 : 0,
+      });
+      toasts.success(`${submitNow ? "Payment" : "Draft payment"} ${upd.name} · ${session.currency} ${upd.paid_amount.toFixed(session.currencyPrecision)}`);
+      if (!submitNow) backToDraft(upd.name);
+      else {
+        const autoprint = session.printBehaviour?.after_submit ? { autoprint: "1" } : undefined;
+        void router.replace({ name: "payment-detail", params: { name: upd.name }, query: autoprint });
+      }
+      return;
+    }
     const res = await save({
       customer: customer.value,
       paid_amount: n,
@@ -178,7 +249,13 @@ async function submit() {
       invoice_names: hasPicks.value && !advance.value ? selectedList.value : undefined,
       remarks: remarks.value || undefined,
       advance: advance.value ? 1 : undefined,
+      ...(submitNow ? {} : { submit: 0 as const }),
     });
+    if (!submitNow && !res.queued) {
+      toasts.success(`Draft payment ${res.name} saved`);
+      void router.push({ name: "payment-detail", params: { name: res.name } });
+      return;
+    }
     toasts.success(
       res.queued
         ? "Payment queued offline"
@@ -207,6 +284,7 @@ async function submit() {
 
 <template>
   <div class="stack">
+    <p v-if="draftName" class="draft-note">Editing draft {{ draftName }}</p>
     <section class="card stack">
       <span class="label">Customer</span>
       <SearchSelect
@@ -214,6 +292,7 @@ async function submit() {
         :options="customerOptions"
         placeholder="Search customer by name or code"
         remote
+        :disabled="!!draftName"
         @search="onCustomerSearch"
       />
     </section>
@@ -339,10 +418,17 @@ async function submit() {
       </label>
     </section>
 
-    <button class="submit" :disabled="busy" @click="submit">
+    <!-- Save draft only where collections are submitted ("Payment collection
+         status" = Submit); with Draft every collection is a draft already. -->
+    <div :class="{ actions: session.collectionSubmit }">
+      <button v-if="session.collectionSubmit" class="btn-ghost" type="button" :disabled="busy" @click="submit(false)">
+        <Icon name="edit" :size="18" /> Save draft
+      </button>
+      <button class="submit" :disabled="busy" @click="submit(true)">
       <Icon name="check" :size="18" />
       {{ busy ? "Saving…" : "Record payment" }}
-    </button>
+      </button>
+    </div>
   </div>
 </template>
 
@@ -410,5 +496,16 @@ async function submit() {
 }
 .name-row { display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap; }
 
-.submit { min-height: 3.25rem; font-size: var(--text-base); }
+.submit { min-height: 3.25rem; font-size: var(--text-base); width: 100%; }
+/* Save draft + Save, as on the invoice form. */
+.actions { display: grid; grid-template-columns: 1fr 1.4fr; gap: 0.5rem; }
+.btn-ghost {
+  all: unset; cursor: pointer; box-sizing: border-box;
+  min-height: 3.25rem; border-radius: var(--radius);
+  background: var(--surface-muted); text-align: center;
+  display: inline-flex; justify-content: center; align-items: center; gap: 0.4rem;
+  font-weight: 600;
+}
+.btn-ghost:disabled { opacity: 0.5; cursor: not-allowed; }
+.draft-note { margin: 0; padding: 0.5rem 0.75rem; border-radius: var(--radius); background: var(--info-soft); color: var(--info); font-size: var(--text-sm); font-weight: 600; }
 </style>

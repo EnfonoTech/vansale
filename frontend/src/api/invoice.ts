@@ -67,6 +67,8 @@ export async function listMine(
 
 export interface ReturnRow {
   name: string;
+  /** 0 = draft credit note. */
+  docstatus?: number;
   customer: string;
   customer_name: string;
   /** The customer's title (Badria: English name); customer_name is what the invoice stored. */
@@ -138,6 +140,10 @@ export interface InvoiceDetail {
   posting_time: string | null;
   due_date: string | null;
   is_return: number;
+  /** Credit note: the invoice it returns (none on a bulk return). */
+  return_against?: string | null;
+  /** Draft credit note: the refund paid when it is submitted (amount null = all). */
+  planned_refund?: PlannedRefund | null;
   /** 1 = cash (POS) invoice. Absent on servers older than this field. */
   is_pos?: number;
   /** Cash or credit, whichever way the cash sale is posted (POS or Payment Entry). */
@@ -177,13 +183,17 @@ export async function detail(name: string): Promise<InvoiceDetail> {
  * and would have blanked items + totals if the check had passed. The
  * server-side `submit_draft` loads the stored doc by name instead.
  */
-export async function submitDraft(name: string, modeOfPayment?: string): Promise<void> {
-  await apiCall("POST", "vansale.api.invoice.submit_draft", {
+export async function submitDraft(
+  name: string,
+  modeOfPayment?: string,
+): Promise<{ refund_entry?: string | null }> {
+  const res = await apiCall<{ refund_entry?: string | null }>("POST", "vansale.api.invoice.submit_draft", {
     name,
     ...(modeOfPayment ? { mode_of_payment: modeOfPayment } : {}),
   });
   const sync = useSyncStore();
   void sync.refresh();
+  return res ?? {};
 }
 
 /**
@@ -344,6 +354,57 @@ export interface ReturnWithoutInvoiceLine {
   rate?: number | null;     // blank → the server's default price
 }
 
+export interface PlannedRefund {
+  mode_of_payment: string;
+  amount: number | null;
+  reference_no?: string | null;
+}
+
+/** A draft credit note, as the return screens refill their form from it. */
+export interface ReturnDraft {
+  name: string;
+  customer: string;
+  customer_name: string;
+  return_against: string | null;
+  reason: string;
+  note: string;
+  discount_amount: number;
+  references: string[];
+  /** The refund kept on the draft, paid when it is submitted. */
+  refund: PlannedRefund | null;
+  items: Array<{
+    sales_invoice_item: string | null;
+    item_code: string;
+    item_name: string;
+    qty: number;
+    uom: string;
+    conversion_factor: number;
+    rate: number;
+  }>;
+}
+
+export async function returnDraft(name: string): Promise<ReturnDraft> {
+  return apiCall<ReturnDraft>("GET", `vansale.api.sales_return.draft?name=${encodeURIComponent(name)}`);
+}
+
+/** Save changes to a draft credit note, keeping it a draft or submitting it. */
+export async function updateReturnDraft(payload: {
+  name: string;
+  items: Array<Record<string, unknown>>;
+  reason: string;
+  note?: string;
+  discount_amount?: number;
+  references?: string[];
+  submit: 0 | 1;
+  refund?: RefundPayload;
+}): Promise<SavedReturn & { refund_entry?: string | null; docstatus?: number }> {
+  const res = await apiCall<SavedReturn & { refund_entry?: string | null; docstatus?: number }>(
+    "POST", "vansale.api.sales_return.update_draft", payload,
+  );
+  void useSyncStore().refresh();
+  return res;
+}
+
 /** Credit note without an original invoice ("Return without invoice" setting).
  *  Online only, like returns against an invoice. */
 export async function returnWithoutInvoice(payload: {
@@ -356,6 +417,8 @@ export async function returnWithoutInvoice(payload: {
   refund?: RefundPayload;
   /** Additional discount typed on the bulk return. */
   discount_amount?: number;
+  /** 0 = save a draft (submitted later from the credit note). */
+  submit?: 0 | 1;
 }): Promise<SavedReturn & { references?: string[] }> {
   const clientId = genUuid();
   const res = await apiCall<SavedReturn & { references?: string[] }>(

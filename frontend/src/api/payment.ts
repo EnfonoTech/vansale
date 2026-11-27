@@ -15,6 +15,8 @@ export interface PaymentPayload {
   remarks?: string;
   /** 1 = advance: nothing allocated, the amount stays as customer credit. */
   advance?: 0 | 1;
+  /** 0 = keep as a draft (only where collections are submitted). */
+  submit?: 0 | 1;
 }
 
 export interface SavedPayment {
@@ -39,8 +41,30 @@ export async function listMine(
   return apiCall("GET", `vansale.api.payment.list_mine?${qs.toString()}`);
 }
 
-export async function outstanding(customer: string): Promise<Array<Record<string, unknown>>> {
-  return apiCall("GET", `vansale.api.payment.outstanding?customer=${encodeURIComponent(customer)}`);
+/** `exclude`: a draft collection being edited (its own allocation stays on offer). */
+export async function outstanding(customer: string, exclude?: string): Promise<Array<Record<string, unknown>>> {
+  const qs = new URLSearchParams({ customer });
+  if (exclude) qs.set("exclude", exclude);
+  return apiCall("GET", `vansale.api.payment.outstanding?${qs.toString()}`);
+}
+
+/** Change a draft collection and keep it as a draft or submit it. */
+export async function updateDraft(payload: {
+  name: string;
+  paid_amount: number;
+  mode_of_payment: string;
+  reference_no?: string;
+  invoice_names?: string[];
+  remarks?: string;
+  advance?: 0 | 1;
+  submit: 0 | 1;
+}): Promise<{ name: string; paid_amount: number; status: string; docstatus: number }> {
+  return apiCall("POST", "vansale.api.payment.update_draft", payload);
+}
+
+/** Submit a draft collection (where collections are submitted from the app). */
+export async function submitDraft(name: string): Promise<{ name: string; status: string; docstatus: number }> {
+  return apiCall("POST", "vansale.api.payment.submit_draft", { name });
 }
 
 export interface ModeOfPayment {
@@ -98,6 +122,8 @@ export interface PaymentDetail {
   reference_date: string | null;
   posting_date: string | null;
   remarks: string | null;
+  /** 1 = the remarks were typed (not ERPNext's own "Amount … received from …"). */
+  custom_remarks?: number;
   status: string;
   docstatus: number;
   references: PaymentReference[];

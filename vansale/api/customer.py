@@ -847,6 +847,31 @@ def _statement_address(cust) -> str:
     return ", ".join(str(v).strip() for v in (a or {}).values() if v and str(v).strip())
 
 
+def _fiscal_year_start(on_date: str, company: str | None) -> str | None:
+    """Start of the ERPNext Fiscal Year holding `on_date` (the company's, or
+    one for all companies), or None when there is none."""
+    from erpnext.accounts.utils import get_fiscal_year
+
+    try:
+        found = get_fiscal_year(on_date, company=company or None, as_dict=True, boolean=True)
+    except Exception:
+        return None
+    return str(found[0].year_start_date) if found else None
+
+
+def statement_period(from_date: str | None, to_date: str | None) -> tuple[str, str]:
+    """The statement's dates when not chosen: up to today, from the start of
+    the fiscal year (it used to be the last 90 days, which cut the year's
+    opening invoices out of the list). 90 days only where no Fiscal Year
+    covers the date."""
+    from vansale.api.invoice import _user_company
+
+    to_date = str(to_date or frappe.utils.today())
+    if not from_date:
+        from_date = _fiscal_year_start(to_date, _user_company()) or frappe.utils.add_days(to_date, -90)
+    return str(from_date), to_date
+
+
 def _build_statement_html(name: str, from_date: str | None, to_date: str | None) -> str:
     """Shared statement-HTML builder for both the download and JSON endpoints.
 
@@ -861,8 +886,7 @@ def _build_statement_html(name: str, from_date: str | None, to_date: str | None)
     check_read("Customer", name)
     cust = frappe.get_doc("Customer", name)
 
-    to_date = to_date or str(frappe.utils.today())
-    from_date = from_date or frappe.utils.add_days(to_date, -90)
+    from_date, to_date = statement_period(from_date, to_date)
     if getdate(from_date) > getdate(to_date):
         frappe.throw(_("From Date must be before To Date"))
 
@@ -1137,8 +1161,10 @@ def statement_json(
     inside the in-app StatementView (no `window.open` round-trip, which
     fails on native because the WebView runs at `https://localhost`).
     """
+    from_date, to_date = statement_period(from_date, to_date)
     html = _build_statement_html(name, from_date, to_date)
-    return {"html": html}
+    # The dates used, so the app shows the period it got by default.
+    return {"html": html, "from_date": from_date, "to_date": to_date}
 
 
 @frappe.whitelist(methods=["GET"])

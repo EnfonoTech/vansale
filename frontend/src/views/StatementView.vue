@@ -52,12 +52,12 @@ function onFrameLoad() {
   }
 }
 onBeforeUnmount(() => resizeObs?.disconnect());
-// Pre-filled with the server's default period (last 90 days) so the shown
-// range is visible; local dates, not UTC.
+// From: left blank and filled with the server's default (the start of the
+// fiscal year) after the first load; local dates, not UTC.
 const isoLocal = (d: Date) =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 const today = new Date();
-const fromDate = ref(isoLocal(new Date(today.getFullYear(), today.getMonth(), today.getDate() - 90)));
+const fromDate = ref("");
 const toDate = ref(isoLocal(today));
 const downloading = ref(false);
 const printing = ref(false);
@@ -73,6 +73,7 @@ async function load() {
       toDate.value || undefined,
     );
     html.value = res.html ?? "";
+    if (!fromDate.value && res.from_date) fromDate.value = res.from_date;
   } catch (e) {
     if (e instanceof ApiError) {
       // Backend without the JSON endpoint raises "Method Not Found" /

@@ -162,7 +162,7 @@ function pickInvoice(name: string) {
       <li v-for="r in rows" :key="r.name" class="ret-row">
         <button type="button" class="ret-main" @click="openReturn(r.name)">
           <div class="body">
-            <strong class="name">{{ r.name }}</strong>
+            <strong class="name">{{ r.name }} <span v-if="r.docstatus === 0" class="pill" data-tone="info">Draft</span></strong>
             <span class="muted xsmall">
               {{ customerLine(r.customer_title, r.customer_name, r.customer) }} · {{ r.posting_date }}
             </span>

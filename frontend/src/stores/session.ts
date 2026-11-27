@@ -113,6 +113,7 @@ export const useSessionStore = defineStore("session", {
     applyDiscountOn: (s) => s.defaults?.invoice_options?.apply_discount_on ?? "Grand Total",
     defaultPaymentType: (s): "cash" | "credit" => s.defaults?.invoice_options?.default_payment ?? "cash",
     paymentDelete: (s) => s.defaults?.payment_delete !== false,
+    collectionSubmit: (s) => s.defaults?.collection_submit === true,
     invoiceDelete: (s) => s.defaults?.invoice_delete === true,
     confirmSubmit: (s) => s.defaults?.confirm_submit === true,
     /** Free items allowed (rate 0); off by default — the server refuses them too. */

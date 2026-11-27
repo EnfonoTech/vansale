@@ -13,7 +13,9 @@ import { useRoute, useRouter } from "vue-router";
 import {
   detail,
   returnAgainst,
+  returnDraft,
   returnPreview,
+  updateReturnDraft,
   type ReturnTotals,
   type InvoiceDetail,
   type InvoiceDetailItem,
@@ -64,6 +66,9 @@ const busy = ref(false);
 const err = ref("");
 
 const origName = computed(() => String(route.params.name ?? ""));
+// Editing a draft credit note (?draft=<name>): the form is filled from it
+// and saving changes that draft instead of making a new one.
+const draftName = computed(() => String(route.query.draft ?? ""));
 
 onMounted(async () => {
   try {
@@ -83,10 +88,44 @@ onMounted(async () => {
       const left = qtyIn(leftStock, cf);
       rows[i] = { include: false, qty: left, maxQty: left, uom: it.uom ?? "", cf, leftStock };
     });
+    if (draftName.value) await fillFromDraft(draftName.value);
   } catch (e) {
     err.value = e instanceof Error ? e.message : String(e);
   }
 });
+
+/** After saving an edited draft: back to its screen when we came from it
+ *  (it reloads), else open it in place of this one. */
+function backToDraft(name: string) {
+  const back = (window.history.state as { back?: unknown } | null)?.back;
+  if (typeof back === "string" && back.startsWith(`/invoice/${encodeURIComponent(name)}`)) router.back();
+  else void router.replace({ name: "invoice-detail", params: { name } });
+}
+
+async function fillFromDraft(name: string) {
+  const d = await returnDraft(name);
+  if (!orig.value || d.return_against !== orig.value.name) {
+    err.value = `${name} is not a draft return of ${origName.value}`;
+    return;
+  }
+  for (const line of d.items) {
+    const i = orig.value.items.findIndex((it) => it.name === line.sales_invoice_item);
+    const r = rows[i];
+    if (!r) continue;
+    const it = orig.value.items[i];
+    r.uom = line.uom || it.uom || "";
+    r.cf = it.return_uoms?.find((x) => x.uom === r.uom)?.conversion_factor || line.conversion_factor || r.cf;
+    r.maxQty = qtyIn(r.leftStock, r.cf);
+    r.qty = Math.min(line.qty, r.maxQty);
+    r.include = r.qty > 0;
+  }
+  reason.value = d.reason;
+  remarks.value = d.note;
+  discountTyped.value = d.discount_amount || 0;
+  if (d.refund) {
+    refund.value = { on: true, mode: d.refund.mode_of_payment, amount: d.refund.amount ?? null, reference: d.refund.reference_no ?? "" };
+  }
+}
 
 // Whole units of `cf` left (3 decimals, never rounding up past what's left).
 function qtyIn(stock: number, cf: number): number {
@@ -212,8 +251,10 @@ function clampQty(idx: number, it: InvoiceDetailItem) {
   void it;
 }
 
-async function submit() {
-  if (!orig.value) return;
+/** Submit (posts stock and credit, refund now if chosen), or save a draft
+ *  to submit later from the credit note (refund after it is submitted). */
+async function submit(submitNow = true) {
+  if (!orig.value || busy.value) return;
   const picks = orig.value.items
     .map((it, i) => ({ it, r: rows[i] }))
     .filter(({ r }) => r?.include && r.qty > 0);
@@ -225,43 +266,67 @@ async function submit() {
     toasts.warn("Choose a return reason");
     return;
   }
+  // A draft keeps the refund too (paid when it is submitted).
   const refundErr = refundAmountError();
   if (refundErr) { toasts.warn(refundErr); return; }
-  const ok = await confirmSubmit("Submit return?", [
-    `${customerLine(orig.value.customer_title, orig.value.customer_name, orig.value.customer)} · against ${orig.value.name}`,
-    `${picks.length} line${picks.length === 1 ? "" : "s"}${totals.value ? ` · ${withCurrency(fmt(Math.abs(totals.value.grand_total)))}` : ""}`,
-    refund.value.on
-      ? `Refund ${refund.value.amount != null ? fmt(refund.value.amount) : "in full"} · ${refund.value.mode}`
-      : "Kept as customer credit",
-  ]);
-  if (!ok) return;
+  // Locked from the first tap (a double tap made two credit notes).
   busy.value = true;
+  if (submitNow) {
+    const ok = await confirmSubmit("Submit return?", [
+      `${customerLine(orig.value.customer_title, orig.value.customer_name, orig.value.customer)} · against ${orig.value.name}`,
+      `${picks.length} line${picks.length === 1 ? "" : "s"}${totals.value ? ` · ${withCurrency(fmt(Math.abs(totals.value.grand_total)))}` : ""}`,
+      refund.value.on
+        ? `Refund ${refund.value.amount != null ? fmt(refund.value.amount) : "in full"} · ${refund.value.mode}`
+        : "Kept as customer credit",
+    ]);
+    if (!ok) { busy.value = false; return; }
+  }
   try {
-    const res = await returnAgainst({
-      original_name: orig.value.name,
-      items: picks.map(({ it, r }) => ({
-        // The invoice row being returned, so a repeated item maps correctly.
-        sales_invoice_item: it.name,
-        item_code: it.item_code,
-        qty: r.qty,
-        rate: rateIn(it, r.cf),
-        uom: r.uom || it.uom || undefined,
-        warehouse: it.warehouse ?? undefined,
-      })),
-      reason: reason.value,
-      note: remarks.value || undefined,
-      submit: 1,
-      refund: refundPayload(),
-      discount_amount: discountToSend(),
-    });
+    const lines = picks.map(({ it, r }) => ({
+      // The invoice row being returned, so a repeated item maps correctly.
+      sales_invoice_item: it.name,
+      item_code: it.item_code,
+      qty: r.qty,
+      rate: rateIn(it, r.cf),
+      uom: r.uom || it.uom || undefined,
+      warehouse: it.warehouse ?? undefined,
+    }));
+    const res = draftName.value
+      ? await updateReturnDraft({
+          name: draftName.value,
+          items: lines,
+          reason: reason.value,
+          note: remarks.value || undefined,
+          discount_amount: discountToSend(),
+          submit: submitNow ? 1 : 0,
+          refund: refundPayload(),
+        })
+      : await returnAgainst({
+          original_name: orig.value.name,
+          items: lines,
+          reason: reason.value,
+          note: remarks.value || undefined,
+          submit: submitNow ? 1 : 0,
+          refund: refundPayload(),
+          discount_amount: discountToSend(),
+        });
+    // An edited draft replaces this screen, so Back doesn't reopen it.
+    const go = draftName.value ? router.replace : router.push;
+    if (!submitNow) {
+      const planned = refundPayload();
+      toasts.success(`Draft credit note ${res.name} saved${planned ? ` · refund ${planned.amount != null ? fmt(planned.amount) : "in full"} (${planned.mode_of_payment}) when submitted` : ""}`);
+      if (draftName.value) backToDraft(draftName.value);
+      else void router.replace({ name: "invoice-detail", params: { name: res.name } });
+      return;
+    }
     toasts.success(`Credit Note ${res.name} · ${session.currency} ${Math.abs(res.grand_total).toFixed(session.currencyPrecision)}`);
     if (session.printBehaviour?.after_submit) {
       // "Print after submit": the credit note's detail view prints on arrival.
-      void router.push({ name: "invoice-detail", params: { name: res.name }, query: { autoprint: "1" } });
+      void go({ name: "invoice-detail", params: { name: res.name }, query: { autoprint: "1" } });
     } else {
       // Route to in-app print view — same format handles is_return.
       // Native WebView can't open the server /printview route directly.
-      void router.push({
+      void go({
         name: "print-view",
         params: { doctype: "Sales Invoice", name: res.name },
       });
@@ -282,6 +347,7 @@ async function submit() {
     <p v-if="err" class="error">{{ err }}</p>
 
     <template v-if="orig && !err">
+      <p v-if="draftName" class="draft-note">Editing draft {{ draftName }}</p>
       <section class="card stack">
         <div class="row-head">
           <div>
@@ -405,15 +471,31 @@ async function submit() {
       <RefundSection v-model="refund" :totals="totals" :currency="session.currency"
                      :precision="session.currencyPrecision" />
 
-      <button class="submit danger" :disabled="busy || selectedCount === 0 || !reason" @click="submit">
-        <Icon name="receipt" :size="18" />
-        {{ busy ? "Processing…" : "Submit Credit Note" }}
-      </button>
+      <div class="actions">
+        <button class="btn-ghost" type="button" :disabled="busy || selectedCount === 0 || !reason" @click="submit(false)">
+          <Icon name="edit" :size="18" /> Save draft
+        </button>
+        <button class="submit danger" :disabled="busy || selectedCount === 0 || !reason" @click="submit(true)">
+          <Icon name="receipt" :size="18" />
+          {{ busy ? "Processing…" : "Submit Credit Note" }}
+        </button>
+      </div>
     </template>
   </div>
 </template>
 
 <style scoped>
+/* Save draft + Submit, as on the invoice form. */
+.actions { display: grid; grid-template-columns: 1fr 1.4fr; gap: 0.5rem; }
+.btn-ghost {
+  all: unset; cursor: pointer; box-sizing: border-box;
+  min-height: 3.25rem; border-radius: var(--radius);
+  background: var(--surface-muted); text-align: center;
+  display: inline-flex; justify-content: center; align-items: center; gap: 0.4rem;
+  font-weight: 600;
+}
+.btn-ghost:disabled { opacity: 0.5; cursor: not-allowed; }
+.draft-note { margin: 0; padding: 0.5rem 0.75rem; border-radius: var(--radius); background: var(--info-soft); color: var(--info); font-size: var(--text-sm); font-weight: 600; }
 .row-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 0.75rem; }
 .inv-name { margin: 0.15rem 0; font-size: var(--text-lg); font-family: var(--font-mono, ui-monospace); }
 .grand-row { display: flex; justify-content: space-between; align-items: baseline; font-variant-numeric: tabular-nums; }
